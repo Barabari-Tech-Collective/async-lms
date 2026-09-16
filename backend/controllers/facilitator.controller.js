@@ -437,14 +437,15 @@ exports.getFacilitatorStudentModuleAnalytics = async (req, res) => {
     projectsData.rows.forEach(r => projectsByTopic[r.topic_id].push(r));
     quizzesData.rows.forEach(r => {
       const max = r.max_score > 0 ? r.max_score : 100;
-      const pct = (r.score / max) * 100;
+      const pct = Math.round((r.score / max) * 100);
       const isAttempted = r.attempts_count > 0;
-      // Authoritative pass/fail evaluation: check quiz_attempts.is_passed, with fallback to pct >= 60%
-      const isPassed = isAttempted && (r.is_passed === true || (r.is_passed === null && pct >= 60));
+      // Strict 60% criteria: Individual quiz must have score percentage >= 60% to pass
+      const isPassed = isAttempted && pct >= 60;
       const status = !isAttempted ? 'Pending' : (isPassed ? 'Passed' : 'Failed');
 
       quizzesByTopic[r.topic_id].push({
         ...r,
+        score_pct: pct,
         status,
       });
     });

@@ -140,15 +140,25 @@ function TopicRowView({ topic }: { topic: TopicRow }) {
                 </h4>
                 {topic.quizzes_list.length > 0 ? (
                   <ul className="space-y-2">
-                    {topic.quizzes_list.map(q => (
-                      <li key={q.id} className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-xs hover:shadow-sm transition-shadow">
-                        <span className="font-semibold text-xs sm:text-[13px] text-slate-800 leading-tight">{q.title}</span>
-                        <div className="flex items-center justify-between mt-1">
-                          <span className="text-slate-500 text-[11px] sm:text-xs font-semibold px-1.5 py-0.5 bg-slate-50 rounded border border-slate-100">Score: {q.score}/{q.max_score}</span>
-                          <StatusBadge status={q.status} />
-                        </div>
-                      </li>
-                    ))}
+                    {topic.quizzes_list.map(q => {
+                      const max = Number(q.max_score) || 0;
+                      const sc = Number(q.score) || 0;
+                      const pct = max > 0 ? Math.round((sc / max) * 100) : null;
+                      const status = (q.status === 'Passed' || q.status === 'Failed')
+                        ? (pct !== null ? (pct >= 60 ? 'Passed' : 'Failed') : q.status)
+                        : q.status;
+                      return (
+                        <li key={q.id} className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-xs hover:shadow-sm transition-shadow">
+                          <span className="font-semibold text-xs sm:text-[13px] text-slate-800 leading-tight">{q.title}</span>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-slate-500 text-[11px] sm:text-xs font-semibold px-1.5 py-0.5 bg-slate-50 rounded border border-slate-100">
+                              Score: {q.score}/{q.max_score}{pct !== null ? ` (${pct}%)` : ''}
+                            </span>
+                            <StatusBadge status={status} />
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <div className="text-xs text-slate-400 italic bg-white/70 p-3 rounded-xl border border-slate-200/60 border-dashed">No quizzes for this module.</div>
@@ -423,8 +433,9 @@ export function StudentDetailsModal({
           const sc = Number(q.score) || 0;
           const hasAttempt = q.status === 'Passed' || q.status === 'Failed' || (Number(q.attempts_count) > 0);
           const pct = hasAttempt && max > 0 ? Math.min(100, Math.round((sc / max) * 100)) : null;
+          // Strict 60% criteria: Individual quiz must have score percentage >= 60% to be Passed
           const finalStatus: 'Passed' | 'Failed' | 'Not Attempted' = hasAttempt
-            ? (q.status === 'Passed' ? 'Passed' : (q.status === 'Failed' ? 'Failed' : (pct !== null && pct >= 60 ? 'Passed' : 'Failed')))
+            ? (pct !== null ? (pct >= 60 ? 'Passed' : 'Failed') : (q.status === 'Passed' ? 'Passed' : 'Failed'))
             : 'Not Attempted';
 
           list.push({
@@ -540,15 +551,41 @@ export function StudentDetailsModal({
                   </div>
                 </div>
 
-                <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-indigo-100 shadow-xs flex flex-col justify-between">
-                  <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-1 truncate">
+                <div className={`bg-white p-3 sm:p-3.5 rounded-2xl border shadow-xs flex flex-col justify-between ${
+                  avgQuizScorePct === null
+                    ? 'border-slate-200/80'
+                    : avgQuizScorePct >= 60
+                    ? 'border-emerald-100'
+                    : 'border-rose-100'
+                }`}>
+                  <div className={`text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider mb-1 truncate ${
+                    avgQuizScorePct === null
+                      ? 'text-slate-400'
+                      : avgQuizScorePct >= 60
+                      ? 'text-emerald-600'
+                      : 'text-rose-600'
+                  }`}>
                     Average Score
                   </div>
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-xl sm:text-2xl font-black text-indigo-600">
+                    <span className={`text-xl sm:text-2xl font-black ${
+                      avgQuizScorePct === null
+                        ? 'text-slate-700'
+                        : avgQuizScorePct >= 60
+                        ? 'text-emerald-600'
+                        : 'text-rose-600'
+                    }`}>
                       {avgQuizScorePct !== null ? `${avgQuizScorePct}%` : 'N/A'}
                     </span>
-                    <span className="text-[11px] sm:text-xs text-indigo-600/70 font-medium">overall</span>
+                    <span className={`text-[11px] sm:text-xs font-medium ${
+                      avgQuizScorePct === null
+                        ? 'text-slate-400'
+                        : avgQuizScorePct >= 60
+                        ? 'text-emerald-600/70'
+                        : 'text-rose-600/70'
+                    }`}>
+                      {avgQuizScorePct === null ? 'overall' : avgQuizScorePct >= 60 ? 'passing avg' : 'failing avg (<60%)'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -720,7 +757,7 @@ export function StudentDetailsModal({
                                   <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                     <div
                                       className={`h-full rounded-full ${
-                                        q.scorePct >= 70
+                                        q.scorePct >= 60
                                           ? 'bg-emerald-500'
                                           : q.scorePct >= 40
                                           ? 'bg-amber-500'
