@@ -581,7 +581,7 @@ export function QuizStudentsModal({
                               <div className="w-12 bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                 <div
                                   className={`h-full rounded-full ${
-                                    s.score_pct >= 70
+                                    s.score_pct >= 60
                                       ? 'bg-emerald-500'
                                       : s.score_pct >= 40
                                       ? 'bg-amber-500'
@@ -592,7 +592,7 @@ export function QuizStudentsModal({
                               </div>
                               <span
                                 className={`text-xs font-bold ${
-                                  s.score_pct >= 70
+                                  s.score_pct >= 60
                                     ? 'text-emerald-700'
                                     : s.score_pct >= 40
                                     ? 'text-amber-700'
@@ -696,7 +696,7 @@ export function QuizStudentsModal({
                                 <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                   <div
                                     className={`h-full rounded-full ${
-                                      s.score_pct >= 70
+                                      s.score_pct >= 60
                                         ? 'bg-emerald-500'
                                         : s.score_pct >= 40
                                         ? 'bg-amber-500'
@@ -707,7 +707,7 @@ export function QuizStudentsModal({
                                 </div>
                                 <span
                                   className={`text-xs font-bold ${
-                                    s.score_pct >= 70
+                                    s.score_pct >= 60
                                       ? 'text-emerald-700'
                                       : s.score_pct >= 40
                                       ? 'text-amber-700'
