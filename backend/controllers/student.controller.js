@@ -760,14 +760,13 @@ exports.submitQuizAttempt = async (req, res) => {
 
     // Derive passing threshold from actual question points to handle cases where
     // the stored max_score is out of sync with real question points.
-    // Clamp to 1 so a stale/misconfigured passing_score > max_score can never
-    // produce a threshold higher than the actual achievable score.
-    const passingRatio =
-      max_score > 0 ? Math.min(1, passing_score / max_score) : 0.7;
+    // Clamp to at least 60% (0.60) to enforce the universal 60% passing criteria.
+    const rawRatio = max_score > 0 ? passing_score / max_score : 0.6;
+    const passingRatio = Math.max(0.6, Math.min(1, rawRatio));
     const effectivePassingScore =
       actual_max_score > 0
         ? Math.ceil(actual_max_score * passingRatio)
-        : passing_score;
+        : Math.ceil(max_score > 0 ? max_score * 0.6 : 60);
     const isPassed = score >= effectivePassingScore;
 
     const result = await pool.query(
