@@ -1652,6 +1652,513 @@ exports.getBatchDashboard = async (req, res) => {
   }
 };
 
+// ─── Analytics: Batch Date-Filtered Activity Report & Excel Export ──────────
+
+async function fetchBatchActivityReportData(req) {
+  const { id: facilitatorId, role } = req.user;
+  const isFacilitator = role === 'facilitator';
+  const subjectIds = req.user.subject_ids || [];
+  const { college_id, batch, subject_id, time_range = '7d', start_date, end_date, search } = req.query;
+
+  const emptyResult = {
+    period: { time_range, start_date: new Date().toISOString(), end_date: new Date().toISOString() },
+    meta: { subject_name: 'All Subjects', college_name: 'All Colleges', batch: 'All Batches' },
+    summary: { total_enrolled: 0, active_count: 0, inactive_count: 0, lessons_completed: 0, exercises_passed: 0, quizzes_attempted: 0, assignments_submitted: 0, projects_submitted: 0, total_xp_earned: 0, cohort_avg_progress: 0 },
+    students: [],
+  };
+
+  if (isFacilitator && subjectIds.length === 0) {
+    return emptyResult;
+  }
+
+  if (isFacilitator && subject_id && !subjectIds.includes(subject_id)) {
+    return emptyResult;
+  }
+
+  const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
+  if (!colleges.length) {
+    return emptyResult;
+  }
+
+  const enrolledIds = await getEnrolledStudentIds(colleges, batch, subject_id, isFacilitator ? subjectIds : null);
+  if (!enrolledIds.length) {
+    return emptyResult;
+  }
+
+  // Calculate start and end date
+  const now = new Date();
+  let startDate;
+  let endDate = now;
+
+  switch (time_range) {
+    case '1d':
+      startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      break;
+    case '10d':
+      startDate = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+      break;
+    case '15d':
+      startDate = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+      break;
+    case '30d':
+      startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      break;
+    case 'custom':
+      startDate = start_date ? new Date(start_date) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      endDate = end_date ? new Date(new Date(end_date).setHours(23, 59, 59, 999)) : now;
+      break;
+    case '7d':
+    default:
+      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      break;
+  }
+
+  // Fetch subject metadata if subject_id passed
+  let subjectName = 'All Subjects';
+  if (subject_id && subject_id !== 'all') {
+    const sNameRes = await pool.query('SELECT name FROM subjects WHERE id = $1::uuid', [subject_id]);
+    if (sNameRes.rows.length) subjectName = sNameRes.rows[0].name;
+  }
+
+  // Fetch college name if college_id passed
+  let collegeName = 'All Colleges';
+  if (college_id && college_id !== 'all') {
+    const cNameRes = await pool.query('SELECT name FROM colleges WHERE id = $1::uuid', [college_id]);
+    if (cNameRes.rows.length) collegeName = cNameRes.rows[0].name;
+  }
+
+  // Build subject scoping clauses for activity queries
+  let sClause = '';
+  const sParams = [enrolledIds, startDate, endDate];
+  if (subject_id && subject_id !== 'all') {
+    sParams.push(subject_id);
+    sClause = `AND t.subject_id = $${sParams.length}::uuid`;
+  } else if (isFacilitator && subjectIds.length > 0) {
+    sParams.push(subjectIds);
+    sClause = `AND t.subject_id = ANY($${sParams.length}::uuid[])`;
+  }
+
+  // 1. Lessons / Subtopics completed in period
+  const lessonsRes = await pool.query(
+    `SELECT usp.user_id, COUNT(DISTINCT usp.subtopic_id)::int AS count
+     FROM user_subtopic_progress usp
+     JOIN subtopics st ON st.id = usp.subtopic_id AND st.is_deleted = false
+     JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
+     JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+     WHERE usp.user_id = ANY($1::uuid[]) AND usp.is_completed = true
+       AND usp.completed_at >= $2::timestamptz AND usp.completed_at <= $3::timestamptz
+       ${sClause}
+     GROUP BY usp.user_id`,
+    sParams,
+  );
+  const lessonsMap = new Map(lessonsRes.rows.map((r) => [r.user_id, r.count]));
+
+  // 2. Exercises passed in period
+  const exercisesRes = await pool.query(
+    `SELECT es.user_id, COUNT(DISTINCT es.exercise_id)::int AS count
+     FROM exercise_submissions es
+     JOIN exercises e ON e.id = es.exercise_id AND e.is_deleted = false
+     JOIN subtopics st ON e.subtopic_id = st.id AND st.is_deleted = false
+     JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
+     JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+     WHERE es.user_id = ANY($1::uuid[]) AND es.is_passed = true
+       AND es.submitted_at >= $2::timestamptz AND es.submitted_at <= $3::timestamptz
+       ${sClause}
+     GROUP BY es.user_id`,
+    sParams,
+  );
+  const exercisesMap = new Map(exercisesRes.rows.map((r) => [r.user_id, r.count]));
+
+  // 3. Quizzes attempted and average score % in period
+  const quizzesRes = await pool.query(
+    `SELECT 
+       qa.user_id,
+       COUNT(DISTINCT qa.quiz_id)::int AS quizzes_attempted,
+       ROUND(AVG(LEAST(100.0, qa.score * 100.0 / NULLIF(q.max_score, 0)))::numeric, 1) AS avg_quiz_score_pct
+     FROM quiz_attempts qa
+     JOIN quizzes q ON q.id = qa.quiz_id AND q.is_deleted = false
+     JOIN units un ON q.unit_id = un.id AND un.is_deleted = false
+     JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+     WHERE qa.user_id = ANY($1::uuid[])
+       AND COALESCE(qa.attempted_at, qa.created_at) >= $2::timestamptz 
+       AND COALESCE(qa.attempted_at, qa.created_at) <= $3::timestamptz
+       ${sClause}
+     GROUP BY qa.user_id`,
+    sParams,
+  );
+  const quizAttemptMap = new Map(quizzesRes.rows.map((r) => [r.user_id, r.quizzes_attempted]));
+  const quizScoreMap = new Map(quizzesRes.rows.map((r) => [r.user_id, parseFloat(r.avg_quiz_score_pct)]));
+
+  // 4. Assignments submitted (curriculum + college assignments)
+  let caSubjClause = '';
+  if (subject_id && subject_id !== 'all') {
+    caSubjClause = `AND (ca.course = '${subject_id}' OR ca.course IN (SELECT slug FROM subjects WHERE id = '${subject_id}'::uuid))`;
+  }
+  const asgRes = await pool.query(
+    `SELECT user_id, COUNT(DISTINCT assignment_id)::int AS assignments_submitted
+     FROM (
+       SELECT asub.user_id, asub.assignment_id
+       FROM assignment_submissions asub
+       JOIN assignments a ON a.id = asub.assignment_id AND a.is_deleted = false
+       JOIN units un ON a.unit_id = un.id AND un.is_deleted = false
+       JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+       WHERE asub.user_id = ANY($1::uuid[])
+         AND asub.submitted_at >= $2::timestamptz AND asub.submitted_at <= $3::timestamptz
+         ${sClause}
+       UNION ALL
+       SELECT cas.student_id AS user_id, cas.assignment_id
+       FROM college_assignment_submissions cas
+       JOIN college_assignments ca ON ca.id = cas.assignment_id AND ca.is_deleted = false
+       WHERE cas.student_id = ANY($1::uuid[])
+         AND (
+           (cas.submitted_at IS NOT NULL AND cas.submitted_at >= $2::timestamptz AND cas.submitted_at <= $3::timestamptz)
+           OR (cas.updated_at IS NOT NULL AND cas.updated_at >= $2::timestamptz AND cas.updated_at <= $3::timestamptz)
+         )
+         ${caSubjClause}
+     ) combined_asg
+     GROUP BY user_id`,
+    sParams,
+  );
+  const asgMap = new Map(asgRes.rows.map((r) => [r.user_id, r.assignments_submitted]));
+
+  // 5. Projects submitted and approved
+  const projRes = await pool.query(
+    `SELECT 
+       ps.user_id,
+       COUNT(DISTINCT ps.project_id)::int AS projects_submitted,
+       COUNT(DISTINCT ps.project_id) FILTER (WHERE ps.is_approved = true OR ps.score >= 60)::int AS projects_approved
+     FROM project_submissions ps
+     JOIN projects p ON p.id = ps.project_id AND p.is_deleted = false
+     JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+     WHERE ps.user_id = ANY($1::uuid[])
+       AND ps.submitted_at >= $2::timestamptz AND ps.submitted_at <= $3::timestamptz
+       ${sClause}
+     GROUP BY ps.user_id`,
+    sParams,
+  );
+  const projMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_submitted]));
+  const projApprMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_approved]));
+
+  // 6. Points / XP earned in period - Detailed Breakdown by Source
+  const xpBySourceRes = await pool.query(
+    `SELECT pl.user_id, pl.source, COALESCE(SUM(pl.points), 0)::int AS xp, COUNT(*)::int AS count
+     FROM points_log pl
+     WHERE pl.user_id = ANY($1::uuid[])
+       AND pl.created_at >= $2::timestamptz AND pl.created_at <= $3::timestamptz
+     GROUP BY pl.user_id, pl.source`,
+    [enrolledIds, startDate, endDate],
+  );
+
+  const xpBreakdownMap = new Map();
+  xpBySourceRes.rows.forEach((r) => {
+    const current = xpBreakdownMap.get(r.user_id) || {
+      lessons_xp: 0,
+      lessons_count: 0,
+      exercises_xp: 0,
+      exercises_count: 0,
+      quizzes_xp: 0,
+      quizzes_count: 0,
+      assignments_xp: 0,
+      assignments_count: 0,
+      projects_xp: 0,
+      projects_count: 0,
+      other_xp: 0,
+      total_xp: 0,
+    };
+    const src = (r.source || '').toLowerCase();
+    const pts = parseInt(r.xp, 10) || 0;
+    const cnt = parseInt(r.count, 10) || 0;
+    current.total_xp += pts;
+
+    if (src.includes('lesson')) {
+      current.lessons_xp += pts;
+      current.lessons_count += cnt;
+    } else if (src.includes('exercise')) {
+      current.exercises_xp += pts;
+      current.exercises_count += cnt;
+    } else if (src.includes('quiz')) {
+      current.quizzes_xp += pts;
+      current.quizzes_count += cnt;
+    } else if (src.includes('capstone') || src.includes('project')) {
+      current.projects_xp += pts;
+      current.projects_count += cnt;
+    } else if (src.includes('assignment')) {
+      current.assignments_xp += pts;
+      current.assignments_count += cnt;
+    } else {
+      current.other_xp += pts;
+    }
+    xpBreakdownMap.set(r.user_id, current);
+  });
+
+  // 7. Unified Last Active Timestamp across all 7 action surfaces
+  const activityRes = await pool.query(
+    `SELECT active_actions.user_id, MAX(active_actions.activity_date) AS last_active_at
+     FROM (
+       SELECT user_id, completed_at AS activity_date FROM public.user_subtopic_progress WHERE user_id = ANY($1::uuid[]) AND completed_at IS NOT NULL
+       UNION ALL
+       SELECT user_id, COALESCE(attempted_at, created_at) AS activity_date FROM public.quiz_attempts WHERE user_id = ANY($1::uuid[]) AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
+       UNION ALL
+       SELECT user_id, submitted_at AS activity_date FROM public.exercise_submissions WHERE user_id = ANY($1::uuid[]) AND submitted_at IS NOT NULL
+       UNION ALL
+       SELECT user_id, submitted_at AS activity_date FROM public.assignment_submissions WHERE user_id = ANY($1::uuid[]) AND submitted_at IS NOT NULL
+       UNION ALL
+       SELECT user_id, submitted_at AS activity_date FROM public.project_submissions WHERE user_id = ANY($1::uuid[]) AND submitted_at IS NOT NULL
+       UNION ALL
+       SELECT student_id AS user_id, COALESCE(submitted_at, updated_at) AS activity_date FROM public.college_assignment_submissions WHERE student_id = ANY($1::uuid[]) AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
+       UNION ALL
+       SELECT user_id, last_activity::timestamptz AS activity_date FROM public.user_streaks WHERE user_id = ANY($1::uuid[]) AND last_activity IS NOT NULL
+       UNION ALL
+       SELECT user_id, created_at AS activity_date FROM public.points_log WHERE user_id = ANY($1::uuid[]) AND created_at IS NOT NULL
+     ) active_actions
+     GROUP BY active_actions.user_id`,
+    [enrolledIds],
+  );
+  const lastActiveMap = new Map(activityRes.rows.map((r) => [r.user_id, r.last_active_at]));
+
+  // 8. Fetch student base details
+  const targetSubjId = subject_id && subject_id !== 'all' ? subject_id : null;
+  const progressSelect = targetSubjId
+    ? `COALESCE((SELECT progress_percent FROM user_subjects WHERE user_id = u.id AND subject_id = $2::uuid LIMIT 1), 0)`
+    : `COALESCE((SELECT ROUND(AVG(progress_percent))::int FROM user_subjects WHERE user_id = u.id), 0)`;
+  const sBaseParams = targetSubjId ? [enrolledIds, targetSubjId] : [enrolledIds];
+
+  const studentsRes = await pool.query(
+    `SELECT 
+       u.id AS student_id,
+       u.full_name,
+       u.email,
+       c.name AS college_name,
+       c.short_code AS college_code,
+       COALESCE(sp.expected_graduation_year::text, sp.year::text, 'General') AS batch,
+       sp.degree,
+       ${progressSelect} AS overall_subject_progress
+     FROM users u
+     JOIN student_profiles sp ON sp.user_id = u.id
+     LEFT JOIN colleges c ON c.id = sp.college_id
+     WHERE u.id = ANY($1::uuid[]) AND u.deleted_at IS NULL
+     ORDER BY u.full_name ASC`,
+    sBaseParams,
+  );
+
+  let students = studentsRes.rows.map((s) => {
+    const xpInfo = xpBreakdownMap.get(s.student_id) || {
+      lessons_xp: 0,
+      lessons_count: 0,
+      exercises_xp: 0,
+      exercises_count: 0,
+      quizzes_xp: 0,
+      quizzes_count: 0,
+      assignments_xp: 0,
+      assignments_count: 0,
+      projects_xp: 0,
+      projects_count: 0,
+      other_xp: 0,
+      total_xp: 0,
+    };
+
+    const lessonsCompleted = Math.max(lessonsMap.get(s.student_id) || 0, xpInfo.lessons_count);
+    const exercisesPassed = Math.max(exercisesMap.get(s.student_id) || 0, xpInfo.exercises_count);
+    const quizzesAttempted = Math.max(quizAttemptMap.get(s.student_id) || 0, xpInfo.quizzes_count);
+    const rawAvgQuizScore = quizScoreMap.get(s.student_id);
+    const avgQuizScore = (rawAvgQuizScore !== undefined && rawAvgQuizScore !== null)
+      ? Math.min(100, Math.max(0, rawAvgQuizScore))
+      : null;
+    const assignmentsSubmitted = Math.max(asgMap.get(s.student_id) || 0, xpInfo.assignments_count);
+    const projectsSubmitted = Math.max(projMap.get(s.student_id) || 0, xpInfo.projects_count);
+    const projectsApproved = projApprMap.get(s.student_id) || 0;
+    const totalXp = xpInfo.total_xp;
+    const lastActiveAt = lastActiveMap.get(s.student_id) || null;
+
+    const isActive = (
+      totalXp > 0 ||
+      lessonsCompleted > 0 ||
+      exercisesPassed > 0 ||
+      quizzesAttempted > 0 ||
+      assignmentsSubmitted > 0 ||
+      projectsSubmitted > 0 ||
+      (lastActiveAt && new Date(lastActiveAt) >= startDate)
+    );
+
+    return {
+      student_id: s.student_id,
+      full_name: s.full_name,
+      email: s.email,
+      college_name: s.college_name || 'N/A',
+      college_code: s.college_code || 'N/A',
+      batch: s.batch,
+      degree: s.degree || 'N/A',
+      overall_subject_progress: s.overall_subject_progress,
+      weekly_lessons_completed: lessonsCompleted,
+      weekly_lessons_xp: xpInfo.lessons_xp,
+      weekly_exercises_passed: exercisesPassed,
+      weekly_exercises_xp: xpInfo.exercises_xp,
+      weekly_quizzes_attempted: quizzesAttempted,
+      weekly_quizzes_xp: xpInfo.quizzes_xp,
+      weekly_avg_quiz_score: avgQuizScore,
+      weekly_assignments_submitted: assignmentsSubmitted,
+      weekly_assignments_xp: xpInfo.assignments_xp,
+      weekly_projects_submitted: projectsSubmitted,
+      weekly_projects_approved: projectsApproved,
+      weekly_projects_xp: xpInfo.projects_xp,
+      weekly_xp_earned: totalXp,
+      last_active_at: lastActiveAt,
+      engagement_status: isActive ? 'Active' : 'Inactive',
+    };
+  });
+
+  // Apply search query filter if provided
+  if (search && search.trim()) {
+    const q = search.trim().toLowerCase();
+    students = students.filter((s) =>
+      s.full_name.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      s.batch.toLowerCase().includes(q),
+    );
+  }
+
+  // Compute KPI summary
+  const totalEnrolled = students.length;
+  const activeCount = students.filter((s) => s.engagement_status === 'Active').length;
+  const inactiveCount = totalEnrolled - activeCount;
+  const lessonsCompletedTotal = students.reduce((acc, s) => acc + s.weekly_lessons_completed, 0);
+  const lessonsXpTotal = students.reduce((acc, s) => acc + s.weekly_lessons_xp, 0);
+  const exercisesPassedTotal = students.reduce((acc, s) => acc + s.weekly_exercises_passed, 0);
+  const exercisesXpTotal = students.reduce((acc, s) => acc + s.weekly_exercises_xp, 0);
+  const quizzesAttemptedTotal = students.reduce((acc, s) => acc + s.weekly_quizzes_attempted, 0);
+  const quizzesXpTotal = students.reduce((acc, s) => acc + s.weekly_quizzes_xp, 0);
+  const assignmentsSubmittedTotal = students.reduce((acc, s) => acc + s.weekly_assignments_submitted, 0);
+  const assignmentsXpTotal = students.reduce((acc, s) => acc + s.weekly_assignments_xp, 0);
+  const projectsSubmittedTotal = students.reduce((acc, s) => acc + s.weekly_projects_submitted, 0);
+  const projectsXpTotal = students.reduce((acc, s) => acc + s.weekly_projects_xp, 0);
+  const totalXpTotal = students.reduce((acc, s) => acc + s.weekly_xp_earned, 0);
+  const avgProgress = totalEnrolled > 0
+    ? Math.round(students.reduce((acc, s) => acc + s.overall_subject_progress, 0) / totalEnrolled)
+    : 0;
+
+  return {
+    period: {
+      time_range,
+      start_date: startDate.toISOString(),
+      end_date: endDate.toISOString(),
+    },
+    meta: {
+      subject_name: subjectName,
+      college_name: collegeName,
+      batch: batch && batch !== 'all' ? batch : 'All Batches',
+    },
+    summary: {
+      total_enrolled: totalEnrolled,
+      active_count: activeCount,
+      inactive_count: inactiveCount,
+      lessons_completed: lessonsCompletedTotal,
+      lessons_xp: lessonsXpTotal,
+      exercises_passed: exercisesPassedTotal,
+      exercises_xp: exercisesXpTotal,
+      quizzes_attempted: quizzesAttemptedTotal,
+      quizzes_xp: quizzesXpTotal,
+      assignments_submitted: assignmentsSubmittedTotal,
+      assignments_xp: assignmentsXpTotal,
+      projects_submitted: projectsSubmittedTotal,
+      projects_xp: projectsXpTotal,
+      total_xp_earned: totalXpTotal,
+      cohort_avg_progress: avgProgress,
+    },
+    students,
+  };
+}
+
+exports.getBatchActivityReport = async (req, res) => {
+  try {
+    const data = await fetchBatchActivityReportData(req);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[getBatchActivityReport] error:', err);
+    serverError(res, err, 'getBatchActivityReport');
+  }
+};
+
+exports.exportBatchActivityReport = async (req, res) => {
+  try {
+    const data = await fetchBatchActivityReportData(req);
+    const { students, meta, period } = data;
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const headers = [
+      'Student Name',
+      'Email',
+      'Batch',
+      'Degree',
+      'College',
+      'Lessons XP (Period)',
+      'Lessons Completed (Period)',
+      'Exercises XP (Period)',
+      'Exercises Passed (Period)',
+      'Quizzes XP (Period)',
+      'Quizzes Attempted (Period)',
+      'Avg Quiz Score % (Period)',
+      'Assignments XP (Period)',
+      'Assignments Submitted (Period)',
+      'Projects XP (Period)',
+      'Projects Submitted (Period)',
+      'Projects Approved (Period)',
+      'Total XP Earned (Period)',
+      'Overall Course Progress %',
+      'Last Active Date',
+      'Engagement Status',
+    ];
+
+    const rows = students.map((s) => [
+      escapeCsv(s.full_name),
+      escapeCsv(s.email),
+      escapeCsv(s.batch),
+      escapeCsv(s.degree),
+      escapeCsv(s.college_name),
+      s.weekly_lessons_xp,
+      s.weekly_lessons_completed,
+      s.weekly_exercises_xp,
+      s.weekly_exercises_passed,
+      s.weekly_quizzes_xp,
+      s.weekly_quizzes_attempted,
+      s.weekly_avg_quiz_score !== null ? `${s.weekly_avg_quiz_score}%` : 'N/A',
+      s.weekly_assignments_xp,
+      s.weekly_assignments_submitted,
+      s.weekly_projects_xp,
+      s.weekly_projects_submitted,
+      s.weekly_projects_approved,
+      s.weekly_xp_earned,
+      `${s.overall_subject_progress}%`,
+      s.last_active_at ? new Date(s.last_active_at).toLocaleString('en-IN') : 'Never',
+      s.engagement_status,
+    ]);
+
+    const rangeStr = `${new Date(period.start_date).toLocaleDateString()} to ${new Date(period.end_date).toLocaleDateString()}`;
+    const csvContent = '\uFEFF' + [
+      `# BATCH ACTIVITY REPORT - ${meta.subject_name || 'All Subjects'}`,
+      `# College: ${meta.college_name || 'All'} | Batch: ${meta.batch || 'All'} | Timeframe: ${period.time_range} (${rangeStr})`,
+      `# Generated: ${new Date().toLocaleString('en-IN')}`,
+      '',
+      headers.join(','),
+      ...rows.map((r) => r.join(',')),
+    ].join('\r\n');
+
+    const cleanSubject = (meta.subject_name || 'Cohort').replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Batch_Report_${cleanSubject}_${period.time_range}.csv"`);
+    res.send(csvContent);
+  } catch (err) {
+    serverError(res, err, 'exportBatchActivityReport');
+  }
+};
+
 // ─── Analytics: Student Performance ──────────────────────────────────────────
 
 exports.getStudentAnalytics = async (req, res) => {

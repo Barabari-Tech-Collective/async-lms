@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Loader2, ListChecks, Search, ArrowUpRight, Users, CheckCircle2, XCircle, Clock, X, ChevronRight,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import apiClient from '@/services/api';
@@ -56,6 +57,65 @@ type BatchDashData = {
   quiz_completion_rate: number; quiz_pass_rate: number;
   assignment_completion_rate: number; project_completion_rate: number;
   subjects: BatchSubject[];
+};
+
+export type TimeRangePreset = '1d' | '7d' | '10d' | '15d' | '30d' | 'custom';
+
+export type BatchReportStudent = {
+  student_id: string;
+  full_name: string;
+  email: string;
+  college_name: string;
+  college_code: string;
+  batch: string;
+  degree: string;
+  overall_subject_progress: number;
+  weekly_lessons_completed: number;
+  weekly_lessons_xp: number;
+  weekly_exercises_passed: number;
+  weekly_exercises_xp: number;
+  weekly_quizzes_attempted: number;
+  weekly_quizzes_xp: number;
+  weekly_avg_quiz_score: number | null;
+  weekly_assignments_submitted: number;
+  weekly_assignments_xp: number;
+  weekly_projects_submitted: number;
+  weekly_projects_approved: number;
+  weekly_projects_xp: number;
+  weekly_xp_earned: number;
+  last_active_at: string | null;
+  engagement_status: 'Active' | 'Inactive';
+};
+
+export type BatchReportData = {
+  period: {
+    time_range: string;
+    start_date: string;
+    end_date: string;
+  };
+  meta: {
+    subject_name: string;
+    college_name: string;
+    batch: string;
+  };
+  summary: {
+    total_enrolled: number;
+    active_count: number;
+    inactive_count: number;
+    lessons_completed: number;
+    lessons_xp: number;
+    exercises_passed: number;
+    exercises_xp: number;
+    quizzes_attempted: number;
+    quizzes_xp: number;
+    assignments_submitted: number;
+    assignments_xp: number;
+    projects_submitted: number;
+    projects_xp: number;
+    total_xp_earned: number;
+    cohort_avg_progress: number;
+  };
+  students: BatchReportStudent[];
 };
 
 type StudentRow = {
@@ -1283,6 +1343,19 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
   const [page, setPage] = useState(1);
   const pageSize = 5;
 
+  // Timeframe & Activity Report State
+  const [timeRange, setTimeRange] = useState<TimeRangePreset>('7d');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [activeView, setActiveView] = useState<'modules' | 'report'>('modules');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [reportData, setReportData] = useState<BatchReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [studentPage, setStudentPage] = useState(1);
+  const studentPageSize = 10;
+  const [exporting, setExporting] = useState(false);
+
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
     apiClient.get(`/facilitator/analytics/topics?subject_id=${subject}`)
@@ -1290,7 +1363,7 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
       .catch(() => setTopics([]));
   }, [subject]);
 
-  const load = useCallback(async () => {
+  const loadBatchMetrics = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -1307,14 +1380,153 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
     }
   }, [college, batch, subject, topic]);
 
-  useEffect(() => { setPage(1); load(); }, [load]);
+  const loadActivityReport = useCallback(async () => {
+    setReportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (college) params.set('college_id', college);
+      if (batch) params.set('batch', batch);
+      if (subject) params.set('subject_id', subject);
+      params.set('time_range', timeRange);
+      if (timeRange === 'custom') {
+        if (customStartDate) params.set('start_date', customStartDate);
+        if (customEndDate) params.set('end_date', customEndDate);
+      }
+      const res = await apiClient.get(`/facilitator/analytics/batch-report?${params}`);
+      setReportData(res.data.data);
+    } catch (err) {
+      console.error('Failed to load batch activity report:', err);
+      setReportData(null);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [college, batch, subject, timeRange, customStartDate, customEndDate]);
+
+  useEffect(() => {
+    setPage(1);
+    loadBatchMetrics();
+  }, [loadBatchMetrics]);
+
+  useEffect(() => {
+    setStudentPage(1);
+    loadActivityReport();
+  }, [loadActivityReport]);
+
+  const handleExportExcel = async () => {
+    if (!reportData || !reportData.students.length) return;
+    setExporting(true);
+    try {
+      const escapeCsv = (val: unknown) => {
+        if (val === null || val === undefined) return '';
+        const str = String(val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const headers = [
+        'Student Name',
+        'Email',
+        'Batch',
+        'Degree',
+        'College',
+        'Lessons XP (Period)',
+        'Lessons Completed (Period)',
+        'Exercises XP (Period)',
+        'Exercises Passed (Period)',
+        'Quizzes XP (Period)',
+        'Quizzes Attempted (Period)',
+        'Avg Quiz Score % (Period)',
+        'Assignments XP (Period)',
+        'Assignments Submitted (Period)',
+        'Projects XP (Period)',
+        'Projects Submitted (Period)',
+        'Projects Approved (Period)',
+        'Total XP Earned (Period)',
+        'Overall Course Progress %',
+        'Last Active Date',
+        'Engagement Status',
+      ];
+
+      const rows = reportData.students.map((s) => [
+        escapeCsv(s.full_name),
+        escapeCsv(s.email),
+        escapeCsv(s.batch),
+        escapeCsv(s.degree),
+        escapeCsv(s.college_name),
+        s.weekly_lessons_xp,
+        s.weekly_lessons_completed,
+        s.weekly_exercises_xp,
+        s.weekly_exercises_passed,
+        s.weekly_quizzes_xp,
+        s.weekly_quizzes_attempted,
+        s.weekly_avg_quiz_score !== null ? `${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%` : 'N/A',
+        s.weekly_assignments_xp,
+        s.weekly_assignments_submitted,
+        s.weekly_projects_xp,
+        s.weekly_projects_submitted,
+        s.weekly_projects_approved,
+        s.weekly_xp_earned,
+        `${s.overall_subject_progress}%`,
+        s.last_active_at ? new Date(s.last_active_at).toLocaleString('en-IN') : 'Never',
+        s.engagement_status,
+      ]);
+
+      const rangeStr = `${new Date(reportData.period.start_date).toLocaleDateString()} to ${new Date(reportData.period.end_date).toLocaleDateString()}`;
+      const csvContent = '\uFEFF' + [
+        `# BATCH ACTIVITY REPORT - ${reportData.meta.subject_name || 'All Subjects'}`,
+        `# College: ${reportData.meta.college_name || 'All Colleges'} | Batch: ${reportData.meta.batch || 'All Batches'} | Timeframe: ${reportData.period.time_range} (${rangeStr})`,
+        `# Total Enrolled: ${reportData.summary.total_enrolled} | Active: ${reportData.summary.active_count} | Inactive: ${reportData.summary.inactive_count}`,
+        `# Generated: ${new Date().toLocaleString('en-IN')}`,
+        '',
+        headers.join(','),
+        ...rows.map((r) => r.join(',')),
+      ].join('\r\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      const cleanSubj = (reportData.meta.subject_name || 'Cohort').replace(/[^a-zA-Z0-9_-]/g, '_');
+      link.setAttribute('download', `Batch_Report_${cleanSubj}_${reportData.period.time_range}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export batch report:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const totalSubjects = data?.subjects?.length ?? 0;
   const totalPages = Math.ceil(totalSubjects / pageSize);
   const paginatedSubjects = data?.subjects?.slice((page - 1) * pageSize, page * pageSize) ?? [];
 
+  // Filter students for Student Cohort Activity Report View
+  const filteredStudents = (reportData?.students ?? []).filter((s) => {
+    if (statusFilter === 'active' && s.engagement_status !== 'Active') return false;
+    if (statusFilter === 'inactive' && s.engagement_status !== 'Inactive') return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      return (
+        s.full_name.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        s.batch.toLowerCase().includes(q) ||
+        s.college_name.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const totalStudentPages = Math.ceil(filteredStudents.length / studentPageSize);
+  const paginatedStudents = filteredStudents.slice((studentPage - 1) * studentPageSize, studentPage * studentPageSize);
+
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
+      {/* ── Filter Bar: College, Batch, Subject, Module ── */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
@@ -1322,98 +1534,553 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
         <Select label="Module" value={topic} onChange={setTopic} options={topics} placeholder="All Modules" />
       </div>
 
-      {loading ? <LoadingState /> : !data ? <EmptyState /> : (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
-            <StatCard label="Students Enrolled" value={data.enrolled} />
-            <StatCard label="Active Students" value={data.active_students} sub="Online & active today" />
-            <StatCard label="Avg Batch Streak" value={`${data.avg_batch_streak} days`} />
-            <StatCard label="Avg Module Progress" value={`${data.avg_module_progress}%`} />
-            <StatCard label="Quiz Completion" value={`${data.quiz_completion_rate}%`} />
-            <StatCard label="Quiz Pass Rate" value={`${data.quiz_pass_rate}%`} />
-            <StatCard label="Assignment Completion" value={`${data.assignment_completion_rate}%`} />
-            <StatCard label="Project Completion" value={`${data.project_completion_rate}%`} />
+      {/* ── Timeframe & Report Action Bar ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold mr-1">
+            <Clock className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Timeframe:</span>
+          </div>
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl overflow-x-auto no-scrollbar">
+            {(['1d', '7d', '10d', '15d', '30d', 'custom'] as const).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setTimeRange(preset)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                  timeRange === preset
+                    ? 'bg-white text-indigo-600 shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {preset === '1d' ? 'Today (24h)' :
+                 preset === '7d' ? 'Past 7 Days' :
+                 preset === '10d' ? 'Past 10 Days' :
+                 preset === '15d' ? 'Past 15 Days' :
+                 preset === '30d' ? 'Past 30 Days' : 'Custom'}
+              </button>
+            ))}
           </div>
 
-          {totalSubjects > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-              <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Module-Level Breakdown</h3>
-                <span className="text-xs text-slate-400 font-medium">{totalSubjects} modules</span>
-              </div>
+          {timeRange === 'custom' && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-xs text-slate-400">to</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          )}
+        </div>
 
-              {/* Mobile Card View (No horizontal scrollbar) */}
-              <div className="divide-y divide-slate-100 md:hidden">
-                {paginatedSubjects.map((s) => (
-                  <div key={s.id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
-                    <p className="font-bold text-slate-800 text-sm">{s.name}</p>
-                    <div className="grid grid-cols-2 gap-2.5 text-xs">
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Quiz Completion</span>
-                        <RateBar value={s.quiz_completion} />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Pass Rate</span>
-                        <RateBar value={s.pass_rate} color="bg-green-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Assignment</span>
-                        <RateBar value={s.assignment_completion} color="bg-amber-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Project</span>
-                        <RateBar value={s.project_completion} color="bg-purple-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Lessons Read</span>
-                        <RateBar value={s.lesson_completion} color="bg-blue-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Avg Progress</span>
-                        <RateBar value={s.module_progress} color="bg-indigo-600" />
-                      </div>
-                    </div>
-                  </div>
+        <div className="flex items-center gap-2.5 self-end md:self-auto w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setStudentPage(1); }}
+              placeholder="Search student or email..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={exporting || !reportData || !reportData.students.length}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer shrink-0"
+            title="Download CSV formatted for Microsoft Excel with UTF-8 BOM"
+          >
+            {exporting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">Export to Excel</span>
+            <span className="sm:hidden">Export</span>
+          </button>
+        </div>
+      </div>
+
+      {loading ? <LoadingState /> : !data ? <EmptyState /> : (
+        <>
+          {/* ── 8 StatCards (as shown in image) ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
+            <StatCard label="Students Enrolled" value={reportData?.summary.total_enrolled ?? data.enrolled} />
+            <StatCard
+              label="Active Students"
+              value={reportData?.summary.active_count ?? data.active_students}
+              sub={`In ${timeRange === '1d' ? '24h' : timeRange === 'custom' ? 'range' : timeRange}`}
+              colorScheme="emerald"
+            />
+            <StatCard label="Avg Batch Streak" value={`${data.avg_batch_streak} days`} />
+            <StatCard label="Avg Module Progress" value={`${data.avg_module_progress}%`} colorScheme="indigo" />
+            <StatCard label="Quiz Completion" value={`${data.quiz_completion_rate}%`} />
+            <StatCard label="Quiz Pass Rate" value={`${data.quiz_pass_rate}%`} colorScheme="emerald" />
+            <StatCard label="Assignment Completion" value={`${data.assignment_completion_rate}%`} colorScheme="amber" />
+            <StatCard label="Project Completion" value={`${data.project_completion_rate}%`} colorScheme="rose" />
+          </div>
+
+          {/* ── Section View Switcher ── */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 border-b border-slate-200 pb-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveView('modules')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeView === 'modules'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>📊 Module-Level Breakdown</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeView === 'modules' ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {totalSubjects}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('report')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeView === 'report'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>👥 Student Cohort Activity Report</span>
+                {reportData && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    activeView === 'report' ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {reportData.summary.total_enrolled}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {activeView === 'report' && reportData && (
+              <div className="flex items-center gap-1 text-xs self-end sm:self-auto">
+                {(['all', 'active', 'inactive'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => { setStatusFilter(st); setStudentPage(1); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-all cursor-pointer ${
+                      statusFilter === st
+                        ? st === 'active'
+                          ? 'bg-emerald-100 text-emerald-800 font-bold'
+                          : st === 'inactive'
+                          ? 'bg-rose-100 text-rose-800 font-bold'
+                          : 'bg-slate-800 text-white font-bold'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {st === 'all' ? `All (${reportData.summary.total_enrolled})` :
+                     st === 'active' ? `Active (${reportData.summary.active_count})` :
+                     `Inactive (${reportData.summary.inactive_count})`}
+                  </button>
                 ))}
               </div>
+            )}
+          </div>
 
-              {/* Desktop Table View */}
-              <div className="hidden md:block overflow-x-auto no-scrollbar w-full min-w-0">
-                <table className="w-full text-xs sm:text-sm">
-                  <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
-                    <tr>
-                      <th className="text-left px-4 sm:px-5 py-3">Module</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Quiz Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Pass Rate</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Assignment Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Project Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Lessons Read</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Avg Progress</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {paginatedSubjects.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-4 sm:px-5 py-3 font-medium text-slate-800">{s.name}</td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.quiz_completion} /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.pass_rate} color="bg-green-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.assignment_completion} color="bg-amber-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.project_completion} color="bg-purple-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.lesson_completion} color="bg-blue-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.module_progress} color="bg-indigo-600" /></td>
+          {/* ── View 1: Module-Level Breakdown (Original Screen) ── */}
+          {activeView === 'modules' && (
+            totalSubjects > 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
+                <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Module-Level Breakdown</h3>
+                  <span className="text-xs text-slate-400 font-medium">{totalSubjects} modules</span>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="divide-y divide-slate-100 md:hidden">
+                  {paginatedSubjects.map((s) => (
+                    <div key={s.id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
+                      <p className="font-bold text-slate-800 text-sm">{s.name}</p>
+                      <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Quiz Completion</span>
+                          <RateBar value={s.quiz_completion} />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Pass Rate</span>
+                          <RateBar value={s.pass_rate} color="bg-green-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Assignment</span>
+                          <RateBar value={s.assignment_completion} color="bg-amber-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Project</span>
+                          <RateBar value={s.project_completion} color="bg-purple-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Lessons Read</span>
+                          <RateBar value={s.lesson_completion} color="bg-blue-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Avg Progress</span>
+                          <RateBar value={s.module_progress} color="bg-indigo-600" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto no-scrollbar w-full min-w-0">
+                  <table className="w-full text-xs sm:text-sm">
+                    <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
+                      <tr>
+                        <th className="text-left px-4 sm:px-5 py-3">Module</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Quiz Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Pass Rate</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Assignment Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Project Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Lessons Read</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Avg Progress</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {paginatedSubjects.map((s) => (
+                        <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="px-4 sm:px-5 py-3 font-medium text-slate-800">{s.name}</td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.quiz_completion} /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.pass_rate} color="bg-green-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.assignment_completion} color="bg-amber-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.project_completion} color="bg-purple-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.lesson_completion} color="bg-blue-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.module_progress} color="bg-indigo-600" /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
+                    <span className="text-center sm:text-left">
+                      Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalSubjects)} of {totalSubjects} modules · page {page} of {totalPages}
+                    </span>
+                    <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500 text-xs sm:text-sm">
+                No modules found for the selected filter combination.
+              </div>
+            )
+          )}
+
+          {/* ── View 2: Student Cohort Activity Report ── */}
+          {activeView === 'report' && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
+              <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-50/50">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-800">
+                    Student Activity & Progress ({timeRange === '1d' ? 'Last 24 Hours' : timeRange === 'custom' ? 'Custom Range' : `Past ${timeRange}`})
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Itemized delta completions and cumulative progress for {reportData?.meta.subject_name || 'Cohort'}.
+                  </p>
+                </div>
+                <div className="text-xs text-slate-500 font-medium">
+                  Showing {filteredStudents.length} of {reportData?.students.length ?? 0} students
+                </div>
               </div>
 
-              {totalPages > 1 && (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                  <span className="text-center sm:text-left">
-                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalSubjects)} of {totalSubjects} modules · page {page} of {totalPages}
-                  </span>
-                  <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+              {reportLoading ? (
+                <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                  <span className="text-xs font-medium">Aggregating cohort activity...</span>
                 </div>
+              ) : filteredStudents.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs sm:text-sm">
+                  No students match the current filters or search query.
+                </div>
+              ) : (
+                <>
+                  {/* Mobile Student Cards */}
+                  <div className="divide-y divide-slate-100 lg:hidden">
+                    {paginatedStudents.map((s) => (
+                      <div key={s.student_id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900 text-sm truncate">{s.full_name}</p>
+                            <p className="text-xs text-slate-500 truncate">{s.email}</p>
+                            <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-400">
+                              <span className="font-medium text-slate-600">{s.college_code || s.college_name}</span>
+                              <span>·</span>
+                              <span>{s.batch}</span>
+                            </div>
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            s.engagement_status === 'Active'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-500 border border-slate-200'
+                          }`}>
+                            {s.engagement_status}
+                          </span>
+                        </div>
+
+                        {/* Metric Grid */}
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Lessons</span>
+                            <span className="font-bold text-indigo-600 text-sm">
+                              {s.weekly_lessons_xp > 0 ? `+${s.weekly_lessons_xp} XP` : s.weekly_lessons_completed > 0 ? `${s.weekly_lessons_completed}` : '0 XP'}
+                            </span>
+                            {s.weekly_lessons_completed > 0 && (
+                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_lessons_completed} completed)</span>
+                            )}
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Exercises</span>
+                            <span className="font-bold text-emerald-600 text-sm">
+                              {s.weekly_exercises_xp > 0 ? `+${s.weekly_exercises_xp} XP` : s.weekly_exercises_passed > 0 ? `${s.weekly_exercises_passed}` : '0 XP'}
+                            </span>
+                            {s.weekly_exercises_passed > 0 && (
+                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_exercises_passed} passed)</span>
+                            )}
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Quizzes</span>
+                            <span className="font-bold text-amber-600 text-sm">
+                              {s.weekly_quizzes_xp > 0 ? `+${s.weekly_quizzes_xp} XP` : s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted}` : '0 XP'}
+                            </span>
+                            {(s.weekly_quizzes_attempted > 0 || s.weekly_avg_quiz_score !== null) && (
+                              <span className="text-[10px] font-medium text-slate-400 block">
+                                {s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted} att` : ''}
+                                {s.weekly_avg_quiz_score !== null ? ` (${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Assignments</span>
+                            <span className="font-bold text-purple-600 text-sm">
+                              {s.weekly_assignments_xp > 0 ? `+${s.weekly_assignments_xp} XP` : s.weekly_assignments_submitted > 0 ? `${s.weekly_assignments_submitted}` : '0 XP'}
+                            </span>
+                            {s.weekly_assignments_submitted > 0 && (
+                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_assignments_submitted} sub)</span>
+                            )}
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Projects</span>
+                            <span className="font-bold text-blue-600 text-sm">
+                              {s.weekly_projects_xp > 0 ? `+${s.weekly_projects_xp} XP` : s.weekly_projects_submitted > 0 ? `${s.weekly_projects_submitted}` : '0 XP'}
+                            </span>
+                            {s.weekly_projects_approved > 0 ? (
+                              <span className="text-[10px] font-medium text-emerald-600 block">({s.weekly_projects_approved} appr)</span>
+                            ) : s.weekly_projects_submitted > 0 ? (
+                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_projects_submitted} sub)</span>
+                            ) : null}
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
+                            <span className="text-[10px] text-slate-400 block font-semibold">Total XP</span>
+                            <span className="font-bold text-emerald-700 text-sm">
+                              {s.weekly_xp_earned > 0 ? `+${s.weekly_xp_earned} XP` : '0 XP'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Progress Bar & Last Active */}
+                        <div className="pt-1">
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                            <span>Course Progress</span>
+                            <span className="font-bold text-slate-800">{s.overall_subject_progress}%</span>
+                          </div>
+                          <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
+                          <div className="mt-1.5 text-[10px] text-slate-400 flex items-center justify-between">
+                            <span>Last Active:</span>
+                            <span className="font-medium text-slate-600">
+                              {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table */}
+                  <div className="hidden lg:block overflow-x-auto no-scrollbar w-full min-w-0">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="text-left px-4 py-3">Student</th>
+                          <th className="text-left px-3 py-3">Batch</th>
+                          <th className="text-center px-2 py-3" title="Lessons XP earned & completions in period">Lessons</th>
+                          <th className="text-center px-2 py-3" title="Exercises XP earned & passed in period">Exercises</th>
+                          <th className="text-center px-2 py-3" title="Quizzes XP earned & attempts in period">Quizzes (Avg %)</th>
+                          <th className="text-center px-2 py-3" title="Assignments XP earned & submissions in period">Asgns</th>
+                          <th className="text-center px-2 py-3" title="Projects XP earned & submissions in period">Projects</th>
+                          <th className="text-center px-2 py-3" title="Total XP points earned in period">Total XP</th>
+                          <th className="text-left px-3 py-3 w-32">Course Progress</th>
+                          <th className="text-left px-3 py-3">Last Active</th>
+                          <th className="text-center px-3 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {paginatedStudents.map((s) => (
+                          <tr key={s.student_id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-slate-900">{s.full_name}</p>
+                              <p className="text-[11px] text-slate-400">{s.email}</p>
+                            </td>
+                            <td className="px-3 py-3 text-slate-600">
+                              <span className="font-medium">{s.batch}</span>
+                              <span className="block text-[10px] text-slate-400 truncate max-w-[100px]">{s.college_code || s.college_name}</span>
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {s.weekly_lessons_xp > 0 ? (
+                                <div>
+                                  <span className="font-bold text-indigo-600">+{s.weekly_lessons_xp} XP</span>
+                                  {s.weekly_lessons_completed > 0 && (
+                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_lessons_completed} lessons)</span>
+                                  )}
+                                </div>
+                              ) : s.weekly_lessons_completed > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-indigo-600">+{s.weekly_lessons_completed} lessons</span>
+                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {s.weekly_exercises_xp > 0 ? (
+                                <div>
+                                  <span className="font-bold text-emerald-600">+{s.weekly_exercises_xp} XP</span>
+                                  {s.weekly_exercises_passed > 0 && (
+                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_exercises_passed} passed)</span>
+                                  )}
+                                </div>
+                              ) : s.weekly_exercises_passed > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-emerald-600">+{s.weekly_exercises_passed} passed</span>
+                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {s.weekly_quizzes_xp > 0 ? (
+                                <div>
+                                  <span className="font-bold text-amber-600">+{s.weekly_quizzes_xp} XP</span>
+                                  <span className="block text-[10px] text-slate-400 font-medium">
+                                    {s.weekly_quizzes_attempted > 0 ? `(${s.weekly_quizzes_attempted} att${s.weekly_avg_quiz_score !== null ? ` · ${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%` : ''})` : s.weekly_avg_quiz_score !== null ? `(${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)` : ''}
+                                  </span>
+                                </div>
+                              ) : s.weekly_quizzes_attempted > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-amber-600">{s.weekly_quizzes_attempted} att</span>
+                                  {s.weekly_avg_quiz_score !== null && (
+                                    <span className="block text-[10px] text-slate-400 font-medium">({Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {s.weekly_assignments_xp > 0 ? (
+                                <div>
+                                  <span className="font-bold text-purple-600">+{s.weekly_assignments_xp} XP</span>
+                                  {s.weekly_assignments_submitted > 0 && (
+                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_assignments_submitted} sub)</span>
+                                  )}
+                                </div>
+                              ) : s.weekly_assignments_submitted > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-purple-600">+{s.weekly_assignments_submitted} sub</span>
+                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {s.weekly_projects_xp > 0 ? (
+                                <div>
+                                  <span className="font-bold text-blue-600">+{s.weekly_projects_xp} XP</span>
+                                  <span className="block text-[10px] font-medium text-slate-400">
+                                    {s.weekly_projects_approved > 0 ? (
+                                      <span className="text-emerald-600 font-medium">({s.weekly_projects_approved} appr)</span>
+                                    ) : s.weekly_projects_submitted > 0 ? (
+                                      `(${s.weekly_projects_submitted} sub)`
+                                    ) : ''}
+                                  </span>
+                                </div>
+                              ) : s.weekly_projects_submitted > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-blue-600">{s.weekly_projects_submitted} sub</span>
+                                  {s.weekly_projects_approved > 0 && (
+                                    <span className="block text-[10px] text-emerald-600 font-medium">({s.weekly_projects_approved} appr)</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-3 text-center font-semibold text-emerald-700">
+                              {s.weekly_xp_earned > 0 ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  +{s.weekly_xp_earned} XP
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-medium text-xs">0 XP</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
+                                </div>
+                                <span className="text-[11px] font-bold text-slate-700 w-8 text-right">{s.overall_subject_progress}%</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-slate-500 whitespace-nowrap text-[11px]">
+                              {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                s.engagement_status === 'Active'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-slate-100 text-slate-500 border border-slate-200'
+                              }`}>
+                                {s.engagement_status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {totalStudentPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
+                      <span className="text-center sm:text-left">
+                        Showing {(studentPage - 1) * studentPageSize + 1}–{Math.min(studentPage * studentPageSize, filteredStudents.length)} of {filteredStudents.length} students · page {studentPage} of {totalStudentPages}
+                      </span>
+                      <PaginationControls page={studentPage} totalPages={totalStudentPages} onPageChange={setStudentPage} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -30,6 +30,8 @@ router.get('/analytics/assignments', facilitatorController.getAssignmentAnalytic
 router.get('/analytics/projects', facilitatorController.getProjectAnalytics);
 router.get('/analytics/module-projects', facilitatorController.getAnalyticsModuleProjects);
 router.get('/analytics/batch', facilitatorController.getBatchDashboard);
+router.get('/analytics/batch-report', facilitatorController.getBatchActivityReport);
+router.get('/analytics/batch-report/export', facilitatorController.exportBatchActivityReport);
 router.get('/analytics/students', facilitatorController.getStudentAnalytics);
 
 module.exports = router;
