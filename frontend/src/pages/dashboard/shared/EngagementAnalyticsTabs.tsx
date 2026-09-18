@@ -1418,7 +1418,11 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
     try {
       const escapeCsv = (val: unknown) => {
         if (val === null || val === undefined) return '';
-        const str = String(val);
+        let str = String(val);
+        // Neutralize spreadsheet formula execution (=, +, -, @, tabs, carriage returns)
+        if (/^[=+\-@\t\r]/.test(str)) {
+          str = `'${str}`;
+        }
         if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
           return `"${str.replace(/"/g, '""')}"`;
         }

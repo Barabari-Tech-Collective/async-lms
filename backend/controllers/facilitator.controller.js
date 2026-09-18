@@ -3,6 +3,8 @@ const pool = require('../config/pg');
 const { logAction } = require('../utils/auditLogger');
 const { calculateSubjectProgress } = require('../utils/progress');
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Get Facilitator Scoped Stats
  */
@@ -707,7 +709,7 @@ exports.getFacilitatorColleges = async (req, res) => {
 // ─── Analytics helpers ────────────────────────────────────────────────────────
 
 async function getFacilitatorCollegeIds(facilitatorId, requestedCollegeId, role) {
-  const isSpecificCollege = requestedCollegeId && requestedCollegeId !== 'all' && requestedCollegeId.trim() !== '';
+  const isSpecificCollege = requestedCollegeId && requestedCollegeId !== 'all' && requestedCollegeId.trim() !== '' && UUID_RE.test(requestedCollegeId.trim());
   if (role === 'admin') {
     if (isSpecificCollege) return [requestedCollegeId.trim()];
     const allRes = await pool.query('SELECT id AS college_id FROM colleges');
@@ -734,7 +736,7 @@ async function getEnrolledStudentIds(collegeIds, batch, subjectId, facilitatorSu
   let subjectClause = '';
 
   const hasSpecificBatch = batch && batch !== 'all' && batch.trim() !== '';
-  const hasSpecificSubject = subjectId && subjectId !== 'all' && subjectId.trim() !== '';
+  const hasSpecificSubject = subjectId && subjectId !== 'all' && subjectId.trim() !== '' && UUID_RE.test(subjectId.trim());
 
   if (hasSpecificBatch) {
     if (batch === 'unknown') {
@@ -817,11 +819,11 @@ exports.getAnalyticsSubjects = async (req, res) => {
 exports.getAnalyticsTopics = async (req, res) => {
   try {
     const { subject_id } = req.query;
-    if (!subject_id) return res.json({ success: true, data: [] });
+    if (!subject_id || subject_id === 'all' || !UUID_RE.test(subject_id.trim())) return res.json({ success: true, data: [] });
 
     const { rows } = await pool.query(
       `SELECT id, title as name FROM topics WHERE subject_id = $1::uuid ORDER BY order_index, title`,
-      [subject_id]
+      [subject_id.trim()]
     );
     res.json({ success: true, data: rows });
   } catch (err) {
@@ -832,7 +834,7 @@ exports.getAnalyticsTopics = async (req, res) => {
 exports.getAnalyticsQuizzes = async (req, res) => {
   try {
     const { topic_id } = req.query;
-    if (!topic_id || topic_id === 'all' || topic_id.trim() === '') return res.json({ success: true, data: [] });
+    if (!topic_id || topic_id === 'all' || topic_id.trim() === '' || !UUID_RE.test(topic_id.trim())) return res.json({ success: true, data: [] });
 
     const isFacilitator = req.user.role === 'facilitator';
     const subjectIds = req.user.subject_ids || [];
@@ -863,7 +865,7 @@ exports.getAnalyticsQuizzes = async (req, res) => {
 exports.getCourseAssignments = async (req, res) => {
   try {
     const { topic_id } = req.query;
-    if (!topic_id || topic_id === 'all' || topic_id.trim() === '') return res.json({ success: true, data: [] });
+    if (!topic_id || topic_id === 'all' || topic_id.trim() === '' || !UUID_RE.test(topic_id.trim())) return res.json({ success: true, data: [] });
 
     const isFacilitator = req.user.role === 'facilitator';
     const subjectIds = req.user.subject_ids || [];
@@ -894,7 +896,7 @@ exports.getCourseAssignments = async (req, res) => {
 exports.getAnalyticsModuleProjects = async (req, res) => {
   try {
     const { topic_id } = req.query;
-    if (!topic_id || topic_id === 'all' || topic_id.trim() === '') return res.json({ success: true, data: [] });
+    if (!topic_id || topic_id === 'all' || topic_id.trim() === '' || !UUID_RE.test(topic_id.trim())) return res.json({ success: true, data: [] });
 
     const isFacilitator = req.user.role === 'facilitator';
     const subjectIds = req.user.subject_ids || [];
@@ -935,9 +937,9 @@ exports.getQuizAnalytics = async (req, res) => {
 
     const { college_id, batch, subject_id, topic_id, quiz_id, page, limit } = req.query;
 
-    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '';
-    const hasSpecificTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '';
-    const hasSpecificQuiz = quiz_id && quiz_id !== 'all' && quiz_id.trim() !== '';
+    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+    const hasSpecificTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '' && UUID_RE.test(topic_id.trim());
+    const hasSpecificQuiz = quiz_id && quiz_id !== 'all' && quiz_id.trim() !== '' && UUID_RE.test(quiz_id.trim());
 
     if (isFacilitator && hasSpecificSubject && !subjectIds.includes(subject_id.trim())) {
       return res.json({ success: true, data: emptyQuizData() });
@@ -1208,11 +1210,14 @@ exports.getAssignmentAnalytics = async (req, res) => {
       }
     }
 
+    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+    const hasSpecificAssignment = assignment_id && assignment_id !== 'all' && assignment_id.trim() !== '' && UUID_RE.test(assignment_id.trim());
+
     let subjectJoin = '';
     let subjectClause = '';
-    if (subject_id) {
+    if (hasSpecificSubject) {
       subjectJoin = 'JOIN user_subjects us ON us.user_id = sp.user_id';
-      params.push(subject_id);
+      params.push(subject_id.trim());
       subjectClause = `AND us.subject_id = $${params.length}::uuid`;
     } else if (isFacilitator) {
       subjectJoin = 'JOIN user_subjects us ON us.user_id = sp.user_id';
@@ -1233,17 +1238,17 @@ exports.getAssignmentAnalytics = async (req, res) => {
 
     const studentIds = students.map((s) => s.id);
     let submittedIds = new Set();
-    if (assignment_id) {
+    if (hasSpecificAssignment) {
       if (assignment_type === 'course') {
         const subRes = await pool.query(
-          `SELECT user_id as student_id FROM assignment_submissions WHERE assignment_id = $1`,
-          [assignment_id]
+          `SELECT user_id as student_id FROM assignment_submissions WHERE assignment_id = $1::uuid`,
+          [assignment_id.trim()]
         );
         submittedIds = new Set(subRes.rows.map((r) => r.student_id));
       } else {
         const subRes = await pool.query(
-          `SELECT student_id FROM college_assignment_submissions WHERE assignment_id = $1`,
-          [assignment_id],
+          `SELECT student_id FROM college_assignment_submissions WHERE assignment_id = $1::uuid`,
+          [assignment_id.trim()],
         );
         submittedIds = new Set(subRes.rows.map((r) => r.student_id));
       }
@@ -1253,8 +1258,8 @@ exports.getAssignmentAnalytics = async (req, res) => {
       // "Assignments Submitted" aggregate — keeps the two views consistent.
       const courseParams = [studentIds];
       let courseSubjectClause = '';
-      if (subject_id) {
-        courseParams.push(subject_id);
+      if (hasSpecificSubject) {
+        courseParams.push(subject_id.trim());
         courseSubjectClause = `AND t.subject_id = $${courseParams.length}::uuid`;
       } else if (isFacilitator) {
         courseParams.push(subjectIds);
@@ -1330,7 +1335,11 @@ exports.getProjectAnalytics = async (req, res) => {
 
     const { college_id, batch, subject_id, topic_id, project_id, page, limit } = req.query;
 
-    if (isFacilitator && subject_id && !subjectIds.includes(subject_id)) {
+    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+    const hasSpecificTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '' && UUID_RE.test(topic_id.trim());
+    const hasSpecificProject = project_id && project_id !== 'all' && project_id.trim() !== '' && UUID_RE.test(project_id.trim());
+
+    if (isFacilitator && hasSpecificSubject && !subjectIds.includes(subject_id.trim())) {
       return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
     }
     
@@ -1340,7 +1349,7 @@ exports.getProjectAnalytics = async (req, res) => {
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
     if (!colleges.length) return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
 
-    const enrolledIds = await getEnrolledStudentIds(colleges, batch, subject_id, isFacilitator ? subjectIds : null);
+    const enrolledIds = await getEnrolledStudentIds(colleges, batch, hasSpecificSubject ? subject_id.trim() : null, isFacilitator ? subjectIds : null);
     if (!enrolledIds.length) return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
 
     // Get student names
@@ -1354,16 +1363,16 @@ exports.getProjectAnalytics = async (req, res) => {
     let psJoin = '';
     let psClause = '';
     
-    if (project_id) {
-      psParams.push(project_id);
+    if (hasSpecificProject) {
+      psParams.push(project_id.trim());
       psClause = `AND ps.project_id = $${psParams.length}::uuid`;
-    } else if (topic_id) {
+    } else if (hasSpecificTopic) {
       psJoin = 'JOIN projects p ON p.id = ps.project_id';
-      psParams.push(topic_id);
+      psParams.push(topic_id.trim());
       psClause = `AND p.topic_id = $${psParams.length}::uuid`;
-    } else if (subject_id) {
+    } else if (hasSpecificSubject) {
       psJoin = 'JOIN projects p ON p.id = ps.project_id JOIN topics t ON t.id = p.topic_id';
-      psParams.push(subject_id);
+      psParams.push(subject_id.trim());
       psClause = `AND t.subject_id = $${psParams.length}::uuid`;
     } else if (isFacilitator) {
       psJoin = 'JOIN projects p ON p.id = ps.project_id JOIN topics t ON t.id = p.topic_id';
@@ -1703,35 +1712,42 @@ async function fetchBatchActivityReportData(req) {
     case '30d':
       startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       break;
-    case 'custom':
-      startDate = start_date ? new Date(start_date) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      endDate = end_date ? new Date(new Date(end_date).setHours(23, 59, 59, 999)) : now;
+    case 'custom': {
+      const parsedStart = start_date ? new Date(start_date) : null;
+      const parsedEnd = end_date ? new Date(end_date) : null;
+      startDate = (parsedStart && !Number.isNaN(parsedStart.getTime()))
+        ? parsedStart
+        : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      endDate = (parsedEnd && !Number.isNaN(parsedEnd.getTime()))
+        ? new Date(new Date(parsedEnd).setHours(23, 59, 59, 999))
+        : now;
       break;
+    }
     case '7d':
     default:
       startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       break;
   }
 
-  // Fetch subject metadata if subject_id passed
+  // Fetch subject metadata if valid subject_id passed
   let subjectName = 'All Subjects';
-  if (subject_id && subject_id !== 'all') {
-    const sNameRes = await pool.query('SELECT name FROM subjects WHERE id = $1::uuid', [subject_id]);
+  if (subject_id && subject_id !== 'all' && UUID_RE.test(String(subject_id).trim())) {
+    const sNameRes = await pool.query('SELECT name FROM subjects WHERE id = $1::uuid', [String(subject_id).trim()]);
     if (sNameRes.rows.length) subjectName = sNameRes.rows[0].name;
   }
 
-  // Fetch college name if college_id passed
+  // Fetch college name if valid college_id passed
   let collegeName = 'All Colleges';
-  if (college_id && college_id !== 'all') {
-    const cNameRes = await pool.query('SELECT name FROM colleges WHERE id = $1::uuid', [college_id]);
+  if (college_id && college_id !== 'all' && UUID_RE.test(String(college_id).trim())) {
+    const cNameRes = await pool.query('SELECT name FROM colleges WHERE id = $1::uuid', [String(college_id).trim()]);
     if (cNameRes.rows.length) collegeName = cNameRes.rows[0].name;
   }
 
   // Build subject scoping clauses for activity queries
   let sClause = '';
   const sParams = [enrolledIds, startDate, endDate];
-  if (subject_id && subject_id !== 'all') {
-    sParams.push(subject_id);
+  if (subject_id && subject_id !== 'all' && UUID_RE.test(String(subject_id).trim())) {
+    sParams.push(String(subject_id).trim());
     sClause = `AND t.subject_id = $${sParams.length}::uuid`;
   } else if (isFacilitator && subjectIds.length > 0) {
     sParams.push(subjectIds);
@@ -1791,8 +1807,15 @@ async function fetchBatchActivityReportData(req) {
 
   // 4. Assignments submitted (curriculum + college assignments)
   let caSubjClause = '';
-  if (subject_id && subject_id !== 'all') {
-    caSubjClause = `AND (ca.course = '${subject_id}' OR ca.course IN (SELECT slug FROM subjects WHERE id = '${subject_id}'::uuid))`;
+  const asgParams = [...sParams];
+  if (subject_id && subject_id !== 'all' && UUID_RE.test(String(subject_id).trim())) {
+    asgParams.push(String(subject_id).trim());
+    const paramIdx = asgParams.length;
+    caSubjClause = `AND (ca.course = $${paramIdx} OR ca.course IN (SELECT slug FROM subjects WHERE id = $${paramIdx}::uuid))`;
+  } else if (isFacilitator && subjectIds.length > 0) {
+    asgParams.push(subjectIds);
+    const paramIdx = asgParams.length;
+    caSubjClause = `AND (ca.course = ANY($${paramIdx}::text[]) OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($${paramIdx}::uuid[])))`;
   }
   const asgRes = await pool.query(
     `SELECT user_id, COUNT(DISTINCT assignment_id)::int AS assignments_submitted
@@ -1817,7 +1840,7 @@ async function fetchBatchActivityReportData(req) {
          ${caSubjClause}
      ) combined_asg
      GROUP BY user_id`,
-    sParams,
+    asgParams,
   );
   const asgMap = new Map(asgRes.rows.map((r) => [r.user_id, r.assignments_submitted]));
 
@@ -1917,7 +1940,9 @@ async function fetchBatchActivityReportData(req) {
   const lastActiveMap = new Map(activityRes.rows.map((r) => [r.user_id, r.last_active_at]));
 
   // 8. Fetch student base details
-  const targetSubjId = subject_id && subject_id !== 'all' ? subject_id : null;
+  const targetSubjId = subject_id && subject_id !== 'all' && UUID_RE.test(String(subject_id).trim())
+    ? String(subject_id).trim()
+    : null;
   const progressSelect = targetSubjId
     ? `COALESCE((SELECT progress_percent FROM user_subjects WHERE user_id = u.id AND subject_id = $2::uuid LIMIT 1), 0)`
     : `COALESCE((SELECT ROUND(AVG(progress_percent))::int FROM user_subjects WHERE user_id = u.id), 0)`;
@@ -2007,13 +2032,13 @@ async function fetchBatchActivityReportData(req) {
     };
   });
 
-  // Apply search query filter if provided
+  // Apply search query filter if provided (with null safety)
   if (search && search.trim()) {
     const q = search.trim().toLowerCase();
     students = students.filter((s) =>
-      s.full_name.toLowerCase().includes(q) ||
-      s.email.toLowerCase().includes(q) ||
-      s.batch.toLowerCase().includes(q),
+      (s.full_name || '').toLowerCase().includes(q) ||
+      (s.email || '').toLowerCase().includes(q) ||
+      (s.batch || '').toLowerCase().includes(q),
     );
   }
 
@@ -2085,7 +2110,11 @@ exports.exportBatchActivityReport = async (req, res) => {
 
     const escapeCsv = (val) => {
       if (val === null || val === undefined) return '';
-      const str = String(val);
+      let str = String(val);
+      // Neutralize spreadsheet formula execution (=, +, -, @, tabs, carriage returns)
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = `'${str}`;
+      }
       if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
         return `"${str.replace(/"/g, '""')}"`;
       }
@@ -2366,25 +2395,28 @@ exports.getStudentAnalytics = async (req, res) => {
     let pParams = [enrolledIds];
     let pTopicClause = '';
     
-    if (topic_id) {
-      pParams.push(topic_id);
+    const hasSpecificTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '' && UUID_RE.test(topic_id.trim());
+    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+
+    if (hasSpecificTopic) {
+      pParams.push(topic_id.trim());
       pTopicClause = `AND t.id = $${pParams.length}::uuid`;
       const totalRes = await pool.query(`
         SELECT COUNT(DISTINCT p.id)::int as total 
         FROM projects p
         WHERE p.topic_id = $1::uuid
-      `, [topic_id]);
+      `, [topic_id.trim()]);
       const total = totalRes.rows[0].total || 0;
       enrolledIds.forEach(id => expectedProjMap.set(id, total));
-    } else if (subject_id) {
-      pParams.push(subject_id);
+    } else if (hasSpecificSubject) {
+      pParams.push(subject_id.trim());
       pTopicClause = `AND t.subject_id = $${pParams.length}::uuid`;
       const totalRes = await pool.query(`
         SELECT COUNT(DISTINCT p.id)::int as total 
         FROM projects p
         JOIN topics t ON t.id = p.topic_id
         WHERE t.subject_id = $1::uuid
-      `, [subject_id]);
+      `, [subject_id.trim()]);
       const total = totalRes.rows[0].total || 0;
       enrolledIds.forEach(id => expectedProjMap.set(id, total));
     } else {
