@@ -72,6 +72,15 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
   const [bottomTab, setBottomTab] = useState<'terminal' | 'feedback'>('terminal');
   const [feedbackOutput, setFeedbackOutput] = useState<string>('No submissions yet. Click "Submit" to grade your work.');
 
+  // Clean up object URL when component unmounts
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   // Intelligently detect if this exercise is a DOM / HTML / Web preview environment
   const isDomEnvironment = useMemo(() => {
     const lang = (exercise?.language || '').toLowerCase();
@@ -503,7 +512,12 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
     try {
       const blob = new Blob([combined], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
+      setPreviewUrl((prevUrl) => {
+        if (prevUrl) {
+          URL.revokeObjectURL(prevUrl);
+        }
+        return url;
+      });
     } catch {}
 
     // Broadcast the changes to the external tab if it is open

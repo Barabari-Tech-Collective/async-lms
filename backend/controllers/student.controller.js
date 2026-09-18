@@ -1,12 +1,16 @@
 const serverError = require('../utils/serverError');
 const crypto = require('crypto');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/pg');
 const { logAction } = require('../utils/auditLogger');
 const { notify } = require('../services/notificationService');
 const { getTotalXP } = require('../services/xpService');
 const { calculateSubjectProgress, syncUserSubjectProgress } = require('../utils/progress');
 const { presignS3Url } = require('../utils/s3');
+
+const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 // ============================================
 // HELPERS
 // ============================================
@@ -1013,6 +1017,49 @@ async function loadAccessibleExercise(userId, exerciseId) {
 }
 
 /**
+ * Resolves a safe, canonical workspace directory within WORKSPACE_ROOT.
+ * Enforces strict alphanumeric/uuid checks on exerciseId and taskId to prevent path traversal.
+ */
+function getSafeWorkspaceDir(userId, exerciseId, taskId) {
+  const safeTaskId = taskId && /^[a-zA-Z0-9_-]+$/.test(String(taskId)) ? String(taskId) : null;
+  const safeExerciseId = /^[a-zA-Z0-9_-]+$/.test(String(exerciseId)) ? String(exerciseId) : 'default';
+  const projectId = safeTaskId
+    ? `exercise-${safeExerciseId}-task-${safeTaskId}`
+    : `exercise-${safeExerciseId}`;
+  return path.resolve(WORKSPACE_ROOT, String(userId), projectId);
+}
+
+/**
+ * Persists student workspace files safely with jail boundary enforcement.
+ * Rejects path traversal sequences (..), null bytes, and writes outside the workspace root.
+ */
+function saveStudentFilesSafely(workspaceDir, files) {
+  if (!files || !Array.isArray(files)) return;
+  const resolvedWorkspace = path.resolve(workspaceDir);
+  fs.mkdirSync(resolvedWorkspace, { recursive: true });
+
+  for (const file of files) {
+    const rawName = file.name || file.path;
+    if (typeof rawName !== 'string' || typeof file.content !== 'string') continue;
+    if (rawName.includes('\0')) {
+      throw new ExerciseAccessError(400, 'Security Error: Invalid file name');
+    }
+
+    // Normalize path and strip leading traversal dots
+    const normalizedPath = path.normalize(rawName).replace(/^(\.\.[\/\\])+/, '');
+    const filePath = path.resolve(resolvedWorkspace, normalizedPath);
+
+    // Enforce jail boundary: filePath must strictly reside inside resolvedWorkspace
+    if (!filePath.startsWith(resolvedWorkspace + path.sep) && filePath !== resolvedWorkspace) {
+      throw new ExerciseAccessError(400, 'Security Error: Path traversal attempt detected');
+    }
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, file.content, 'utf-8');
+  }
+}
+
+/**
  * Local semantic DOM / HTML evaluator fallback.
  * Evaluates standard HTML5 structure and semantic elements directly
  * when the central evaluator service is offline or unreachable.
@@ -1281,30 +1328,19 @@ exports.submitExercise = async (req, res) => {
         (files && Array.isArray(files) && files.some((f) => (f.name || f.path || '').endsWith('.html') || (f.name || f.path || '').endsWith('.htm')));
 
       if (isDomLike) {
-        // Direct pass for HTML/DOM exercises without central evaluator overhead
+        // Direct local evaluation for HTML/DOM exercises without central evaluator overhead
+        const workspaceDir = getSafeWorkspaceDir(userId, exerciseId, taskId);
         try {
-          const projectId = taskId
-            ? `exercise-${exerciseId}-task-${taskId}`
-            : `exercise-${exerciseId}`;
-          const workspaceDir = path.join(WORKSPACE_ROOT, String(userId), projectId);
-          fs.mkdirSync(workspaceDir, { recursive: true });
-          for (const file of files) {
-            const fileName = file.name || file.path;
-            if (fileName && typeof file.content === 'string') {
-              const filePath = path.join(workspaceDir, fileName);
-              fs.mkdirSync(path.dirname(filePath), { recursive: true });
-              fs.writeFileSync(filePath, file.content, 'utf-8');
-            }
-          }
+          saveStudentFilesSafely(workspaceDir, files);
         } catch (e) {
+          if (e instanceof ExerciseAccessError) throw e;
           console.warn('[submitExercise] Could not persist workspace files:', e.message);
         }
 
-        score = null;
-        isExplicitPassed = true;
-        testResults = {
-          feedback: 'Successfully submitted.',
-        };
+        const localEval = evaluateDomLocally(files, exercise);
+        score = localEval.score;
+        testResults = localEval.testResults;
+        isExplicitPassed = score >= (exercise.max_score || 100) * 0.6;
       } else {
         const evalTypeMap = {
           dom: 'visual',
@@ -1387,10 +1423,10 @@ exports.submitExercise = async (req, res) => {
       if (!evalResponse) {
         // Central evaluator service is offline or unreachable
         if (exercise.language === 'dom' || evaluatorType === 'visual') {
-          console.log(`[Exercise Submit] Central evaluator offline; evaluating HTML/DOM locally.`);
           const localEval = evaluateDomLocally(files, exercise);
           score = localEval.score;
           testResults = localEval.testResults;
+          isExplicitPassed = score >= (exercise.max_score || 100) * 0.6;
         } else {
           throw new ExerciseAccessError(
             503,
@@ -1610,23 +1646,11 @@ exports.submitExercise = async (req, res) => {
 } else {
   // Practice / open-ended exercise without formal test suite or rubric:
   // Save student files to workspace and award completion credit
+  const workspaceDir = getSafeWorkspaceDir(userId, exerciseId, taskId);
   try {
-    const projectId = taskId
-      ? `exercise-${exerciseId}-task-${taskId}`
-      : `exercise-${exerciseId}`;
-    const workspaceDir = path.join(WORKSPACE_ROOT, String(userId), projectId);
-    fs.mkdirSync(workspaceDir, { recursive: true });
-    if (files && Array.isArray(files)) {
-      for (const file of files) {
-        const fileName = file.name || file.path;
-        if (fileName && typeof file.content === 'string') {
-          const filePath = path.join(workspaceDir, fileName);
-          fs.mkdirSync(path.dirname(filePath), { recursive: true });
-          fs.writeFileSync(filePath, file.content, 'utf-8');
-        }
-      }
-    }
+    saveStudentFilesSafely(workspaceDir, files);
   } catch (e) {
+    if (e instanceof ExerciseAccessError) throw e;
     console.warn('[submitExercise] Could not persist workspace files:', e.message);
   }
 
@@ -1716,11 +1740,7 @@ exports.submitExercise = async (req, res) => {
 // EXERCISE WORKSPACE
 // ============================================
 
-const fs = require('fs');
-const path = require('path');
 const runnerService = require('../services/runnerService');
-
-const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 
 const {
   runTests,

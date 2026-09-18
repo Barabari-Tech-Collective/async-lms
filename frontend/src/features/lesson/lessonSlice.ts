@@ -288,6 +288,14 @@ const lessonSlice = createSlice({
         state.status = 'succeeded';
         state.data = action.payload;
         state.lessonCompleted = false; // Exercises are not subtopic lessons
+        state.passedExercises = {};
+        if (action.payload.exercises && Array.isArray(action.payload.exercises)) {
+          action.payload.exercises.forEach((ex: any) => {
+            if (ex.is_completed) {
+              state.passedExercises[ex.id] = true;
+            }
+          });
+        }
       })
       .addCase(fetchExercise.rejected, (state, action) => {
         state.status = 'failed';

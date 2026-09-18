@@ -986,6 +986,18 @@ exports.getExerciseContent = async (req, res) => {
       }
     }
 
+    const userId = req.user?.id;
+    let isCompleted = false;
+    if (userId) {
+      const subCheck = await pool.query(
+        `SELECT 1 FROM exercise_submissions
+         WHERE exercise_id = $1 AND user_id = $2 AND is_passed = true
+         LIMIT 1`,
+        [exerciseId, userId],
+      );
+      isCompleted = subCheck.rows.length > 0;
+    }
+
     res.json({
       success: true,
       data: {
@@ -1019,6 +1031,7 @@ exports.getExerciseContent = async (req, res) => {
               initial_files: row.exercise_initial_files,
               test_cases: publicTestCases(row.exercise_test_cases),
               tasks: publicTasks(row.exercise_tasks),
+              is_completed: isCompleted,
             };
           })(),
         ],
