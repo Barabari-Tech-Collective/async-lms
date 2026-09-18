@@ -99,6 +99,7 @@ export interface Exercise {
   test_cases?: TestCase[];
   tasks?: ExerciseTask[];
   rubric?: any;
+  is_completed?: boolean;
 }
 
 export interface CollegeAssignment {

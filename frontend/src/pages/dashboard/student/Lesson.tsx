@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { CheckCircle2, XCircle, Award, TrendingUp } from 'lucide-react';
+import { CheckCircle2, XCircle, Award, TrendingUp, Lock } from 'lucide-react';
 import EmbeddedIDE from '@/components/common/EmbeddedIDE';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
-import { fireConfetti } from '@/lib/confetti';
+import { fireConfetti, fireCelebrationBoom } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 
 import LessonAssistant from '@/components/common/LessonAssistant';
@@ -66,6 +66,7 @@ const Lesson = () => {
     quizResults,
     submittingQuiz,
     submittingExercise,
+    passedExercises,
     lessonCompleted,
   } = useAppSelector((state) => state.lesson);
 
@@ -200,6 +201,20 @@ const Lesson = () => {
   }, [courseStructure, subtopicSlug, exerciseId, quizId]);
 
   /* =======================
+     Exercise Completion Gating
+  ======================= */
+  const lessonExercises = data?.exercises;
+  const hasExercises = Boolean(lessonExercises && lessonExercises.length > 0);
+  const allExercisesPassed = useMemo(() => {
+    if (!hasExercises || !lessonExercises) return true;
+    return lessonExercises.every(
+      (ex) => ex.is_completed || passedExercises?.[ex.id],
+    );
+  }, [hasExercises, lessonExercises, passedExercises]);
+
+  const canMarkComplete = !hasExercises || allExercisesPassed;
+
+  /* =======================
      Lesson Completion
   ======================= */
 
@@ -298,7 +313,17 @@ const Lesson = () => {
     if (submittingExercise[exerciseId]) return; // prevent double-submit
     try {
       const result = await dispatch(submitExercise({ exerciseId, files, taskId })).unwrap();
-      toast.success('Exercise submitted! 🎉');
+      if (result.isPassed) {
+        fireCelebrationBoom(160);
+        const hasRubric = Array.isArray(result?.testResults?.rubric_breakdown) && result.testResults.rubric_breakdown.length > 0;
+        if (hasRubric) {
+          toast.success('🎉 Exercise passed with flying colors! Great work!');
+        } else {
+          toast.success('Successfully submitted ✅');
+        }
+      } else {
+        toast.error('Test cases failed. Review the results below and try again!');
+      }
       notifyCourseProgressUpdated();
       return result;
     } catch (error) {
@@ -351,7 +376,8 @@ const Lesson = () => {
     );
   }
 
-  const { subtopic, lesson, quizzes, exercises } = data;
+  const { subtopic, lesson, quizzes } = data;
+  const exercises = lessonExercises || [];
   const hasMarkdown = Boolean(lesson.markdown_content);
 
   return (
@@ -361,7 +387,7 @@ const Lesson = () => {
       {/* Header */}
       <header className='space-y-3 sm:space-y-4'>
         <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
-          <h1 className='text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900'>
+          <h1 className='text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 break-words'>
             {subtopic.title}
           </h1>
           {lessonCompleted && (
@@ -578,7 +604,7 @@ const Lesson = () => {
                                 return (
                                   <label
                                     key={option.id}
-                                    className={`flex items-center gap-3 rounded-lg border p-3 text-sm transition-colors ${
+                                    className={`flex items-start sm:items-center gap-2.5 sm:gap-3 rounded-xl border p-3 text-xs sm:text-sm transition-colors min-h-[44px] ${
                                       !quizSubmitted
                                         ? `cursor-pointer ${
                                             isSelected
@@ -606,16 +632,16 @@ const Lesson = () => {
                                         )
                                       }
                                       disabled={quizSubmitted}
-                                      className='text-indigo-600'
+                                      className='text-indigo-600 mt-0.5 sm:mt-0 shrink-0'
                                     />
-                                    <span className='flex-1'>
+                                    <span className='flex-1 break-words'>
                                       {option.option_text}
                                     </span>
                                     {(isSelectedCorrect || isRevealedCorrect) && (
-                                      <CheckCircle2 className='h-4 w-4 text-green-600' />
+                                      <CheckCircle2 className='h-4 w-4 text-green-600 shrink-0' />
                                     )}
                                     {isSelectedWrong && (
-                                      <XCircle className='h-4 w-4 text-red-600' />
+                                      <XCircle className='h-4 w-4 text-red-600 shrink-0' />
                                     )}
                                   </label>
                                 );
@@ -800,11 +826,11 @@ const Lesson = () => {
                       );
                     })()}
 
-                    <div className='mt-6 flex gap-3'>
+                    <div className='mt-6 flex flex-col sm:flex-row gap-3'>
                       <Button
                         variant='outline'
                         onClick={handleRetakeQuiz}
-                        className={`flex-1 ${
+                        className={`w-full sm:flex-1 min-h-[44px] ${
                           isPassed
                             ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700'
                             : 'border-orange-300 text-orange-700 hover:bg-orange-100 hover:text-orange-700'
@@ -814,7 +840,7 @@ const Lesson = () => {
                       </Button>
                       {isPassed && slug && (
                         <Button
-                          className='flex-1 bg-emerald-600 hover:bg-emerald-700'
+                          className='w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 min-h-[44px]'
                           onClick={() => navigate(buildNextUrl(nextItem, slug))}
                         >
                           {nextItem ? 'Continue →' : 'Back to Course'}
@@ -844,18 +870,20 @@ const Lesson = () => {
               onSubmit={handleSubmitExercise}
             />
           ) : (
-            <Tabs defaultValue={exercises[0].id}>
-              <TabsList className='mb-4'>
-                {exercises.map((ex) => (
-                  <TabsTrigger
-                    key={ex.id}
-                    value={ex.id}
-                    className='max-w-40 truncate'
-                  >
-                    {ex.title}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+            <Tabs defaultValue={exercises[0].id} className='w-full'>
+              <div className='overflow-x-auto pb-2 -mb-2 no-scrollbar'>
+                <TabsList className='inline-flex w-auto max-w-full mb-4 shrink-0'>
+                  {exercises.map((ex) => (
+                    <TabsTrigger
+                      key={ex.id}
+                      value={ex.id}
+                      className='max-w-40 sm:max-w-56 truncate text-xs sm:text-sm min-h-[36px]'
+                    >
+                      {ex.title}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
               {exercises.map((ex) => (
                 <TabsContent key={ex.id} value={ex.id}>
                   <EmbeddedIDE
@@ -870,13 +898,13 @@ const Lesson = () => {
         </section>
       )}
 
-      {/* Completion banner & Mark as Read — shown after exercises */}
+      {/* Completion banner & Mark as Read / Finished — shown after exercises */}
       {lesson.content_type !== 'quiz' && (
-        <div className='flex justify-center pb-4'>
+        <div className='flex flex-col items-center justify-center pb-8 pt-2 gap-3 w-full px-2'>
           {lessonCompleted ? (
-            <div className='w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center'>
+            <div className='w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 sm:p-6 text-center shadow-xs'>
               <CheckCircle2 className='mx-auto mb-2 h-7 w-7 text-emerald-600' />
-              <p className='font-semibold text-emerald-800'>
+              <p className='font-semibold text-emerald-800 text-base sm:text-lg'>
                 {lesson.content_type === 'exercise'
                   ? 'Exercise Completed!'
                   : 'Lesson Completed!'}
@@ -884,23 +912,43 @@ const Lesson = () => {
               {nextItem && slug && (
                 <Button
                   variant='outline'
-                  className='mt-4 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700'
+                  className='mt-4 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700 font-semibold px-6 py-2.5 w-full sm:w-auto min-h-[44px]'
                   onClick={() => navigate(buildNextUrl(nextItem, slug))}
                 >
-                  Next {nextLabel(nextItem?.type || '')}
+                  Next {nextLabel(nextItem?.type || '')} →
                 </Button>
               )}
             </div>
           ) : data?.lesson?.id ? (
-            <Button
-              onClick={handleCompleteLesson}
-              loading={isCompleting || isNavigating}
-              size='lg'
-              className='bg-emerald-600 px-8 py-6 text-lg font-bold shadow-lg hover:bg-emerald-700 transition-all'
-            >
-              <CheckCircle2 className='mr-2 h-6 w-6' />
-              Mark as Read & Next
-            </Button>
+            <div className='flex flex-col items-center gap-2.5 w-full max-w-lg px-1 sm:px-2'>
+              <Button
+                onClick={handleCompleteLesson}
+                disabled={!canMarkComplete || isCompleting || isNavigating}
+                loading={isCompleting || isNavigating}
+                size='lg'
+                className={`w-full sm:w-auto min-h-[48px] sm:min-h-[56px] px-4 sm:px-8 py-3 sm:py-5 text-xs sm:text-base md:text-lg font-bold shadow-lg transition-all rounded-xl flex items-center justify-center text-center ${
+                  canMarkComplete
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer hover:shadow-emerald-500/25 ring-2 ring-emerald-400/30'
+                    : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                }`}
+              >
+                {canMarkComplete ? (
+                  <CheckCircle2 className='mr-2 h-4 w-4 sm:h-5 sm:w-5 shrink-0' />
+                ) : (
+                  <Lock className='mr-2 h-4 w-4 sm:h-5 sm:w-5 text-slate-400 shrink-0' />
+                )}
+                <span className='truncate'>
+                  {canMarkComplete
+                    ? 'Mark as Finished & Next →'
+                    : 'Complete Exercise Below to Unlock'}
+                </span>
+              </Button>
+              {!canMarkComplete && (
+                <p className='text-xs text-slate-500 font-medium text-center px-2 sm:px-4 leading-relaxed'>
+                  Pass all test cases in the coding exercise below to complete this module.
+                </p>
+              )}
+            </div>
           ) : null}
         </div>
       )}
