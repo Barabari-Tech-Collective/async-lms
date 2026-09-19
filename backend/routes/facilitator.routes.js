@@ -17,6 +17,7 @@ router.delete('/students/:id', facilitatorController.deleteStudent);
 router.post('/students/:id/restore', facilitatorController.restoreStudent);
 router.delete('/students/:id/permanent', facilitatorController.permanentDeleteStudent);
 router.get('/students/:id/modules', facilitatorController.getFacilitatorStudentModuleAnalytics);
+router.get('/students/:id/submissions', facilitatorController.getFacilitatorStudentSubmissions);
 router.patch('/students/:id/verify', verifyStudent);
 router.patch('/students/:id', editStudent);
 

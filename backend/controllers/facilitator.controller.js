@@ -2,6 +2,7 @@ const serverError = require('../utils/serverError');
 const pool = require('../config/pg');
 const { logAction } = require('../utils/auditLogger');
 const { calculateSubjectProgress } = require('../utils/progress');
+const { presignS3Url } = require('../utils/s3');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -524,6 +525,442 @@ exports.getFacilitatorStudentModuleAnalytics = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch module analytics' });
   }
 };
+
+/**
+ * Get detailed submissions and evaluations breakdown for a student (Assignments or Projects)
+ */
+exports.getFacilitatorStudentSubmissions = async (req, res) => {
+  try {
+    const { id: facilitatorId, role } = req.user;
+    const studentId = req.params.id;
+    const type = req.query.type === 'projects' ? 'projects' : 'assignments';
+    const { subject_id, topic_id } = req.query;
+
+    if (!studentId || !UUID_RE.test(studentId.trim())) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID' });
+    }
+
+    const isFacilitator = role !== 'admin';
+    const collegeIds = req.user.college_ids || [];
+    const subjectIds = (req.user.subject_ids || []).filter(id => id && UUID_RE.test(id));
+
+    // Verify student exists & get profile
+    const studentRes = await pool.query(
+      `SELECT u.id, u.full_name, u.email, sp.college_id, sp.year AS batch, sp.degree, c.name AS college_name
+       FROM users u
+       LEFT JOIN student_profiles sp ON u.id = sp.user_id
+       LEFT JOIN colleges c ON c.id = sp.college_id
+       WHERE u.id = $1 AND u.deleted_at IS NULL`,
+      [studentId.trim()]
+    );
+
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    const student = studentRes.rows[0];
+
+    // Authorization check for facilitators
+    if (isFacilitator && collegeIds.length > 0 && student.college_id) {
+      if (!collegeIds.includes(student.college_id)) {
+        return res.status(403).json({ success: false, message: 'Access denied: student belongs to another institution' });
+      }
+    }
+
+    const parseFeedback = (feedback) => {
+      if (!feedback) return null;
+      if (typeof feedback === 'object') return feedback;
+      try {
+        const parsed = JSON.parse(feedback);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
+          try {
+            const inner = JSON.parse(parsed.summary);
+            if (inner && typeof inner === 'object') {
+              return { ...parsed, ...inner };
+            }
+          } catch {}
+        }
+        return parsed;
+      } catch {
+        return { summary: String(feedback) };
+      }
+    };
+
+    if (type === 'projects') {
+      const projParams = [studentId.trim()];
+      let projFilters = '';
+
+      if (topic_id && UUID_RE.test(topic_id.trim())) {
+        projParams.push(topic_id.trim());
+        projFilters += ` AND p.topic_id = $${projParams.length}::uuid`;
+      } else if (subject_id && UUID_RE.test(subject_id.trim())) {
+        projParams.push(subject_id.trim());
+        projFilters += ` AND t.subject_id = $${projParams.length}::uuid`;
+      } else if (isFacilitator && subjectIds.length > 0) {
+        projParams.push(subjectIds);
+        projFilters += ` AND t.subject_id = ANY($${projParams.length}::uuid[])`;
+      }
+
+      const query = `
+        SELECT 
+          p.id,
+          p.title,
+          'PROJECT' AS item_type,
+          s.name AS subject_name,
+          s.slug AS subject_slug,
+          t.title AS topic_title,
+          COALESCE(p.max_score, 100)::int AS max_score,
+          p.created_at,
+          ps.id AS submission_id,
+          ps.submission_link,
+          ps.submitted_at,
+          ps.score AS ps_score,
+          ps.is_approved,
+          ps.rubric_breakdown AS ps_rubric_breakdown,
+          er.id AS evaluation_result_id,
+          er.status AS evaluation_status,
+          er.marks AS er_marks,
+          er.feedback AS er_feedback
+        FROM projects p
+        INNER JOIN topics t ON p.topic_id = t.id
+        INNER JOIN subjects s ON t.subject_id = s.id
+        LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+        LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+        LEFT JOIN LATERAL (
+          SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback
+          FROM evaluation_results er_inner
+          WHERE er_inner.submission_id = ps.id
+          ORDER BY er_inner.created_at DESC
+          LIMIT 1
+        ) er ON true
+        WHERE (p.is_deleted = false OR p.is_deleted IS NULL)
+          ${projFilters}
+        ORDER BY s.name, t.order_index, p.id
+      `;
+
+      const result = await pool.query(query, projParams);
+
+      const items = [];
+      for (const row of result.rows) {
+        const isSubmitted = Boolean(row.submission_link || row.submitted_at);
+        const maxScore = Number(row.max_score) || 100;
+        let score = null;
+        if (row.er_marks !== null && row.er_marks !== undefined) {
+          score = Number(row.er_marks);
+        } else if (row.ps_score !== null && row.ps_score !== undefined) {
+          score = Number(row.ps_score);
+        }
+
+        let status = 'not_started';
+        if (isSubmitted) {
+          if (score !== null) {
+            const pct = maxScore > 0 ? (score / maxScore) * 100 : 0;
+            status = pct >= 60 ? 'passed' : 'failed';
+          } else {
+            status = 'submitted';
+          }
+        }
+
+        let submissionLink = row.submission_link;
+        if (submissionLink) {
+          try {
+            submissionLink = await presignS3Url(submissionLink);
+          } catch {}
+        }
+
+        const rawFeedback = row.er_feedback || row.ps_rubric_breakdown;
+
+        items.push({
+          id: row.id,
+          title: row.title,
+          item_type: 'project',
+          subject_name: row.subject_name,
+          topic_title: row.topic_title,
+          max_score: maxScore,
+          score,
+          status,
+          is_approved: Boolean(row.is_approved),
+          submitted_at: row.submitted_at,
+          submission_link: submissionLink,
+          evaluation_status: row.evaluation_status,
+          feedback: parseFeedback(rawFeedback)
+        });
+      }
+
+      const total = items.length;
+      const attemptedItems = items.filter(i => i.status !== 'not_started');
+      const attempted = attemptedItems.length;
+      const passed = items.filter(i => i.status === 'passed').length;
+      const failed = items.filter(i => i.status === 'failed').length;
+      const scoredItems = items.filter(i => i.score !== null);
+      const avgScorePct = scoredItems.length > 0
+        ? Math.round(scoredItems.reduce((sum, i) => sum + ((i.score / i.max_score) * 100), 0) / scoredItems.length)
+        : 0;
+
+      return res.json({
+        success: true,
+        student: {
+          id: student.id,
+          name: student.full_name,
+          email: student.email,
+          college_name: student.college_name,
+          batch: student.batch,
+          degree: student.degree
+        },
+        metrics: {
+          total,
+          attempted,
+          passed,
+          failed,
+          avg_score_pct: avgScorePct
+        },
+        items
+      });
+    }
+
+    // Otherwise: type === 'assignments'
+    // 1. Curriculum assignments
+    const currParams = [studentId.trim()];
+    let currFilters = '';
+    if (topic_id && UUID_RE.test(topic_id.trim())) {
+      currParams.push(topic_id.trim());
+      currFilters += ` AND t.id = $${currParams.length}::uuid`;
+    } else if (subject_id && UUID_RE.test(subject_id.trim())) {
+      currParams.push(subject_id.trim());
+      currFilters += ` AND t.subject_id = $${currParams.length}::uuid`;
+    } else if (isFacilitator && subjectIds.length > 0) {
+      currParams.push(subjectIds);
+      currFilters += ` AND t.subject_id = ANY($${currParams.length}::uuid[])`;
+    }
+
+    const currQuery = `
+      SELECT 
+        a.id,
+        a.title,
+        'CURRICULUM' AS assignment_type,
+        s.name AS subject_name,
+        s.slug AS subject_slug,
+        t.title AS topic_title,
+        u.title AS unit_title,
+        COALESCE(a.max_score, 100)::int AS max_score,
+        a.created_at,
+        sub.id AS submission_id,
+        sub.submission_link,
+        sub.submitted_at,
+        sub.score AS sub_score,
+        er.id AS evaluation_result_id,
+        er.status AS evaluation_status,
+        er.marks AS er_marks,
+        er.feedback AS er_feedback
+      FROM assignments a
+      INNER JOIN units u ON a.unit_id = u.id
+      INNER JOIN topics t ON u.topic_id = t.id
+      INNER JOIN subjects s ON t.subject_id = s.id
+      LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+      LEFT JOIN assignment_submissions sub ON sub.assignment_id = a.id AND sub.user_id = $1
+      LEFT JOIN LATERAL (
+        SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback
+        FROM evaluation_results er_inner
+        WHERE er_inner.submission_id = sub.id
+        ORDER BY er_inner.created_at DESC
+        LIMIT 1
+      ) er ON true
+      WHERE (a.is_deleted = false OR a.is_deleted IS NULL)
+        ${currFilters}
+      ORDER BY s.name, t.order_index, u.order_index, a.id
+    `;
+
+    // 2. College assignments
+    const collegeParams = [studentId.trim()];
+    let collegeFilters = '';
+    if (student.college_id) {
+      collegeParams.push(student.college_id);
+      collegeFilters += ` AND ca.college_id = $${collegeParams.length}::uuid`;
+    }
+    if (topic_id && UUID_RE.test(topic_id.trim())) {
+      collegeParams.push(topic_id.trim());
+      collegeFilters += ` AND ca.topic_id = $${collegeParams.length}::uuid`;
+    } else if (subject_id && UUID_RE.test(subject_id.trim())) {
+      collegeParams.push(subject_id.trim());
+      collegeFilters += ` AND (
+        ca.course = $${collegeParams.length} 
+        OR ca.course IN (SELECT slug FROM subjects WHERE id = $${collegeParams.length}::uuid)
+        OR ca.course IN (SELECT name FROM subjects WHERE id = $${collegeParams.length}::uuid)
+      )`;
+    } else if (isFacilitator && subjectIds.length > 0) {
+      collegeParams.push(facilitatorId, subjectIds);
+      collegeFilters += ` AND (
+        ca.created_by = $${collegeParams.length - 1} 
+        OR ca.course IN (SELECT id::text FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
+        OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
+        OR ca.course IN (SELECT name FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
+      )`;
+    }
+
+    const collegeQuery = `
+      SELECT
+        ca.id,
+        ca.title,
+        'COLLEGE' AS assignment_type,
+        COALESCE(s.name, ca.course, 'College Assignment') AS subject_name,
+        s.slug AS subject_slug,
+        COALESCE(t.title, ca.course, 'General') AS topic_title,
+        COALESCE(t.title, ca.course, 'General') AS unit_title,
+        100 AS max_score,
+        ca.due_date,
+        ca.created_at,
+        ca.rubric,
+        cas.id AS submission_id,
+        cas.submission_link,
+        cas.submission_file_url,
+        cas.submitted_at,
+        er.id AS evaluation_result_id,
+        er.status AS evaluation_status,
+        er.marks AS er_marks,
+        er.feedback AS er_feedback
+      FROM college_assignments ca
+      LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
+      LEFT JOIN topics t ON ca.topic_id = t.id
+      LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $1
+      LEFT JOIN LATERAL (
+        SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback
+        FROM evaluation_results er_inner
+        WHERE er_inner.submission_id = cas.id
+        ORDER BY er_inner.created_at DESC
+        LIMIT 1
+      ) er ON true
+      WHERE ca.is_deleted = false
+        ${collegeFilters}
+      ORDER BY ca.due_date ASC NULLS LAST, ca.created_at DESC
+    `;
+
+    const [currRes, collegeRes] = await Promise.all([
+      pool.query(currQuery, currParams),
+      pool.query(collegeQuery, collegeParams)
+    ]);
+
+    const items = [];
+
+    for (const row of currRes.rows) {
+      const isSubmitted = Boolean(row.submission_link || row.submitted_at);
+      const maxScore = Number(row.max_score) || 100;
+      let score = null;
+      if (row.er_marks !== null && row.er_marks !== undefined) {
+        score = Number(row.er_marks);
+      } else if (row.sub_score !== null && row.sub_score !== undefined) {
+        score = Number(row.sub_score);
+      }
+
+      let status = 'not_started';
+      if (isSubmitted) {
+        if (score !== null) {
+          const pct = maxScore > 0 ? (score / maxScore) * 100 : 0;
+          status = pct >= 60 ? 'passed' : 'failed';
+        } else {
+          status = 'submitted';
+        }
+      }
+
+      let submissionLink = row.submission_link;
+      if (submissionLink) {
+        try {
+          submissionLink = await presignS3Url(submissionLink);
+        } catch {}
+      }
+
+      items.push({
+        id: row.id,
+        title: row.title,
+        item_type: 'curriculum',
+        subject_name: row.subject_name,
+        topic_title: row.topic_title,
+        unit_title: row.unit_title,
+        max_score: maxScore,
+        score,
+        status,
+        submitted_at: row.submitted_at,
+        submission_link: submissionLink,
+        evaluation_status: row.evaluation_status,
+        feedback: parseFeedback(row.er_feedback)
+      });
+    }
+
+    for (const row of collegeRes.rows) {
+      const isSubmitted = Boolean(row.submission_link || row.submission_file_url || row.submitted_at);
+      const maxScore = 100;
+      let score = null;
+      if (row.er_marks !== null && row.er_marks !== undefined) {
+        score = Number(row.er_marks);
+      }
+
+      let status = 'not_started';
+      if (isSubmitted) {
+        if (score !== null) {
+          const pct = maxScore > 0 ? (score / maxScore) * 100 : 0;
+          status = pct >= 60 ? 'passed' : 'failed';
+        } else {
+          status = 'submitted';
+        }
+      }
+
+      let submissionLink = row.submission_link || row.submission_file_url;
+      if (submissionLink) {
+        try {
+          submissionLink = await presignS3Url(submissionLink);
+        } catch {}
+      }
+
+      items.push({
+        id: row.id,
+        title: row.title,
+        item_type: 'college',
+        subject_name: row.subject_name,
+        topic_title: row.topic_title,
+        unit_title: row.unit_title,
+        max_score: maxScore,
+        score,
+        status,
+        submitted_at: row.submitted_at,
+        submission_link: submissionLink,
+        evaluation_status: row.evaluation_status,
+        feedback: parseFeedback(row.er_feedback)
+      });
+    }
+
+    const total = items.length;
+    const attemptedItems = items.filter(i => i.status !== 'not_started');
+    const attempted = attemptedItems.length;
+    const passed = items.filter(i => i.status === 'passed').length;
+    const failed = items.filter(i => i.status === 'failed').length;
+    const scoredItems = items.filter(i => i.score !== null);
+    const avgScorePct = scoredItems.length > 0
+      ? Math.round(scoredItems.reduce((sum, i) => sum + ((i.score / i.max_score) * 100), 0) / scoredItems.length)
+      : 0;
+
+    return res.json({
+      success: true,
+      student: {
+        id: student.id,
+        name: student.full_name,
+        email: student.email,
+        college_name: student.college_name,
+        batch: student.batch,
+        degree: student.degree
+      },
+      metrics: {
+        total,
+        attempted,
+        passed,
+        failed,
+        avg_score_pct: avgScorePct
+      },
+      items
+    });
+  } catch (err) {
+    console.error('getFacilitatorStudentSubmissions error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to fetch student submissions' });
+  }
+};
+
 
 exports.getBatches = async (req, res) => {
   try {
@@ -1200,6 +1637,42 @@ function emptyQuizData() {
   };
 }
 
+function emptyAssignmentData() {
+  return {
+    enrolled: 0,
+    attempted: 0,
+    not_attempted: 0,
+    passed: 0,
+    failed: 0,
+    avg_score_pct: 0,
+    score_distribution: ['0-20%', '21-40%', '41-60%', '61-80%', '81-100%'].map((range) => ({ range, count: 0 })),
+    students: [],
+    total_assignments: 0,
+    total: 0,
+    submitted: 0,
+    not_submitted: 0,
+    rate: 0,
+  };
+}
+
+function emptyProjectData() {
+  return {
+    enrolled: 0,
+    attempted: 0,
+    not_attempted: 0,
+    passed: 0,
+    failed: 0,
+    avg_score_pct: 0,
+    score_distribution: ['0-20%', '21-40%', '41-60%', '61-80%', '81-100%'].map((range) => ({ range, count: 0 })),
+    students: [],
+    total_projects: 0,
+    total: 0,
+    not_started: 0,
+    submitted: 0,
+    approved: 0,
+  };
+}
+
 // ─── Analytics: Assignments ───────────────────────────────────────────────────
 
 exports.getAssignmentAnalytics = async (req, res) => {
@@ -1209,135 +1682,307 @@ exports.getAssignmentAnalytics = async (req, res) => {
     const subjectIds = req.user.subject_ids || [];
 
     if (isFacilitator && subjectIds.length === 0) {
-      return res.json({ success: true, data: { total: 0, submitted: 0, not_submitted: 0, rate: 0, students: [] } });
+      return res.json({ success: true, data: emptyAssignmentData() });
     }
 
-    const { college_id, batch, subject_id, assignment_id, assignment_type, page, limit } = req.query;
+    const { college_id, batch, subject_id, topic_id, assignment_id, assignment_type, page, limit } = req.query;
 
-    if (isFacilitator && subject_id && !subjectIds.includes(subject_id)) {
-      return res.json({ success: true, data: { total: 0, submitted: 0, not_submitted: 0, rate: 0, students: [] } });
+    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+    const hasSpecificTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '' && UUID_RE.test(topic_id.trim());
+    const hasSpecificAssignment = assignment_id && assignment_id !== 'all' && assignment_id.trim() !== '' && UUID_RE.test(assignment_id.trim());
+
+    if (isFacilitator && hasSpecificSubject && !subjectIds.includes(subject_id.trim())) {
+      return res.json({ success: true, data: emptyAssignmentData() });
     }
 
     const sLimit = Math.min(parseInt(limit, 10) || 20, 100);
     const sOffset = (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
-    if (!colleges.length) return res.json({ success: true, data: { total: 0, submitted: 0, not_submitted: 0, rate: 0, students: [] } });
+    if (!colleges.length) return res.json({ success: true, data: emptyAssignmentData() });
 
-    const params = [colleges];
-    let batchClause = '';
-    if (batch && batch !== 'all') { 
-      if (batch === 'unknown') {
-        batchClause = `AND (sp.expected_graduation_year IS NULL AND sp.year IS NULL)`;
-      } else {
-        params.push(batch.trim()); 
-        batchClause = `AND (sp.expected_graduation_year::text = $${params.length} OR sp.year::text = $${params.length})`; 
-      }
-    }
+    const enrolledIds = await getEnrolledStudentIds(colleges, batch, hasSpecificSubject ? subject_id.trim() : null, isFacilitator ? subjectIds : null);
+    if (!enrolledIds.length) return res.json({ success: true, data: emptyAssignmentData() });
 
-    const hasSpecificSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
-    const hasSpecificAssignment = assignment_id && assignment_id !== 'all' && assignment_id.trim() !== '' && UUID_RE.test(assignment_id.trim());
-
-    let subjectJoin = '';
-    let subjectClause = '';
-    if (hasSpecificSubject) {
-      subjectJoin = 'JOIN user_subjects us ON us.user_id = sp.user_id';
-      params.push(subject_id.trim());
-      subjectClause = `AND us.subject_id = $${params.length}::uuid`;
-    } else if (isFacilitator) {
-      subjectJoin = 'JOIN user_subjects us ON us.user_id = sp.user_id';
-      params.push(subjectIds);
-      subjectClause = `AND us.subject_id = ANY($${params.length}::uuid[])`;
-    }
-
-    const studentsRes = await pool.query(
-      `SELECT DISTINCT u.id, u.full_name, u.email
-       FROM users u
-       JOIN student_profiles sp ON sp.user_id = u.id
-       ${subjectJoin}
-       WHERE sp.college_id = ANY($1::uuid[]) AND u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT') AND u.deleted_at IS NULL ${batchClause} ${subjectClause}
-       ORDER BY u.full_name`,
-      params,
+    const namesRes = await pool.query(
+      `SELECT u.id, u.full_name, u.email FROM users u WHERE u.id = ANY($1::uuid[]) ORDER BY u.full_name`,
+      [enrolledIds],
     );
-    const students = studentsRes.rows;
+    const students = namesRes.rows;
+    const studentIds = enrolledIds;
+    const studentSubMap = new Map();
 
-    const studentIds = students.map((s) => s.id);
-    let submittedIds = new Set();
     if (hasSpecificAssignment) {
       if (assignment_type === 'course') {
-        const subRes = await pool.query(
-          `SELECT user_id as student_id FROM assignment_submissions WHERE assignment_id = $1::uuid`,
-          [assignment_id.trim()]
-        );
-        submittedIds = new Set(subRes.rows.map((r) => r.student_id));
+        const [subRes, assignInfo] = await Promise.all([
+          pool.query(
+            `SELECT 
+               asub.user_id as student_id,
+               COALESCE(MAX(er.marks), MAX(asub.score)) as resolved_score
+             FROM assignment_submissions asub
+             LEFT JOIN evaluation_results er ON er.submission_id = asub.id AND er.status = 'completed'
+             WHERE asub.assignment_id = $1::uuid AND asub.user_id = ANY($2::uuid[])
+             GROUP BY asub.user_id`,
+            [assignment_id.trim(), studentIds]
+          ),
+          pool.query(
+            `SELECT COALESCE(max_score, 100)::int as max_score FROM assignments WHERE id = $1::uuid`,
+            [assignment_id.trim()]
+          ),
+        ]);
+        const maxScore = assignInfo.rows[0]?.max_score || 100;
+        subRes.rows.forEach((r) => {
+          studentSubMap.set(r.student_id, {
+            submitted: true,
+            resolvedScore: r.resolved_score !== null ? Number(r.resolved_score) : null,
+            maxScore,
+          });
+        });
       } else {
         const subRes = await pool.query(
-          `SELECT student_id FROM college_assignment_submissions WHERE assignment_id = $1::uuid`,
-          [assignment_id.trim()],
+          `SELECT 
+             cas.student_id,
+             MAX(er.marks) as resolved_score
+           FROM college_assignment_submissions cas
+           LEFT JOIN evaluation_results er ON er.submission_id = cas.id AND er.status = 'completed'
+           WHERE cas.assignment_id = $1::uuid AND cas.student_id = ANY($2::uuid[])
+           GROUP BY cas.student_id`,
+          [assignment_id.trim(), studentIds]
         );
-        submittedIds = new Set(subRes.rows.map((r) => r.student_id));
+        const maxScore = 100;
+        subRes.rows.forEach((r) => {
+          studentSubMap.set(r.student_id, {
+            submitted: true,
+            resolvedScore: r.resolved_score !== null ? Number(r.resolved_score) : null,
+            maxScore,
+          });
+        });
       }
     } else {
-      // No specific assignment selected: fall back to "submitted at least one assignment"
-      // (course or college), matching the definition used by the Student Dashboard tab's
-      // "Assignments Submitted" aggregate — keeps the two views consistent.
+      // Aggregate across course and college assignments
       const courseParams = [studentIds];
       let courseSubjectClause = '';
-      if (hasSpecificSubject) {
+      if (hasSpecificTopic) {
+        courseParams.push(topic_id.trim());
+        courseSubjectClause = `AND t.id = $${courseParams.length}::uuid`;
+      } else if (hasSpecificSubject) {
         courseParams.push(subject_id.trim());
         courseSubjectClause = `AND t.subject_id = $${courseParams.length}::uuid`;
       } else if (isFacilitator) {
         courseParams.push(subjectIds);
         courseSubjectClause = `AND t.subject_id = ANY($${courseParams.length}::uuid[])`;
       }
-      const courseSubRes = await pool.query(
-        `SELECT DISTINCT asub.user_id as student_id
-         FROM assignment_submissions asub
-         JOIN assignments a ON a.id = asub.assignment_id
-         JOIN units un ON un.id = a.unit_id
-         JOIN topics t ON t.id = un.topic_id
-         WHERE asub.user_id = ANY($1::uuid[]) ${courseSubjectClause}`,
-        courseParams,
-      );
+
       const collegeParams = [studentIds, colleges];
       let collegeFacilitatorClause = '';
-      if (isFacilitator) {
+      if (hasSpecificTopic) {
+        collegeParams.push(topic_id.trim());
+        collegeFacilitatorClause += ` AND ca.topic_id = $${collegeParams.length}::uuid`;
+      } else if (hasSpecificSubject) {
+        collegeParams.push(subject_id.trim());
+        collegeFacilitatorClause += ` AND (
+          ca.course = $${collegeParams.length} 
+          OR ca.course IN (SELECT slug FROM subjects WHERE id = $${collegeParams.length}::uuid)
+          OR ca.course IN (SELECT name FROM subjects WHERE id = $${collegeParams.length}::uuid)
+        )`;
+      } else if (isFacilitator) {
         collegeParams.push(facilitatorId, subjectIds);
-        collegeFacilitatorClause = `AND (
-          ca.created_by = $3 
-          OR ca.course IN (SELECT id::text FROM subjects WHERE id = ANY($4::uuid[]))
-          OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($4::uuid[]))
-          OR ca.course IN (SELECT name FROM subjects WHERE id = ANY($4::uuid[]))
+        collegeFacilitatorClause += ` AND (
+          ca.created_by = $${collegeParams.length - 1} 
+          OR ca.course IN (SELECT id::text FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
+          OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
+          OR ca.course IN (SELECT name FROM subjects WHERE id = ANY($${collegeParams.length}::uuid[]))
         )`;
       }
-      const collegeSubRes = await pool.query(
-        `SELECT DISTINCT cas.student_id
-         FROM college_assignment_submissions cas
-         JOIN college_assignments ca ON ca.id = cas.assignment_id AND ca.is_deleted = false
-         WHERE cas.student_id = ANY($1::uuid[]) AND ca.college_id = ANY($2::uuid[]) ${collegeFacilitatorClause}`,
-        collegeParams,
-      );
-      courseSubRes.rows.forEach((r) => submittedIds.add(r.student_id));
-      collegeSubRes.rows.forEach((r) => submittedIds.add(r.student_id));
+
+      const [courseSubRes, collegeSubRes] = await Promise.all([
+        pool.query(
+          `SELECT 
+             asub.user_id as student_id,
+             asub.assignment_id,
+             COALESCE(MAX(er.marks), MAX(asub.score)) as resolved_score,
+             COALESCE(MAX(a.max_score), 100)::int as max_score
+           FROM assignment_submissions asub
+           JOIN assignments a ON a.id = asub.assignment_id
+           JOIN units un ON un.id = a.unit_id
+           JOIN topics t ON t.id = un.topic_id
+           LEFT JOIN evaluation_results er ON er.submission_id = asub.id AND er.status = 'completed'
+           WHERE asub.user_id = ANY($1::uuid[]) ${courseSubjectClause}
+           GROUP BY asub.user_id, asub.assignment_id`,
+          courseParams,
+        ),
+        pool.query(
+          `SELECT 
+             cas.student_id,
+             cas.assignment_id,
+             MAX(er.marks) as resolved_score,
+             100::int as max_score
+           FROM college_assignment_submissions cas
+           JOIN college_assignments ca ON ca.id = cas.assignment_id AND ca.is_deleted = false
+           LEFT JOIN evaluation_results er ON er.submission_id = cas.id AND er.status = 'completed'
+           WHERE cas.student_id = ANY($1::uuid[]) AND ca.college_id = ANY($2::uuid[]) ${collegeFacilitatorClause}
+           GROUP BY cas.student_id, cas.assignment_id`,
+          collegeParams,
+        ),
+      ]);
+
+      const combinedRows = [...courseSubRes.rows, ...collegeSubRes.rows];
+      combinedRows.forEach((r) => {
+        if (!studentSubMap.has(r.student_id)) {
+          studentSubMap.set(r.student_id, { submitted: true, items: [] });
+        }
+        studentSubMap.get(r.student_id).items.push({
+          resolvedScore: r.resolved_score !== null ? Number(r.resolved_score) : null,
+          maxScore: r.max_score > 0 ? r.max_score : 100,
+        });
+      });
     }
 
-    const studentList = students.map((s) => ({
-      id: s.id,
-      name: s.full_name,
-      email: s.email,
-      status: submittedIds.has(s.id) ? 'Submitted' : 'Pending',
-    }));
+    // Calculate total available assignments in current scope
+    let totalAssignments = 1;
+    if (!hasSpecificAssignment) {
+      const courseCountParams = [];
+      let courseCountClause = '';
+      if (hasSpecificTopic) {
+        courseCountParams.push(topic_id.trim());
+        courseCountClause = `AND t.id = $${courseCountParams.length}::uuid`;
+      } else if (hasSpecificSubject) {
+        courseCountParams.push(subject_id.trim());
+        courseCountClause = `AND t.subject_id = $${courseCountParams.length}::uuid`;
+      } else if (isFacilitator) {
+        courseCountParams.push(subjectIds);
+        courseCountClause = `AND t.subject_id = ANY($${courseCountParams.length}::uuid[])`;
+      }
 
-    const submitted = studentList.filter((s) => s.status === 'Submitted').length;
-    const total = students.length;
+      const collegeCountParams = [colleges];
+      let collegeCountClause = '';
+      if (hasSpecificTopic) {
+        collegeCountParams.push(topic_id.trim());
+        collegeCountClause += ` AND ca.topic_id = $${collegeCountParams.length}::uuid`;
+      } else if (hasSpecificSubject) {
+        collegeCountParams.push(subject_id.trim());
+        collegeCountClause += ` AND (
+          ca.course = $${collegeCountParams.length} 
+          OR ca.course IN (SELECT slug FROM subjects WHERE id = $${collegeCountParams.length}::uuid)
+          OR ca.course IN (SELECT name FROM subjects WHERE id = $${collegeCountParams.length}::uuid)
+        )`;
+      } else if (isFacilitator) {
+        collegeCountParams.push(facilitatorId, subjectIds);
+        collegeCountClause += ` AND (
+          ca.created_by = $${collegeCountParams.length - 1} 
+          OR ca.course IN (SELECT id::text FROM subjects WHERE id = ANY($${collegeCountParams.length}::uuid[]))
+          OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($${collegeCountParams.length}::uuid[]))
+          OR ca.course IN (SELECT name FROM subjects WHERE id = ANY($${collegeCountParams.length}::uuid[]))
+        )`;
+      }
+
+      const [courseCountRes, collegeCountRes] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(DISTINCT a.id)::int as total
+           FROM assignments a
+           JOIN units un ON un.id = a.unit_id
+           JOIN topics t ON t.id = un.topic_id
+           WHERE a.is_deleted = false ${courseCountClause}`,
+          courseCountParams,
+        ),
+        pool.query(
+          `SELECT COUNT(DISTINCT ca.id)::int as total
+           FROM college_assignments ca
+           WHERE ca.college_id = ANY($1::uuid[]) AND ca.is_deleted = false ${collegeCountClause}`,
+          collegeCountParams,
+        ),
+      ]);
+
+      const foundTotal = (courseCountRes.rows[0]?.total || 0) + (collegeCountRes.rows[0]?.total || 0);
+      let maxStudentAttempted = 0;
+      studentSubMap.forEach((val) => {
+        if (val.items && val.items.length > maxStudentAttempted) {
+          maxStudentAttempted = val.items.length;
+        }
+      });
+      totalAssignments = Math.max(foundTotal, maxStudentAttempted, 1);
+    }
+
+    const studentList = students.map((s) => {
+      let status = 'Not Started';
+      let score_pct = null;
+      let assignments_attempted = 0;
+
+      if (studentSubMap.has(s.id)) {
+        const subData = studentSubMap.get(s.id);
+        assignments_attempted = hasSpecificAssignment ? 1 : (subData.items?.length || 0);
+
+        if (hasSpecificAssignment) {
+          if (subData.resolvedScore !== null && subData.resolvedScore !== undefined) {
+            score_pct = Math.min(100, Math.max(0, Math.round((subData.resolvedScore / subData.maxScore) * 100)));
+            status = score_pct >= 60 ? 'Passed' : 'Failed';
+          } else {
+            status = 'Submitted / Pending Review';
+          }
+        } else {
+          const items = subData.items || [];
+          const evaluatedItems = items.filter((it) => it.resolvedScore !== null && it.resolvedScore !== undefined);
+          if (evaluatedItems.length > 0) {
+            const pcts = evaluatedItems.map((it) => Math.min(100, Math.max(0, Math.round((it.resolvedScore / it.maxScore) * 100))));
+            score_pct = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+            status = score_pct >= 60 ? 'Passed' : 'Failed';
+          } else {
+            status = 'Submitted / Pending Review';
+          }
+        }
+      }
+
+      return {
+        id: s.id,
+        name: s.full_name,
+        email: s.email,
+        status,
+        score_pct,
+        assignments_attempted,
+      };
+    });
+
+    const enrolled = studentList.length;
+    const passed = studentList.filter((s) => s.status === 'Passed').length;
+    const failed = studentList.filter((s) => s.status === 'Failed').length;
+    const pending = studentList.filter((s) => s.status === 'Submitted / Pending Review').length;
+    const notAttempted = studentList.filter((s) => s.status === 'Not Started').length;
+    const attempted = passed + failed + pending;
+
+    const dist = { '0-20%': 0, '21-40%': 0, '41-60%': 0, '61-80%': 0, '81-100%': 0 };
+    const evaluatedScores = [];
+
+    studentList.forEach((s) => {
+      if (s.score_pct !== null && s.score_pct !== undefined) {
+        evaluatedScores.push(s.score_pct);
+        if (s.score_pct <= 20) dist['0-20%']++;
+        else if (s.score_pct <= 40) dist['21-40%']++;
+        else if (s.score_pct <= 60) dist['41-60%']++;
+        else if (s.score_pct <= 80) dist['61-80%']++;
+        else dist['81-100%']++;
+      }
+    });
+
+    const avgScore = evaluatedScores.length
+      ? Math.round(evaluatedScores.reduce((a, b) => a + b, 0) / evaluatedScores.length)
+      : 0;
 
     res.json({
       success: true,
       data: {
-        total,
-        submitted,
-        not_submitted: total - submitted,
-        rate: total > 0 ? Math.round((submitted / total) * 100) : 0,
-        students: studentList.slice(sOffset, sOffset + sLimit),
+        enrolled,
+        attempted,
+        not_attempted: notAttempted,
+        passed,
+        failed,
+        avg_score_pct: avgScore,
+        score_distribution: Object.entries(dist).map(([range, count]) => ({ range, count })),
+        students: studentList,
+        total_assignments: totalAssignments,
+        // Legacy backwards compatibility:
+        total: enrolled,
+        submitted: attempted,
+        not_submitted: notAttempted,
+        rate: enrolled > 0 ? Math.round((attempted / enrolled) * 100) : 0,
       },
     });
   } catch (err) {
@@ -1354,7 +1999,7 @@ exports.getProjectAnalytics = async (req, res) => {
     const subjectIds = req.user.subject_ids || [];
 
     if (isFacilitator && subjectIds.length === 0) {
-      return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
+      return res.json({ success: true, data: emptyProjectData() });
     }
 
     const { college_id, batch, subject_id, topic_id, project_id, page, limit } = req.query;
@@ -1364,17 +2009,17 @@ exports.getProjectAnalytics = async (req, res) => {
     const hasSpecificProject = project_id && project_id !== 'all' && project_id.trim() !== '' && UUID_RE.test(project_id.trim());
 
     if (isFacilitator && hasSpecificSubject && !subjectIds.includes(subject_id.trim())) {
-      return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
+      return res.json({ success: true, data: emptyProjectData() });
     }
     
     const sLimit = Math.min(parseInt(limit, 10) || 10, 100);
     const sOffset = (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
 
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
-    if (!colleges.length) return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
+    if (!colleges.length) return res.json({ success: true, data: emptyProjectData() });
 
     const enrolledIds = await getEnrolledStudentIds(colleges, batch, hasSpecificSubject ? subject_id.trim() : null, isFacilitator ? subjectIds : null);
-    if (!enrolledIds.length) return res.json({ success: true, data: { not_started: 0, submitted: 0, approved: 0, students: [], total: 0 } });
+    if (!enrolledIds.length) return res.json({ success: true, data: emptyProjectData() });
 
     // Get student names
     const namesRes = await pool.query(
@@ -1384,62 +2029,154 @@ exports.getProjectAnalytics = async (req, res) => {
 
     // Get project submissions scoped to subject (if provided)
     const psParams = [enrolledIds];
-    let psJoin = '';
+    let topicJoin = '';
     let psClause = '';
     
     if (hasSpecificProject) {
       psParams.push(project_id.trim());
       psClause = `AND ps.project_id = $${psParams.length}::uuid`;
     } else if (hasSpecificTopic) {
-      psJoin = 'JOIN projects p ON p.id = ps.project_id';
       psParams.push(topic_id.trim());
       psClause = `AND p.topic_id = $${psParams.length}::uuid`;
     } else if (hasSpecificSubject) {
-      psJoin = 'JOIN projects p ON p.id = ps.project_id JOIN topics t ON t.id = p.topic_id';
+      topicJoin = 'JOIN topics t ON t.id = p.topic_id';
       psParams.push(subject_id.trim());
       psClause = `AND t.subject_id = $${psParams.length}::uuid`;
     } else if (isFacilitator) {
-      psJoin = 'JOIN projects p ON p.id = ps.project_id JOIN topics t ON t.id = p.topic_id';
+      topicJoin = 'JOIN topics t ON t.id = p.topic_id';
       psParams.push(subjectIds);
       psClause = `AND t.subject_id = ANY($${psParams.length}::uuid[])`;
     }
 
     const psRes = await pool.query(
-      `SELECT ps.user_id, ps.is_approved
+      `SELECT 
+         ps.user_id,
+         COUNT(DISTINCT ps.project_id)::int as projects_attempted,
+         COALESCE(MAX(er.marks), MAX(ps.score)) as resolved_score,
+         BOOL_OR(ps.is_approved) as is_approved,
+         COALESCE(MAX(p.max_score), 100)::int as max_score
        FROM project_submissions ps
-       ${psJoin}
-       WHERE ps.user_id = ANY($1::uuid[]) ${psClause}`,
+       JOIN projects p ON p.id = ps.project_id
+       ${topicJoin}
+       LEFT JOIN evaluation_results er ON er.submission_id = ps.id AND er.status = 'completed'
+       WHERE ps.user_id = ANY($1::uuid[]) ${psClause}
+       GROUP BY ps.user_id`,
       psParams,
     );
 
-    const submittedMap = new Map();
+    const psMap = new Map();
     psRes.rows.forEach((r) => {
-      const existing = submittedMap.get(r.user_id);
-      // is_approved takes priority
-      if (!existing || r.is_approved) submittedMap.set(r.user_id, r.is_approved);
+      psMap.set(r.user_id, {
+        projectsAttempted: r.projects_attempted ? Number(r.projects_attempted) : 1,
+        resolvedScore: r.resolved_score !== null ? Number(r.resolved_score) : null,
+        isApproved: Boolean(r.is_approved),
+        maxScore: r.max_score > 0 ? r.max_score : 100,
+      });
     });
+
+    // Calculate total available projects in scope
+    let totalProjects = 1;
+    if (hasSpecificProject) {
+      totalProjects = 1;
+    } else {
+      const pCountParams = [];
+      let pCountTopicJoin = '';
+      let pCountClause = '';
+      if (hasSpecificTopic) {
+        pCountParams.push(topic_id.trim());
+        pCountClause = `AND p.topic_id = $${pCountParams.length}::uuid`;
+      } else if (hasSpecificSubject) {
+        pCountTopicJoin = 'JOIN topics t ON t.id = p.topic_id';
+        pCountParams.push(subject_id.trim());
+        pCountClause = `AND t.subject_id = $${pCountParams.length}::uuid`;
+      } else if (isFacilitator) {
+        pCountTopicJoin = 'JOIN topics t ON t.id = p.topic_id';
+        pCountParams.push(subjectIds);
+        pCountClause = `AND t.subject_id = ANY($${pCountParams.length}::uuid[])`;
+      }
+
+      const pCountRes = await pool.query(
+        `SELECT COUNT(DISTINCT p.id)::int as total
+         FROM projects p
+         ${pCountTopicJoin}
+         WHERE p.is_deleted = false ${pCountClause}`,
+        pCountParams,
+      );
+
+      const foundTotal = pCountRes.rows[0]?.total || 0;
+      let maxAttempted = 0;
+      psMap.forEach((val) => {
+        if (val.projectsAttempted > maxAttempted) {
+          maxAttempted = val.projectsAttempted;
+        }
+      });
+      totalProjects = Math.max(foundTotal, maxAttempted, 1);
+    }
 
     const students = namesRes.rows.map((s) => {
       let status = 'Not Started';
-      if (submittedMap.has(s.id)) {
-        status = submittedMap.get(s.id) ? 'Approved' : 'Submitted';
+      let score_pct = null;
+      let projects_attempted = 0;
+
+      if (psMap.has(s.id)) {
+        const info = psMap.get(s.id);
+        projects_attempted = info.projectsAttempted || 1;
+        if (info.resolvedScore !== null && info.resolvedScore !== undefined) {
+          score_pct = Math.min(100, Math.max(0, Math.round((info.resolvedScore / info.maxScore) * 100)));
+          status = score_pct >= 60 || info.isApproved ? 'Passed' : 'Failed';
+        } else if (info.isApproved) {
+          score_pct = 100;
+          status = 'Passed';
+        } else {
+          status = 'Submitted / Pending Review';
+        }
       }
-      return { id: s.id, name: s.full_name, email: s.email, status };
+
+      return { id: s.id, name: s.full_name, email: s.email, status, score_pct, projects_attempted };
     });
 
-    const not_started = students.filter((s) => s.status === 'Not Started').length;
-    const submitted = students.filter((s) => s.status === 'Submitted').length;
-    const approved = students.filter((s) => s.status === 'Approved').length;
-    const total = students.length;
+    const enrolled = students.length;
+    const passed = students.filter((s) => s.status === 'Passed').length;
+    const failed = students.filter((s) => s.status === 'Failed').length;
+    const pending = students.filter((s) => s.status === 'Submitted / Pending Review').length;
+    const notStarted = students.filter((s) => s.status === 'Not Started').length;
+    const attempted = passed + failed + pending;
+
+    const dist = { '0-20%': 0, '21-40%': 0, '41-60%': 0, '61-80%': 0, '81-100%': 0 };
+    const evaluatedScores = [];
+
+    students.forEach((s) => {
+      if (s.score_pct !== null && s.score_pct !== undefined) {
+        evaluatedScores.push(s.score_pct);
+        if (s.score_pct <= 20) dist['0-20%']++;
+        else if (s.score_pct <= 40) dist['21-40%']++;
+        else if (s.score_pct <= 60) dist['41-60%']++;
+        else if (s.score_pct <= 80) dist['61-80%']++;
+        else dist['81-100%']++;
+      }
+    });
+
+    const avgScore = evaluatedScores.length
+      ? Math.round(evaluatedScores.reduce((a, b) => a + b, 0) / evaluatedScores.length)
+      : 0;
 
     res.json({
       success: true,
       data: {
-        total,
-        not_started,
-        submitted,
-        approved,
-        students: students.slice(sOffset, sOffset + sLimit),
+        enrolled,
+        attempted,
+        not_attempted: notStarted,
+        passed,
+        failed,
+        avg_score_pct: avgScore,
+        score_distribution: Object.entries(dist).map(([range, count]) => ({ range, count })),
+        students: students,
+        total_projects: totalProjects,
+        // Legacy backwards compatibility:
+        total: enrolled,
+        not_started: notStarted,
+        submitted: attempted,
+        approved: passed,
       },
     });
   } catch (err) {

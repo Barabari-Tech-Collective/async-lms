@@ -2884,13 +2884,14 @@ exports.getCapstone = async (req, res) => {
         p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric,
         ps.submission_link, ps.is_approved, ps.submitted_at, 
         COALESCE(er.marks, ps.score) AS score,
-        COALESCE(er.feedback, ps.rubric_breakdown) AS rubric_breakdown,
+        er.feedback AS er_feedback,
+        ps.rubric_breakdown AS ps_rubric_breakdown,
         ps.execution_logs,
         er.status AS evaluation_status
        FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
        LEFT JOIN LATERAL (
          SELECT er_inner.marks, er_inner.feedback, er_inner.status
@@ -2900,7 +2901,9 @@ exports.getCapstone = async (req, res) => {
          ORDER BY er_inner.created_at DESC
          LIMIT 1
        ) er ON true
-       WHERE p.id = $2`,
+       WHERE p.id = $2
+         AND (p.is_deleted = false OR p.is_deleted IS NULL)
+         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
       [userId, projectId],
     );
 
@@ -2910,7 +2913,51 @@ exports.getCapstone = async (req, res) => {
         .json({ success: false, message: 'Capstone project not found' });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const row = result.rows[0];
+
+    const parseFeedback = (feedback) => {
+      if (!feedback) return null;
+      if (typeof feedback === 'object') return feedback;
+      try {
+        const parsed = JSON.parse(feedback);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
+          try {
+            const inner = JSON.parse(parsed.summary);
+            if (inner && typeof inner === 'object') {
+              return { ...parsed, ...inner };
+            }
+          } catch {}
+        }
+        return parsed;
+      } catch {
+        return { summary: String(feedback) };
+      }
+    };
+
+    const rawFeedback = row.er_feedback || row.ps_rubric_breakdown;
+    const rubric_breakdown = parseFeedback(rawFeedback);
+    const submission_link = row.submission_link
+      ? await presignS3Url(row.submission_link)
+      : null;
+
+    res.json({
+      success: true,
+      data: {
+        id: row.id,
+        title: row.title,
+        instructions: row.instructions,
+        max_score: row.max_score ? Number(row.max_score) : 100,
+        evaluator_type: row.evaluator_type,
+        rubric: row.rubric,
+        submission_link,
+        is_approved: row.is_approved,
+        submitted_at: row.submitted_at,
+        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+        rubric_breakdown,
+        execution_logs: row.execution_logs,
+        evaluation_status: row.evaluation_status,
+      },
+    });
   } catch (error) {
     console.error('Error fetching capstone:', error);
     serverError(res, error);
@@ -2938,8 +2985,11 @@ exports.submitCapstone = async (req, res) => {
       `SELECT p.id FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
-       WHERE p.id = $2`,
+       LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+       WHERE p.id = $2
+         AND (p.is_deleted = false OR p.is_deleted IS NULL)
+         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL)`,
       [userId, projectId],
     );
 

@@ -213,14 +213,29 @@ export default function CapstoneView() {
 
   if (error || !capstone) {
     return (
-      <div className='flex h-[60vh] flex-col items-center justify-center gap-3 p-10 text-center'>
+      <div className='flex h-[60vh] flex-col items-center justify-center gap-3 p-6 sm:p-10 text-center'>
         <XCircle className='h-12 w-12 text-red-400' />
         <p className='text-lg font-semibold text-slate-700'>
           Failed to load capstone project
         </p>
-        <p className='text-sm text-slate-500'>
-          Please try refreshing the page.
+        <p className='text-sm text-slate-500 max-w-sm'>
+          Unable to fetch project details. Please try again or return to your dashboard.
         </p>
+        <div className='flex items-center gap-3 mt-2'>
+          <Button
+            variant='outline'
+            onClick={() => navigate('/dashboard/student')}
+            className='rounded-xl text-xs'
+          >
+            Dashboard
+          </Button>
+          <Button
+            onClick={() => window.location.reload()}
+            className='bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs'
+          >
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }

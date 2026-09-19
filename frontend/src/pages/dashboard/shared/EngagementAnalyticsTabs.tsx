@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Loader2, ListChecks, Search, ArrowUpRight, Users, CheckCircle2, XCircle, Clock, X, ChevronRight,
-  FileSpreadsheet,
+  FileSpreadsheet, FileText, FolderGit2,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import apiClient from '@/services/api';
@@ -10,6 +10,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Cell,
 } from 'recharts';
 import { StudentDetailsModal } from './StudentDetailsModal';
+import { StudentSubmissionsDrawer } from './StudentSubmissionsDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,15 +41,54 @@ type QuizData = {
   students?: QuizStudent[];
 };
 
-type AssignmentData = {
-  total: number; submitted: number; not_submitted: number; rate: number;
-  students: { id: string; name: string; email: string; status: string | null }[];
+export type AssignmentStudent = {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  score_pct: number | null;
+  assignments_attempted?: number;
 };
 
-type ProjectData = {
+export type AssignmentData = {
+  enrolled: number;
+  attempted: number;
+  not_attempted: number;
+  passed: number;
+  failed: number;
+  avg_score_pct: number;
+  score_distribution: { range: string; count: number }[];
+  students: AssignmentStudent[];
+  total_assignments?: number;
   total: number;
-  not_started: number; submitted: number; approved: number;
-  students: { id: string; name: string; email: string; status: string }[];
+  submitted: number;
+  not_submitted: number;
+  rate: number;
+};
+
+export type ProjectStudent = {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  score_pct: number | null;
+  projects_attempted?: number;
+};
+
+export type ProjectData = {
+  enrolled: number;
+  attempted: number;
+  not_attempted: number;
+  passed: number;
+  failed: number;
+  avg_score_pct: number;
+  score_distribution: { range: string; count: number }[];
+  students: ProjectStudent[];
+  total_projects?: number;
+  total: number;
+  not_started: number;
+  submitted: number;
+  approved: number;
 };
 
 type BatchSubject = { id: string; name: string; quiz_completion: number; pass_rate: number; assignment_completion: number; project_completion: number; lesson_completion: number; module_progress: number; };
@@ -137,7 +177,7 @@ export function StatCard({
   colorScheme = 'default',
 }: {
   label: string;
-  value: string | number;
+  value?: string | number | null;
   sub?: string;
   onClick?: () => void;
   actionLabel?: string;
@@ -191,7 +231,7 @@ export function StatCard({
         </p>
       </div>
       <div className="text-center">
-        <p className={`text-base sm:text-lg xl:text-xl font-bold ${schemeStyles.text}`}>{value}</p>
+        <p className={`text-base sm:text-lg xl:text-xl font-bold ${schemeStyles.text}`}>{value ?? 0}</p>
       </div>
       <div className="min-h-[18px] sm:min-h-[22px] mt-0.5 sm:mt-1 text-center flex items-center justify-center">
         {actionLabel && isClickable ? (
@@ -216,15 +256,19 @@ export function StatCard({
 
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    Submitted: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
-    Pending: 'bg-amber-50 text-amber-700 border-amber-200/60',
-    Approved: 'bg-blue-50 text-blue-700 border-blue-200/60',
-    'Not Started': 'bg-slate-100 text-slate-600 border-slate-200/70',
-    'In Progress': 'bg-purple-50 text-purple-700 border-purple-200/60',
-    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+    Passed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    Failed: 'bg-rose-50 text-rose-700 border-rose-200',
+    'Submitted / Pending Review': 'bg-amber-50 text-amber-700 border-amber-200',
+    Submitted: 'bg-amber-50 text-amber-700 border-amber-200',
+    Pending: 'bg-amber-50 text-amber-700 border-amber-200',
+    'Not Started': 'bg-slate-100 text-slate-600 border-slate-200',
+    'Not Attempted': 'bg-slate-100 text-slate-600 border-slate-200',
+    Approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'In Progress': 'bg-purple-50 text-purple-700 border-purple-200',
+    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   };
   return (
-    <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold whitespace-nowrap inline-flex items-center shrink-0 border ${map[status] ?? 'bg-slate-100 text-slate-600 border-slate-200/60'}`}>
+    <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold whitespace-nowrap inline-flex items-center shrink-0 border ${map[status] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}>
       {status}
     </span>
   );
@@ -380,7 +424,6 @@ export const INACTIVE_OPTIONS = [
   { id: '30', name: 'Inactive > 30 Days' },
 ];
 
-const CHART_COLOR = '#4F46E5';
 const DIST_COLORS = ['#EF4444', '#F97316', '#EAB308', '#22C55E', '#3B82F6'];
 
 function QuestionAnalyticsTable({ questions }: { questions: { question_id: string; question_text: string; correct_pct: number }[] }) {
@@ -410,6 +453,7 @@ function QuestionAnalyticsTable({ questions }: { questions: { question_id: strin
 // ─── Quiz Students Drilldown Modal ──────────────────────────────────────────
 
 export type QuizFilterType = 'all' | 'attempted' | 'not_attempted' | 'passed' | 'failed';
+export type AnalyticsFilterType = 'all' | 'attempted' | 'not_attempted' | 'passed' | 'failed';
 
 export function QuizStudentsModal({
   isOpen,
@@ -1046,6 +1090,11 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
   const [data, setData] = useState<AssignmentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [aPage, setAPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
+  const [search, setSearch] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
+
+  const PAGE_SIZE = 10;
 
   // Fetch topics when subject changes
   useEffect(() => {
@@ -1071,7 +1120,7 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
       .catch(() => setCourseAssignments([]));
   }, [topic]);
 
-  const load = useCallback(async (p = 1) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -1086,9 +1135,6 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
         params.set('assignment_id', id);
       }
       
-      params.set('page', String(p));
-      params.set('limit', '10');
-      
       const res = await apiClient.get(`/facilitator/analytics/assignments?${params}`);
       setData(res.data.data);
     } catch {
@@ -1098,81 +1144,353 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
     }
   }, [college, batch, subject, topic, assignmentCompound]);
 
-  const handlePageChange = (p: number) => {
-    setAPage(p);
-    load(p);
-  };
-
-  useEffect(() => { setAPage(1); load(1); }, [load]);
+  useEffect(() => {
+    setAPage(1);
+    setStatusFilter('all');
+    setSearch('');
+    load();
+  }, [load]);
 
   const mergedAssignments = [
     ...collegeAssignments.map(a => ({ id: `college|${a.id}`, name: `[College] ${a.title}` })),
     ...courseAssignments.map(a => ({ id: `course|${a.id}`, name: `[Course] ${a.name}` }))
   ];
 
+  const students = data?.students || [];
+
+  const counts = {
+    all: students.length,
+    attempted: students.filter((s) => s.status !== 'Not Started').length,
+    not_attempted: students.filter((s) => s.status === 'Not Started').length,
+    passed: students.filter((s) => s.status === 'Passed').length,
+    failed: students.filter((s) => s.status === 'Failed').length,
+  };
+
+  const filteredStudents = students.filter((s) => {
+    if (statusFilter === 'passed' && s.status !== 'Passed') return false;
+    if (statusFilter === 'failed' && s.status !== 'Failed') return false;
+    if (statusFilter === 'attempted' && s.status === 'Not Started') return false;
+    if (statusFilter === 'not_attempted' && s.status !== 'Not Started') return false;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const paginatedStudents = filteredStudents.slice((aPage - 1) * PAGE_SIZE, aPage * PAGE_SIZE);
+
+  const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
+    { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
+    { id: 'attempted', label: 'Attempted', count: counts.attempted, activeColor: 'bg-indigo-600 text-white' },
+    { id: 'not_attempted', label: 'Not Attempted', count: counts.not_attempted, activeColor: 'bg-slate-600 text-white' },
+    { id: 'passed', label: 'Passed', count: counts.passed, activeColor: 'bg-emerald-600 text-white' },
+    { id: 'failed', label: 'Failed', count: counts.failed, activeColor: 'bg-rose-600 text-white' },
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
         <Select label="Module" value={topic} onChange={setTopic} options={topics} placeholder="All Modules" />
-        <Select label="Assignment" value={assignmentCompound} onChange={setAssignmentCompound} options={mergedAssignments} placeholder="Select Assignment" />
+        <Select label="Assignment" value={assignmentCompound} onChange={setAssignmentCompound} options={mergedAssignments} placeholder="All Assignments" />
       </div>
 
       {loading ? <LoadingState /> : !data ? <EmptyState /> : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-            <StatCard label="Total Students" value={data.total} />
-            <StatCard label="Submitted" value={data.submitted} />
-            <StatCard label="Not Submitted" value={data.not_submitted} />
-            <StatCard label="Submission Rate" value={`${data.rate}%`} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            <StatCard
+              label="Enrolled"
+              value={data.enrolled ?? data.total ?? 0}
+              actionLabel="View All"
+              colorScheme="blue"
+              onClick={() => { setStatusFilter('all'); setAPage(1); }}
+            />
+            <StatCard
+              label="Attempted"
+              value={data.attempted ?? data.submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="indigo"
+              onClick={() => { setStatusFilter('attempted'); setAPage(1); }}
+            />
+            <StatCard
+              label="Not Attempted"
+              value={data.not_attempted ?? data.not_submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="default"
+              onClick={() => { setStatusFilter('not_attempted'); setAPage(1); }}
+            />
+            <StatCard
+              label="Passed"
+              value={data.passed ?? 0}
+              actionLabel="View List"
+              colorScheme="emerald"
+              onClick={() => { setStatusFilter('passed'); setAPage(1); }}
+            />
+            <StatCard
+              label="Failed"
+              value={data.failed ?? 0}
+              actionLabel="View List"
+              colorScheme="rose"
+              onClick={() => { setStatusFilter('failed'); setAPage(1); }}
+            />
+            <StatCard
+              label="Avg Score"
+              value={`${data.avg_score_pct ?? 0}%`}
+              colorScheme="amber"
+            />
           </div>
           {!assignmentCompound && (
             <p className="text-xs text-slate-500 -mt-2">
-              No specific assignment selected — showing students who submitted at least one assignment (course or college).
+              No specific assignment selected — showing student performance aggregated across subject assignments.
             </p>
           )}
 
+          {/* Score Distribution Bar Chart */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs min-w-0">
+            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Score Distribution</h3>
+            {(!data.score_distribution || data.score_distribution.every((d) => d.count === 0)) ? (
+              <EmptyState message="No evaluated assignments yet — score distribution will appear once submissions are graded" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.score_distribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={45}>
+                    {data.score_distribution.map((_, i) => (
+                      <Cell key={i} fill={DIST_COLORS[i % DIST_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Student Submissions Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Submissions</h3>
+              <div className="relative w-full sm:w-60 shrink-0">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search student name, email..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setAPage(1);
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
+                {search && (
+                  <button
+                    onClick={() => { setSearch(''); setAPage(1); }}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
-            {data.students.length === 0 ? <EmptyState message="No students found" /> : (
+
+            {/* Filter Tabs */}
+            <div className="px-4 sm:px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+              {filterTabs.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setStatusFilter(tab.id);
+                      setAPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                      isActive
+                        ? `${tab.activeColor} shadow-xs`
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredStudents.length === 0 ? (
+              <EmptyState message="No students match the current filter or search query" />
+            ) : (
               <>
-                <div className="overflow-x-auto no-scrollbar w-full min-w-0">
+                {/* Mobile Card List (sm:hidden) */}
+                <div className="sm:hidden divide-y divide-slate-100">
+                  {paginatedStudents.map((s) => {
+                    const initials = s.name
+                      ? s.name
+                          .split(' ')
+                          .map((n: string) => n[0])
+                          .slice(0, 2)
+                          .join('')
+                          .toUpperCase()
+                      : '??';
+                    const attemptedCount = s.assignments_attempted ?? (s.status !== 'Not Started' ? 1 : 0);
+                    const totalCount = data.total_assignments ?? 1;
+
+                    return (
+                      <div key={s.id} className="p-3.5 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-slate-800 text-xs truncate">
+                                {s.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            <StatusBadge status={s.status} />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-medium">Score:</span>
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  s.score_pct >= 60
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                }`}
+                              >
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">No score</span>
+                            )}
+                          </div>
+
+                          <div className="text-[11px] text-slate-600">
+                            {attemptedCount > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                                {attemptedCount} / {totalCount} attempted
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">0 / {totalCount} attempted</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 py-2 px-3 rounded-xl border border-indigo-200/60 transition-colors shadow-sm"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>View Submissions & Breakdown</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-indigo-500 ml-auto" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop/Tablet Table View (hidden sm:block) */}
+                <div className="hidden sm:block overflow-x-auto no-scrollbar w-full min-w-0">
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
                         <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
-                        <th className="text-left px-3.5 sm:px-5 py-3 hidden sm:table-cell">Email</th>
-                        <th className="text-right sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {data.students.map((s) => (
+                      {paginatedStudents.map((s) => (
                         <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-3.5 sm:px-5 py-3 font-medium text-slate-800">
                             <p>{s.name}</p>
-                            <p className="text-[11px] text-slate-400 sm:hidden font-normal">{s.email}</p>
                           </td>
-                          <td className="px-3.5 sm:px-5 py-3 text-slate-500 hidden sm:table-cell">{s.email}</td>
-                          <td className="px-3.5 sm:px-5 py-3 text-right sm:text-left"><StatusBadge status={s.status ?? 'Pending'} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-slate-500">{s.email}</td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {(s.assignments_attempted ?? (s.status !== 'Not Started' ? 1 : 0)) > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200/60 text-xs inline-flex items-center gap-1">
+                                {data.total_assignments && data.total_assignments > 1
+                                  ? `${s.assignments_attempted ?? 1} / ${data.total_assignments} assignments`
+                                  : `${s.assignments_attempted ?? 1} ${(s.assignments_attempted ?? 1) === 1 ? 'assignment' : 'assignments'}`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">
+                                0 {data.total_assignments && data.total_assignments > 1 ? `/ ${data.total_assignments}` : ''} assignments
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                                s.score_pct >= 60 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}>
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-right">
+                            <button
+                              onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg border border-indigo-200/80 transition-all shadow-sm"
+                              title="View student submissions & evaluation feedback"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Submissions</span>
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {Math.ceil(data.total / 10) > 1 && (
+                {totalPages > 1 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{data.total} students · page {aPage} of {Math.ceil(data.total / 10)}</span>
-                    <PaginationControls page={aPage} totalPages={Math.ceil(data.total / 10)} onPageChange={handlePageChange} />
+                    <span>{filteredStudents.length} students · page {aPage} of {totalPages}</span>
+                    <PaginationControls page={aPage} totalPages={totalPages} onPageChange={setAPage} />
                   </div>
                 )}
               </>
             )}
           </div>
         </>
+      )}
+
+      {selectedStudent && (
+        <StudentSubmissionsDrawer
+          isOpen={Boolean(selectedStudent)}
+          onClose={() => setSelectedStudent(null)}
+          studentId={selectedStudent.id}
+          studentName={selectedStudent.name}
+          studentEmail={selectedStudent.email}
+          type="assignments"
+          subjectId={subject}
+          topicId={topic}
+        />
       )}
     </div>
   );
@@ -1193,6 +1511,11 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
   const [data, setData] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(false);
   const [pPage, setPPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
+  const [search, setSearch] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
+
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
@@ -1208,7 +1531,7 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
       .catch(() => setProjects([]));
   }, [topic]);
 
-  const load = useCallback(async (p = 1) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -1217,8 +1540,6 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
       if (subject) params.set('subject_id', subject);
       if (topic) params.set('topic_id', topic);
       if (project) params.set('project_id', project);
-      params.set('page', String(p));
-      params.set('limit', '10');
 
       const res = await apiClient.get(`/facilitator/analytics/projects?${params}`);
       setData(res.data.data);
@@ -1229,26 +1550,46 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
     }
   }, [college, batch, subject, topic, project]);
 
-  const handlePageChange = (p: number) => {
-    setPPage(p);
-    load(p);
+  useEffect(() => {
+    setPPage(1);
+    setStatusFilter('all');
+    setSearch('');
+    load();
+  }, [load]);
+
+  const students = data?.students || [];
+
+  const counts = {
+    all: students.length,
+    attempted: students.filter((s) => s.status !== 'Not Started').length,
+    not_attempted: students.filter((s) => s.status === 'Not Started').length,
+    passed: students.filter((s) => s.status === 'Passed').length,
+    failed: students.filter((s) => s.status === 'Failed').length,
   };
 
-  useEffect(() => { setPPage(1); load(1); }, [load]);
+  const filteredStudents = students.filter((s) => {
+    if (statusFilter === 'passed' && s.status !== 'Passed') return false;
+    if (statusFilter === 'failed' && s.status !== 'Failed') return false;
+    if (statusFilter === 'attempted' && s.status === 'Not Started') return false;
+    if (statusFilter === 'not_attempted' && s.status !== 'Not Started') return false;
 
-  const chartData = data
-    ? [
-        { status: 'Not Started', count: data.not_started },
-        { status: 'Submitted', count: data.submitted },
-        { status: 'Approved', count: data.approved },
-      ]
-    : [];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
-  const statusColors: Record<string, string> = {
-    'Not Started': '#94A3B8',
-    Submitted: '#F59E0B',
-    Approved: '#22C55E',
-  };
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const paginatedStudents = filteredStudents.slice((pPage - 1) * PAGE_SIZE, pPage * PAGE_SIZE);
+
+  const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
+    { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
+    { id: 'attempted', label: 'Attempted', count: counts.attempted, activeColor: 'bg-indigo-600 text-white' },
+    { id: 'not_attempted', label: 'Not Started', count: counts.not_attempted, activeColor: 'bg-slate-600 text-white' },
+    { id: 'passed', label: 'Passed', count: counts.passed, activeColor: 'bg-emerald-600 text-white' },
+    { id: 'failed', label: 'Failed', count: counts.failed, activeColor: 'bg-rose-600 text-white' },
+  ];
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
@@ -1262,69 +1603,290 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
 
       {loading ? <LoadingState /> : !data ? <EmptyState /> : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-            <StatCard label="Total Students" value={data.total ?? 0} />
-            <StatCard label="Not Started" value={data.not_started} />
-            <StatCard label="Submitted" value={data.submitted} />
-            <StatCard label="Approved" value={data.approved} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            <StatCard
+              label="Enrolled"
+              value={data.enrolled ?? data.total ?? 0}
+              actionLabel="View All"
+              colorScheme="blue"
+              onClick={() => { setStatusFilter('all'); setPPage(1); }}
+            />
+            <StatCard
+              label="Attempted"
+              value={data.attempted ?? data.submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="indigo"
+              onClick={() => { setStatusFilter('attempted'); setPPage(1); }}
+            />
+            <StatCard
+              label="Not Started"
+              value={data.not_attempted ?? data.not_started ?? 0}
+              actionLabel="View List"
+              colorScheme="default"
+              onClick={() => { setStatusFilter('not_attempted'); setPPage(1); }}
+            />
+            <StatCard
+              label="Passed"
+              value={data.passed ?? data.approved ?? 0}
+              actionLabel="View List"
+              colorScheme="emerald"
+              onClick={() => { setStatusFilter('passed'); setPPage(1); }}
+            />
+            <StatCard
+              label="Failed"
+              value={data.failed ?? 0}
+              actionLabel="View List"
+              colorScheme="rose"
+              onClick={() => { setStatusFilter('failed'); setPPage(1); }}
+            />
+            <StatCard
+              label="Avg Score"
+              value={`${data.avg_score_pct ?? 0}%`}
+              colorScheme="amber"
+            />
           </div>
 
+          {/* Score Distribution Bar Chart */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs min-w-0">
-            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Project Status Distribution</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="#F1F5F9" vertical={false} />
-                <XAxis dataKey="status" tick={{ fontSize: 11 }} interval={0} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
-                <Tooltip />
-                <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={55}>
-                  {chartData.map((entry) => (
-                    <Cell key={entry.status} fill={statusColors[entry.status] ?? CHART_COLOR} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Score Distribution</h3>
+            {(!data.score_distribution || data.score_distribution.every((d) => d.count === 0)) ? (
+              <EmptyState message="No evaluated projects yet — score distribution will appear once submissions are graded" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.score_distribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={45}>
+                    {data.score_distribution.map((_, i) => (
+                      <Cell key={i} fill={DIST_COLORS[i % DIST_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
+          {/* Student Project Status Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Project Status</h3>
+              <div className="relative w-full sm:w-60 shrink-0">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search student name, email..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPPage(1);
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
+                {search && (
+                  <button
+                    onClick={() => { setSearch(''); setPPage(1); }}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
-            {data.students.length === 0 ? <EmptyState message="No students found" /> : (
+
+            {/* Filter Tabs */}
+            <div className="px-4 sm:px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+              {filterTabs.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setStatusFilter(tab.id);
+                      setPPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                      isActive
+                        ? `${tab.activeColor} shadow-xs`
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredStudents.length === 0 ? (
+              <EmptyState message="No students match the current filter or search query" />
+            ) : (
               <>
-                <div className="overflow-x-auto no-scrollbar w-full min-w-0">
+                {/* Mobile Card List (sm:hidden) */}
+                <div className="sm:hidden divide-y divide-slate-100">
+                  {paginatedStudents.map((s) => {
+                    const initials = s.name
+                      ? s.name
+                          .split(' ')
+                          .map((n: string) => n[0])
+                          .slice(0, 2)
+                          .join('')
+                          .toUpperCase()
+                      : '??';
+                    const attemptedCount = s.projects_attempted ?? (s.status !== 'Not Started' ? 1 : 0);
+                    const totalCount = data.total_projects ?? 1;
+
+                    return (
+                      <div key={s.id} className="p-3.5 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-purple-50 border border-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-slate-800 text-xs truncate">
+                                {s.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            <StatusBadge status={s.status} />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-medium">Score:</span>
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  s.score_pct >= 60
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                }`}
+                              >
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">No score</span>
+                            )}
+                          </div>
+
+                          <div className="text-[11px] text-slate-600">
+                            {attemptedCount > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                                {attemptedCount} / {totalCount} attempted
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">0 / {totalCount} attempted</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 py-2 px-3 rounded-xl border border-indigo-200/60 transition-colors shadow-sm"
+                        >
+                          <FolderGit2 className="w-3.5 h-3.5" />
+                          <span>View Submissions & Breakdown</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-indigo-500 ml-auto" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop/Tablet Table View (hidden sm:block) */}
+                <div className="hidden sm:block overflow-x-auto no-scrollbar w-full min-w-0">
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
                         <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
-                        <th className="text-left px-3.5 sm:px-5 py-3 hidden sm:table-cell">Email</th>
-                        <th className="text-right sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {data.students.map((s) => (
+                      {paginatedStudents.map((s) => (
                         <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-3.5 sm:px-5 py-3 font-medium text-slate-800">
                             <p>{s.name}</p>
-                            <p className="text-[11px] text-slate-400 sm:hidden font-normal">{s.email}</p>
                           </td>
-                          <td className="px-3.5 sm:px-5 py-3 text-slate-500 hidden sm:table-cell">{s.email}</td>
-                          <td className="px-3.5 sm:px-5 py-3 text-right sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-slate-500">{s.email}</td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {(s.projects_attempted ?? (s.status !== 'Not Started' ? 1 : 0)) > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200/60 text-xs inline-flex items-center gap-1">
+                                {data.total_projects && data.total_projects > 1
+                                  ? `${s.projects_attempted ?? 1} / ${data.total_projects} projects`
+                                  : `${s.projects_attempted ?? 1} ${(s.projects_attempted ?? 1) === 1 ? 'project' : 'projects'}`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">
+                                0 {data.total_projects && data.total_projects > 1 ? `/ ${data.total_projects}` : ''} projects
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                                s.score_pct >= 60 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}>
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-right">
+                            <button
+                              onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg border border-indigo-200/80 transition-all shadow-sm"
+                              title="View student project submissions & evaluation feedback"
+                            >
+                              <FolderGit2 className="w-3.5 h-3.5" />
+                              <span>Submissions</span>
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {Math.ceil((data.total ?? 0) / 10) > 1 && (
+                {totalPages > 1 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{data.total} students · page {pPage} of {Math.ceil((data.total ?? 0) / 10)}</span>
-                    <PaginationControls page={pPage} totalPages={Math.ceil((data.total ?? 0) / 10)} onPageChange={handlePageChange} />
+                    <span>{filteredStudents.length} students · page {pPage} of {totalPages}</span>
+                    <PaginationControls page={pPage} totalPages={totalPages} onPageChange={setPPage} />
                   </div>
                 )}
               </>
             )}
           </div>
         </>
+      )}
+
+      {selectedStudent && (
+        <StudentSubmissionsDrawer
+          isOpen={Boolean(selectedStudent)}
+          onClose={() => setSelectedStudent(null)}
+          studentId={selectedStudent.id}
+          studentName={selectedStudent.name}
+          studentEmail={selectedStudent.email}
+          type="projects"
+          subjectId={subject}
+          topicId={topic}
+        />
       )}
     </div>
   );
