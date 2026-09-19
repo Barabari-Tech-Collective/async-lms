@@ -311,7 +311,10 @@ exports.getCourseStructure = async (req, res) => {
         p.id AS capstone_id,
         p.title AS capstone_title,
         p.instructions AS capstone_instructions,
-        p.max_score AS capstone_max_score
+        p.max_score AS capstone_max_score,
+        p.evaluator_type AS capstone_evaluator_type,
+        p.rubric AS capstone_rubric,
+        p.test_cases AS capstone_test_cases
 
       FROM topics t
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
@@ -347,7 +350,15 @@ exports.getCourseStructure = async (req, res) => {
           description: row.topic_description,
           order_index: row.topic_order,
           capstone: row.capstone_id
-            ? { id: row.capstone_id, title: row.capstone_title, instructions: row.capstone_instructions, max_score: row.capstone_max_score }
+            ? {
+                id: row.capstone_id,
+                title: row.capstone_title,
+                instructions: row.capstone_instructions,
+                max_score: row.capstone_max_score,
+                evaluator_type: row.capstone_evaluator_type,
+                rubric: row.capstone_rubric,
+                test_cases: row.capstone_test_cases,
+              }
             : null,
           units: new Map(),
         });

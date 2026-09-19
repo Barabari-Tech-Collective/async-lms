@@ -527,26 +527,50 @@ exports.getFacilitatorStudentModuleAnalytics = async (req, res) => {
 
 exports.getBatches = async (req, res) => {
   try {
-    const facilitatorId = req.user.id;
-    const colRes = await pool.query(
-      'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-      [facilitatorId],
-    );
-    const collegeIds = colRes.rows.map((r) => r.college_id);
-    if (collegeIds.length === 0) return res.json({ success: true, data: [] });
+    const { id: facilitatorId, role } = req.user;
+    const { college_id } = req.query;
+
+    let collegeClause = '';
+    const params = [];
+
+    const isSpecificCollege = college_id && college_id !== 'all' && college_id.trim() !== '' && UUID_RE.test(college_id.trim());
+
+    if (isSpecificCollege) {
+      const collegeIds = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
+      if (!collegeIds.length) return res.json({ success: true, data: [] });
+      params.push(collegeIds);
+      collegeClause = `AND sp.college_id = ANY($${params.length}::uuid[])`;
+    } else if (role !== 'admin') {
+      const collegeIds = await getFacilitatorCollegeIds(facilitatorId, null, role);
+      if (!collegeIds.length) return res.json({ success: true, data: [] });
+      params.push(collegeIds);
+      collegeClause = `AND sp.college_id = ANY($${params.length}::uuid[])`;
+    }
 
     const { rows } = await pool.query(
-      `SELECT DISTINCT sp.expected_graduation_year AS id, sp.expected_graduation_year::text AS name
+      `SELECT DISTINCT COALESCE(sp.expected_graduation_year::text, sp.year::text) AS id,
+                       COALESCE(sp.expected_graduation_year::text, sp.year::text) AS name
        FROM student_profiles sp
-       WHERE sp.college_id = ANY($1::uuid[])
-         AND sp.expected_graduation_year IS NOT NULL
-       ORDER BY sp.expected_graduation_year DESC`,
-      [collegeIds],
+       JOIN users u ON u.id = sp.user_id
+       WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+         AND u.deleted_at IS NULL
+         ${collegeClause}
+         AND (sp.expected_graduation_year IS NOT NULL OR sp.year IS NOT NULL)
+       ORDER BY name DESC`,
+      params,
     );
 
     const unknownRes = await pool.query(
-      `SELECT 1 FROM student_profiles sp WHERE sp.college_id = ANY($1::uuid[]) AND sp.expected_graduation_year IS NULL LIMIT 1`,
-      [collegeIds]
+      `SELECT 1
+       FROM student_profiles sp
+       JOIN users u ON u.id = sp.user_id
+       WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+         AND u.deleted_at IS NULL
+         ${collegeClause}
+         AND sp.expected_graduation_year IS NULL
+         AND sp.year IS NULL
+       LIMIT 1`,
+      params,
     );
     if (unknownRes.rowCount > 0) {
       rows.push({ id: 'unknown', name: 'Unknown Batch' });
@@ -555,7 +579,7 @@ exports.getBatches = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (err) {
     console.error('getBatches error:', err);
-    serverError(res, err);
+    serverError(res, err, 'getBatches');
   }
 };
 
@@ -740,10 +764,10 @@ async function getEnrolledStudentIds(collegeIds, batch, subjectId, facilitatorSu
 
   if (hasSpecificBatch) {
     if (batch === 'unknown') {
-      batchClause = `AND sp.expected_graduation_year IS NULL`;
+      batchClause = `AND (sp.expected_graduation_year IS NULL AND sp.year IS NULL)`;
     } else {
       params.push(batch.trim());
-      batchClause = `AND sp.expected_graduation_year = $${params.length}`;
+      batchClause = `AND (sp.expected_graduation_year::text = $${params.length} OR sp.year::text = $${params.length})`;
     }
   }
   if (hasSpecificSubject) {
@@ -786,12 +810,12 @@ exports.getAnalyticsSubjects = async (req, res) => {
 
     const params = [colleges];
     let batchClause = '';
-    if (batch) { 
+    if (batch && batch !== 'all') { 
       if (batch === 'unknown') {
-        batchClause = `AND sp.expected_graduation_year IS NULL`;
+        batchClause = `AND (sp.expected_graduation_year IS NULL AND sp.year IS NULL)`;
       } else {
-        params.push(batch); 
-        batchClause = `AND sp.expected_graduation_year = $${params.length}`; 
+        params.push(batch.trim()); 
+        batchClause = `AND (sp.expected_graduation_year::text = $${params.length} OR sp.year::text = $${params.length})`; 
       }
     }
 
@@ -1201,12 +1225,12 @@ exports.getAssignmentAnalytics = async (req, res) => {
 
     const params = [colleges];
     let batchClause = '';
-    if (batch) { 
+    if (batch && batch !== 'all') { 
       if (batch === 'unknown') {
-        batchClause = `AND sp.expected_graduation_year IS NULL`;
+        batchClause = `AND (sp.expected_graduation_year IS NULL AND sp.year IS NULL)`;
       } else {
-        params.push(batch); 
-        batchClause = `AND sp.expected_graduation_year = $${params.length}`; 
+        params.push(batch.trim()); 
+        batchClause = `AND (sp.expected_graduation_year::text = $${params.length} OR sp.year::text = $${params.length})`; 
       }
     }
 

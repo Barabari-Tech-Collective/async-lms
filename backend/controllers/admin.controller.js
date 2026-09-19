@@ -459,7 +459,10 @@ exports.getAdminSubjectStructure = async (req, res) => {
         p.id AS capstone_id,
         p.title AS capstone_title,
         p.instructions AS capstone_instructions,
-        p.max_score AS capstone_max_score
+        p.max_score AS capstone_max_score,
+        p.evaluator_type AS capstone_evaluator_type,
+        p.test_cases AS capstone_test_cases,
+        p.rubric AS capstone_rubric
 
       FROM topics t
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
@@ -496,6 +499,9 @@ exports.getAdminSubjectStructure = async (req, res) => {
                 title: row.capstone_title,
                 instructions: row.capstone_instructions,
                 max_score: row.capstone_max_score,
+                evaluator_type: row.capstone_evaluator_type,
+                test_cases: row.capstone_test_cases,
+                rubric: row.capstone_rubric,
               }
             : null,
           units: new Map(),
@@ -2222,7 +2228,15 @@ exports.deleteAssignment = async (req, res) => {
 
 exports.createProject = async (req, res) => {
   try {
-    const { topic_id, title, instructions } = req.body;
+    const {
+      topic_id,
+      title,
+      instructions,
+      max_score,
+      evaluator_type,
+      test_cases,
+      rubric,
+    } = req.body;
 
     if (!topic_id || !title) {
       return res.status(400).json({
@@ -2231,9 +2245,25 @@ exports.createProject = async (req, res) => {
       });
     }
 
+    let testCasesObj = test_cases;
+    if (typeof test_cases === 'string') {
+      try {
+        testCasesObj = JSON.parse(test_cases);
+      } catch (e) {
+        // keep as string or handle error
+      }
+    }
+
+    let rubricObj = rubric;
+    if (typeof rubric === 'string') {
+      try {
+        rubricObj = JSON.parse(rubric);
+      } catch (e) {}
+    }
+
     const query = `
-      INSERT INTO projects (topic_id, title, instructions, max_score)
-      VALUES ($1, $2, $3, 20)
+      INSERT INTO projects (topic_id, title, instructions, max_score, evaluator_type, test_cases, rubric)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *;
     `;
 
@@ -2241,6 +2271,10 @@ exports.createProject = async (req, res) => {
       topic_id,
       title,
       instructions || null,
+      max_score !== undefined && max_score !== null ? max_score : 100,
+      evaluator_type || null,
+      testCasesObj ? JSON.stringify(testCasesObj) : null,
+      rubricObj ? JSON.stringify(rubricObj) : null,
     ]);
 
     logAction({
@@ -2268,7 +2302,14 @@ exports.createProject = async (req, res) => {
 exports.updateProject = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, instructions } = req.body;
+    const {
+      title,
+      instructions,
+      max_score,
+      evaluator_type,
+      test_cases,
+      rubric,
+    } = req.body;
 
     const updates = [];
     const values = [];
@@ -2281,6 +2322,34 @@ exports.updateProject = async (req, res) => {
     if (instructions !== undefined) {
       updates.push(`instructions = $${paramCount++}`);
       values.push(instructions);
+    }
+    if (max_score !== undefined) {
+      updates.push(`max_score = $${paramCount++}`);
+      values.push(max_score);
+    }
+    if (evaluator_type !== undefined) {
+      updates.push(`evaluator_type = $${paramCount++}`);
+      values.push(evaluator_type || null);
+    }
+    if (test_cases !== undefined) {
+      let testCasesObj = test_cases;
+      if (typeof test_cases === 'string') {
+        try {
+          testCasesObj = JSON.parse(test_cases);
+        } catch (e) {}
+      }
+      updates.push(`test_cases = $${paramCount++}`);
+      values.push(testCasesObj ? JSON.stringify(testCasesObj) : null);
+    }
+    if (rubric !== undefined) {
+      let rubricObj = rubric;
+      if (typeof rubric === 'string') {
+        try {
+          rubricObj = JSON.parse(rubric);
+        } catch (e) {}
+      }
+      updates.push(`rubric = $${paramCount++}`);
+      values.push(rubricObj ? JSON.stringify(rubricObj) : null);
     }
 
     if (updates.length === 0) {

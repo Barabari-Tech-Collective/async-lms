@@ -2731,6 +2731,146 @@ exports.getStudentAssignmentsOverview = async (req, res) => {
 // ============================================
 
 /**
+ * Get comprehensive overview of all curriculum capstone projects for the student
+ * with 3-state evaluation tracking (pending, pending_evaluation, evaluated) and rubric feedback.
+ * GET /api/students/projects/overview
+ */
+exports.getStudentProjectsOverview = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const query = `
+      SELECT
+        p.id,
+        p.title,
+        'CAPSTONE' AS type,
+        s.name AS course_name,
+        s.slug AS subject_slug,
+        t.title AS topic_title,
+        COALESCE(p.max_score, 100) AS max_score,
+        NULL::timestamp AS due_date,
+        p.created_at,
+        p.evaluator_type,
+        ps.id AS submission_id,
+        ps.submission_link,
+        ps.submitted_at,
+        ps.score AS ps_score,
+        ps.rubric_breakdown AS ps_rubric_breakdown,
+        er.id AS evaluation_result_id,
+        er.status AS evaluation_status,
+        er.marks AS er_marks,
+        er.feedback AS er_feedback
+      FROM projects p
+      INNER JOIN topics t ON p.topic_id = t.id
+      INNER JOIN subjects s ON t.subject_id = s.id
+      LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+      LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+      LEFT JOIN LATERAL (
+        SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback
+        FROM evaluation_results er_inner
+        JOIN evaluations e ON er_inner.evaluation_id = e.id
+        WHERE (er_inner.submission_id = ps.id OR (er_inner.student_id = $1 AND e.project_id = p.id))
+        ORDER BY er_inner.created_at DESC
+        LIMIT 1
+      ) er ON true
+      WHERE (p.is_deleted = false OR p.is_deleted IS NULL)
+        AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.id IS NOT NULL)
+      ORDER BY s.name, t.order_index, p.id
+    `;
+
+    const result = await pool.query(query, [userId]);
+
+    const parseFeedback = (feedback) => {
+      if (!feedback) return null;
+      if (typeof feedback === 'object') return feedback;
+      try {
+        const parsed = JSON.parse(feedback);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
+          try {
+            const inner = JSON.parse(parsed.summary);
+            if (inner && typeof inner === 'object') {
+              return { ...parsed, ...inner };
+            }
+          } catch {}
+        }
+        return parsed;
+      } catch {
+        return { summary: String(feedback) };
+      }
+    };
+
+    const allProjects = [];
+
+    for (const row of result.rows) {
+      const isSubmitted = Boolean(row.submission_link || row.submitted_at);
+      const isEvaluated = row.evaluation_status === 'completed' || (row.ps_score !== null && row.ps_score !== undefined);
+
+      let status = 'pending';
+      if (isEvaluated) {
+        status = 'evaluated';
+      } else if (isSubmitted || row.evaluation_status === 'pending') {
+        status = 'pending_evaluation';
+      }
+
+      const rawFeedback = row.er_feedback || row.ps_rubric_breakdown;
+      const feedback = parseFeedback(rawFeedback);
+
+      let marks = null;
+      if (status === 'evaluated') {
+        if (row.er_marks !== null && row.er_marks !== undefined) {
+          marks = Number(row.er_marks);
+        } else if (row.ps_score !== null && row.ps_score !== undefined) {
+          marks = Number(row.ps_score);
+        }
+      }
+
+      allProjects.push({
+        id: row.id,
+        title: row.title,
+        type: 'CAPSTONE',
+        course_name: row.course_name,
+        subject_slug: row.subject_slug,
+        topic_title: row.topic_title || null,
+        unit_title: row.topic_title || null,
+        max_score: Number(row.max_score) || 100,
+        due_date: row.due_date,
+        created_at: row.created_at,
+        status,
+        submitted_at: row.submitted_at,
+        submission_link: row.submission_link,
+        submission_file_url: null,
+        marks,
+        feedback,
+        navigation_url: `/dashboard/student/courses/${row.subject_slug}/capstone/${row.id}`,
+      });
+    }
+
+    // Sort: Pending first, then Pending Evaluation, then Evaluated
+    const statusOrder = { pending: 0, pending_evaluation: 1, evaluated: 2 };
+    allProjects.sort((a, b) => {
+      if (statusOrder[a.status] !== statusOrder[b.status]) {
+        return statusOrder[a.status] - statusOrder[b.status];
+      }
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+
+    res.json({
+      success: true,
+      data: allProjects,
+      counts: {
+        total: allProjects.length,
+        pending: allProjects.filter((p) => p.status === 'pending').length,
+        pending_evaluation: allProjects.filter((p) => p.status === 'pending_evaluation').length,
+        evaluated: allProjects.filter((p) => p.status === 'evaluated').length,
+      },
+    });
+  } catch (error) {
+    console.error('Error in getStudentProjectsOverview:', error);
+    serverError(res, error);
+  }
+};
+
+/**
  * Get capstone project for a topic (with existing submission if any)
  * GET /api/students/capstone/:projectId
  */
@@ -2741,13 +2881,25 @@ exports.getCapstone = async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-        p.id, p.title, p.instructions, p.max_score,
-        ps.submission_link, ps.is_approved, ps.submitted_at
+        p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric,
+        ps.submission_link, ps.is_approved, ps.submitted_at, 
+        COALESCE(er.marks, ps.score) AS score,
+        COALESCE(er.feedback, ps.rubric_breakdown) AS rubric_breakdown,
+        ps.execution_logs,
+        er.status AS evaluation_status
        FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
        INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+       LEFT JOIN LATERAL (
+         SELECT er_inner.marks, er_inner.feedback, er_inner.status
+         FROM evaluation_results er_inner
+         JOIN evaluations e ON er_inner.evaluation_id = e.id
+         WHERE (er_inner.submission_id = ps.id OR (er_inner.student_id = $1 AND e.project_id = p.id))
+         ORDER BY er_inner.created_at DESC
+         LIMIT 1
+       ) er ON true
        WHERE p.id = $2`,
       [userId, projectId],
     );

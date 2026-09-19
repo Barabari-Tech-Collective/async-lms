@@ -71,12 +71,18 @@ export const StudentAssignmentFeedbackModal: FC<Props> = ({
             <Badge
               variant='secondary'
               className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md shrink-0 ${
-                assignment.type === 'CURRICULUM'
-                  ? 'bg-indigo-100 text-indigo-700'
-                  : 'bg-purple-100 text-purple-700'
+                assignment.type === 'CAPSTONE' || assignment.type === 'PROJECT'
+                  ? 'bg-amber-100 text-amber-800 border-amber-200'
+                  : assignment.type === 'CURRICULUM'
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                  : 'bg-purple-100 text-purple-700 border-purple-200'
               }`}
             >
-              {assignment.type === 'CURRICULUM' ? 'Curriculum Assignment' : 'Course Assignment'}
+              {assignment.type === 'CAPSTONE' || assignment.type === 'PROJECT'
+                ? 'Capstone Project'
+                : assignment.type === 'CURRICULUM'
+                ? 'Curriculum Assignment'
+                : 'Course Assignment'}
             </Badge>
             <span className='text-xs text-slate-400 font-medium flex items-center gap-1 truncate min-w-0'>
               <Layers className='w-3 h-3 shrink-0' />
