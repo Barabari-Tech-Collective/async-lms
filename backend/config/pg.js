@@ -588,6 +588,29 @@ pool.on('error', (err, client) => {
           RAISE NOTICE '[Migration] Skipping evaluation_results constraint: %', SQLERRM;
       END $$;
     `);
+
+    // ── Capstone Projects: Evaluation attributes & Central Evaluator support ──
+    await client.query(`
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS evaluator_type TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_cases JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS rubric JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_score INTEGER DEFAULT 100;
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'evaluations') THEN
+          ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS score NUMERIC;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS rubric_breakdown JSONB;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS execution_logs TEXT;
+    `);
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {

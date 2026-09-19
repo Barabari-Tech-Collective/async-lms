@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Editor, { loader } from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
-import { Play, Send, BookOpen, Files, Search, Code2, Trash2, Maximize, Minimize, CheckCircle2, Save, ExternalLink, Sun, Moon } from 'lucide-react';
+import { Play, Send, BookOpen, Files, Search, Code2, Trash2, Maximize, Minimize, CheckCircle2, Save, ExternalLink, RotateCw, Sun, Moon } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import FileTreeExplorer from '@/components/common/FileTree';
 import type { FileNode } from '@/components/common/FileTree';
@@ -68,8 +68,45 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
   const [isRunning, setIsRunning] = useState(false);
   const [terminalOutput, setTerminalOutput] = useState<string>('Ready.');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<string>('');
   const [bottomTab, setBottomTab] = useState<'terminal' | 'feedback'>('terminal');
   const [feedbackOutput, setFeedbackOutput] = useState<string>('No submissions yet. Click "Submit" to grade your work.');
+
+  // Clean up object URL when component unmounts
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
+  // Intelligently detect if this exercise is a DOM / HTML / Web preview environment
+  const isDomEnvironment = useMemo(() => {
+    const lang = (exercise?.language || '').toLowerCase();
+    if (['dom', 'html', 'web', 'css'].includes(lang)) return true;
+    if (tabs.some(t => t.path.endsWith('.html') || t.path.endsWith('.htm') || t.path.endsWith('.css'))) {
+      return true;
+    }
+    const initFiles = exercise?.initial_files || [];
+    if (Array.isArray(initFiles) && initFiles.some((f: any) => (f.name || f.path || '').endsWith('.html') || (f.name || f.path || '').endsWith('.htm'))) {
+      return true;
+    }
+    if (/html|css|web|dom/i.test(exercise?.title || '')) {
+      return true;
+    }
+    return false;
+  }, [exercise, tabs]);
+
+  // Determine if this exercise has test cases to run (non-DOM exercises)
+  const hasTestCases = useMemo(() => {
+    if (isDomEnvironment) return false;
+    const taskCases = activeTask?.test_cases;
+    const exCases = exercise.test_cases;
+    if (Array.isArray(taskCases) && taskCases.length > 0) return true;
+    if (Array.isArray(exCases) && exCases.length > 0) return true;
+    return ['javascript', 'python', 'java', 'sql'].includes((exercise.language || '').toLowerCase());
+  }, [isDomEnvironment, activeTask?.test_cases, exercise.test_cases, exercise.language]);
 
   const [saving, setSaving] = useState(false);
   const [theme, setTheme] = useState<'vs-dark' | 'light'>(() => {
@@ -284,6 +321,12 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       setActiveTab(newActiveTab);
 
       taskWorkspaceCache.current[taskKey] = { tree: newTree, tabs: newTabs, activeTab: newActiveTab };
+
+      // Initialize preview immediately if DOM/HTML exercise
+      const hasHtml = newTabs.some((t: any) => t.path.endsWith('.html') || t.path.endsWith('.htm'));
+      if (hasHtml || exercise.language === 'dom' || exercise.language === 'html' || /html|css|web|dom/i.test(exercise.title || '')) {
+        updatePreview(newTabs);
+      }
     };
 
     initWorkspace();
@@ -343,11 +386,12 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
 
   const handleEditorChange = (value: string | undefined) => {
     if (value === undefined || !activeTab) return;
-    setTabs(prev => prev.map(t => t.path === activeTab ? { ...t, content: value } : t));
+    const nextTabs = tabs.map(t => t.path === activeTab ? { ...t, content: value } : t);
+    setTabs(nextTabs);
     
-    // Auto-update preview for DOM exercises
-    if (exercise.language === 'dom') {
-      updatePreview();
+    // Auto-update preview for DOM/HTML exercises
+    if (isDomEnvironment) {
+      updatePreview(nextTabs);
     }
   };
 
@@ -430,32 +474,58 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
     }
   };
 
-  const updatePreview = () => {
-    const html = tabs.find(t => t.path === 'index.html')?.content || '';
-    const css = tabs.find(t => t.path === 'style.css')?.content || '';
-    const js = tabs.find(t => t.path === 'script.js')?.content || '';
+  const updatePreview = (customTabs?: Tab[]) => {
+    const fileList = customTabs || tabs;
+    const html =
+      fileList.find(t => t.path === 'index.html')?.content ??
+      fileList.find(t => t.path.endsWith('.html') || t.path.endsWith('.htm'))?.content ??
+      '';
+    const css =
+      fileList.find(t => t.path === 'style.css')?.content ??
+      fileList.find(t => t.path.endsWith('.css'))?.content ??
+      '';
+    const js =
+      fileList.find(t => t.path === 'script.js')?.content ??
+      fileList.find(t => t.path === 'index.js')?.content ??
+      fileList.find(t => t.path.endsWith('.js'))?.content ??
+      '';
 
     let combined = html;
-    if (combined.includes('</head>')) {
-      combined = combined.replace('</head>', `<style>${css}</style></head>`);
+    if (!combined.trim()) {
+      combined = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Live Preview</title></head><body style="font-family:sans-serif;padding:2rem;color:#64748b;text-align:center;"><h2>No HTML content yet</h2><p>Write your HTML code in <code>index.html</code> to see the live output here.</p></body></html>`;
     } else {
-      combined = `<style>${css}</style>` + combined;
+      if (combined.includes('</head>')) {
+        combined = combined.replace('</head>', `<style>${css}</style></head>`);
+      } else {
+        combined = `<style>${css}</style>` + combined;
+      }
+
+      if (combined.includes('</body>')) {
+        combined = combined.replace('</body>', `<script>${js}</script></body>`);
+      } else {
+        combined = combined + `<script>${js}</script>`;
+      }
     }
 
-    if (combined.includes('</body>')) {
-      combined = combined.replace('</body>', `<script>${js}</script></body>`);
-    } else {
-      combined = combined + `<script>${js}</script>`;
-    }
+    setPreviewDoc(combined);
 
-    const blob = new Blob([combined], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    setPreviewUrl(url);
+    try {
+      const blob = new Blob([combined], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl((prevUrl) => {
+        if (prevUrl) {
+          URL.revokeObjectURL(prevUrl);
+        }
+        return url;
+      });
+    } catch {}
 
     // Broadcast the changes to the external tab if it is open
-    const channel = new BroadcastChannel(`preview-${exercise.id}`);
-    channel.postMessage({ type: 'UPDATE_CONTENT', html: combined });
-    channel.close();
+    try {
+      const channel = new BroadcastChannel(`preview-${exercise.id}`);
+      channel.postMessage({ type: 'UPDATE_CONTENT', html: combined });
+      channel.close();
+    } catch {}
   };
 
   const handleOpenNewTab = () => {
@@ -498,17 +568,17 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
   };
 
   const handleRun = async () => {
-    // Dispatch on the exercise's environment, not on whichever file happens to
-    // be open. A JavaScript exercise always runs its JS entry file — the student
-    // is never told to "select an HTML file".
-    const lang = exercise.language;
-
-    // DOM exercises are the only ones that render a preview. Whichever of the
-    // html/css/js files is open, the preview is rebuilt from all three.
-    if (lang === 'dom') {
+    // DOM and HTML exercises render a live preview. Whichever of the
+    // html/css/js files is open, the preview is rebuilt from all files.
+    if (isDomEnvironment) {
       updatePreview();
+      setIsRunning(false);
+      setTerminalOutput('Live preview updated successfully.\n----------------\nRendered in the Live Preview panel on the right.\n');
+      toast.success('Live preview updated!');
       return;
     }
+
+    const lang = exercise.language;
 
     setIsRunning(true);
     setTerminalOutput('Executing...\n');
@@ -647,9 +717,11 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
   // grades a submission — so what the student sees here matches their grade
   // exactly, and test code never has to be shipped to the browser.
   const handleRunTests = async () => {
-    const testCases = activeTask?.test_cases || [];
+    const testCases = (activeTask?.test_cases && activeTask.test_cases.length > 0)
+      ? activeTask.test_cases
+      : (exercise.test_cases || []);
     if (testCases.length === 0) {
-      toast.error('No test cases are defined for this exercise.');
+      toast.error('No test cases are defined for this exercise yet.');
       return;
     }
 
@@ -715,28 +787,71 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       const submissionPassed = result?.isPassed !== undefined ? result.isPassed : result?.data?.submission?.is_passed;
       const pointsAwarded = result?.data?.points_awarded || 0;
 
-      if (testRes) {
-        let outputText = `=== SUBMISSION EVALUATION ===\n`;
+      const hasRubric = Array.isArray(testRes?.rubric_breakdown) && testRes.rubric_breakdown.length > 0;
+      const hasUnitTests = Boolean(
+        (Array.isArray(testRes?.results) && testRes.results.length > 0) ||
+        (Array.isArray(testRes?.taskResults) && testRes.taskResults.length > 0)
+      );
+
+      let outputText = '';
+      if (hasRubric) {
+        outputText = `=== SUBMISSION EVALUATION ===\n`;
         outputText += `Status: ${submissionPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
         
-        if (testRes.feedback) {
+        if (testRes?.feedback) {
           outputText += `\n--- Detailed Feedback ---\n${testRes.feedback}\n`;
         }
         
-        const breakdown = testRes.rubric_breakdown;
-        if (Array.isArray(breakdown)) {
-          outputText += `\n--- Rubric Breakdown ---\n`;
-          breakdown.forEach((item: any) => {
-            outputText += `- ${item.criteria || item.name}: ${item.score || 0}/${item.max_score || 100} pts\n`;
-            if (item.feedback) outputText += `  Feedback: ${item.feedback}\n`;
-          });
+        outputText += `\n--- Rubric Breakdown ---\n`;
+        testRes.rubric_breakdown.forEach((item: any) => {
+          outputText += `- ${item.criteria || item.name}: ${item.score || 0}/${item.max_score || 100} pts\n`;
+          if (item.feedback) outputText += `  Feedback: ${item.feedback}\n`;
+        });
+      } else if (hasUnitTests) {
+        outputText = `=== SUBMISSION EVALUATION ===\n`;
+        outputText += `Status: ${submissionPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+        if (pointsAwarded > 0) {
+          outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
-        setFeedbackOutput(outputText);
-        setBottomTab('feedback'); // Switch to feedback tab on successful submit
+        if (Array.isArray(testRes.results)) {
+          testRes.results.forEach((r: any) => {
+            outputText += `${r.passed ? '✅' : '❌'} ${r.description}\n`;
+            if (!r.passed && r.error) {
+              outputText += `   ${r.error}\n`;
+            }
+          });
+          if (testRes.total !== undefined) {
+            outputText += `\nPassed ${testRes.passed || 0} / ${testRes.total} tests.\n`;
+          }
+        } else if (Array.isArray(testRes.taskResults)) {
+          testRes.taskResults.forEach((tr: any) => {
+            outputText += `\nTask: ${tr.title || 'Task'}\n`;
+            if (Array.isArray(tr.results)) {
+              tr.results.forEach((r: any) => {
+                outputText += `  ${r.passed ? '✅' : '❌'} ${r.description}\n`;
+              });
+            }
+          });
+          if (testRes.totalTests !== undefined) {
+            outputText += `\nPassed ${testRes.totalPassed || 0} / ${testRes.totalTests} tests.\n`;
+          }
+        }
+        if (testRes.feedback) {
+          outputText += `\nFeedback: ${testRes.feedback}\n`;
+        }
+      } else {
+        outputText = `=== SUBMISSION ===\n`;
+        outputText += `Status: Successfully submitted ✅\n\n`;
+        outputText += (testRes?.feedback && testRes.feedback !== 'Successfully submitted.')
+          ? testRes.feedback
+          : 'Your code has been submitted successfully.';
       }
+
+      setFeedbackOutput(outputText);
+      setBottomTab('feedback'); // Switch to feedback tab on successful submit
     } catch (err) {}
   };
 
@@ -817,7 +932,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
                 <Play className={`w-3 h-3 mr-1 ${exercise.language === 'dom' ? 'text-emerald-400' : ''}`} /> Run
               </Button>
 
-              {activeTask?.test_cases && activeTask.test_cases.length > 0 && exercise.language !== 'dom' && exercise.language !== 'sql' && (
+              {hasTestCases && (
                 <Button
                   size='sm'
                   variant='secondary'
@@ -828,7 +943,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
                   }}
                   disabled={isRunning}
                 >
-                  <CheckCircle2 className='w-3 h-3 mr-1' /> {isRunning ? 'Testing...' : 'Test'}
+                  <CheckCircle2 className='w-3 h-3 mr-1' /> {isRunning ? 'Testing...' : 'Run Test Cases'}
                 </Button>
               )}
 
@@ -995,25 +1110,44 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
 
             {mobileTab === 'output' && (
               <div className={`h-full flex flex-col ${isDark ? 'bg-[#1e1e1e]' : 'bg-white'}`}>
-                {exercise.language === 'dom' && (
+                {isDomEnvironment && (
                   <div className={`h-1/2 flex flex-col border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <div className={`flex items-center justify-between px-3 py-1.5 ${isDark ? 'bg-[#0f172a]' : 'bg-slate-100'} border-b shrink-0`}>
                       <span className='text-xs font-semibold uppercase tracking-wider text-slate-400'>
                         Live Preview
                       </span>
-                      {previewUrl && (
+                      <div className='flex items-center gap-2'>
                         <button
-                          className='flex items-center gap-1 text-xs text-indigo-500 font-medium'
-                          onClick={handleOpenNewTab}
+                          className='flex items-center gap-1 text-xs text-slate-400 hover:text-white font-medium'
+                          onClick={() => {
+                            updatePreview();
+                            toast.success('Preview refreshed!');
+                          }}
+                          title='Refresh preview'
                         >
-                          <ExternalLink className='w-3 h-3' />
-                          <span>New Tab</span>
+                          <RotateCw className='w-3 h-3' />
+                          <span>Refresh</span>
                         </button>
-                      )}
+                        {(previewDoc || previewUrl) && (
+                          <button
+                            className='flex items-center gap-1 text-xs text-indigo-500 font-medium'
+                            onClick={handleOpenNewTab}
+                          >
+                            <ExternalLink className='w-3 h-3' />
+                            <span>New Tab</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className='flex-1 bg-white relative'>
-                      {previewUrl ? (
-                        <iframe src={previewUrl} className='w-full h-full border-none bg-white' sandbox='allow-scripts' title='Preview' />
+                      {previewDoc || previewUrl ? (
+                        <iframe
+                          srcDoc={previewDoc}
+                          src={previewDoc ? undefined : (previewUrl || undefined)}
+                          className='w-full h-full border-none bg-white'
+                          sandbox='allow-scripts allow-modals allow-forms allow-popups'
+                          title='Live Preview'
+                        />
                       ) : (
                         <div className='flex items-center justify-center h-full text-xs italic text-slate-400'>
                           Tap "Run" to update the preview
@@ -1168,7 +1302,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
                     <Play className={`w-3.5 h-3.5 mr-1 ${exercise.language === 'dom' ? 'text-emerald-400' : ''}`} /> Run
                   </Button>
 
-                  {activeTask?.test_cases && activeTask.test_cases.length > 0 && exercise.language !== 'dom' && exercise.language !== 'sql' && (
+                  {hasTestCases && (
                     <Button
                       size='sm'
                       variant='secondary'
@@ -1176,7 +1310,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
                       onClick={handleRunTests}
                       disabled={isRunning}
                     >
-                      <CheckCircle2 className='w-3.5 h-3.5 mr-1' /> {isRunning ? 'Testing...' : 'Run Tests'}
+                      <CheckCircle2 className='w-3.5 h-3.5 mr-1' /> {isRunning ? 'Testing...' : 'Run Test Cases'}
                     </Button>
                   )}
 
@@ -1274,28 +1408,47 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
 
             {/* Output Panel (Right) */}
             <Panel defaultSize={32} minSize={20} className={`flex flex-col min-w-0 overflow-hidden ${isDark ? 'bg-[#1e1e1e]' : 'bg-white'}`}>
-              {exercise.language === 'dom' ? (
+              {isDomEnvironment ? (
                 <PanelGroup direction='vertical' className='h-full w-full'>
                   {/* Live Preview Panel (Top Half) */}
-                  <Panel defaultSize={50} minSize={20} className={`flex flex-col border-b overflow-hidden ${isDark ? 'bg-[#1e1e1e] border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <Panel defaultSize={55} minSize={20} className={`flex flex-col border-b overflow-hidden ${isDark ? 'bg-[#1e1e1e] border-slate-800' : 'bg-white border-slate-200'}`}>
                     <div className={`flex items-center justify-between px-4 py-2 ${isDark ? 'bg-[#0f172a] border-slate-800' : 'bg-slate-100 border-slate-200'} border-b shrink-0 select-none`}>
                       <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Live Preview
                       </span>
-                      {previewUrl && (
+                      <div className='flex items-center gap-2'>
                         <button
-                          className={`flex items-center gap-1 text-xs transition-colors font-semibold ${isDark ? 'text-slate-500 hover:text-indigo-400' : 'text-slate-600 hover:text-indigo-600'}`}
-                          onClick={handleOpenNewTab}
-                          title='Open in new tab'
+                          className={`flex items-center gap-1 text-xs transition-colors font-medium px-2 py-0.5 rounded ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+                          onClick={() => {
+                            updatePreview();
+                            toast.success('Preview refreshed!');
+                          }}
+                          title='Refresh preview'
                         >
-                          <ExternalLink className='w-3.5 h-3.5' />
-                          <span>Open in new tab</span>
+                          <RotateCw className='w-3.5 h-3.5' />
+                          <span>Refresh</span>
                         </button>
-                      )}
+                        {(previewDoc || previewUrl) && (
+                          <button
+                            className={`flex items-center gap-1 text-xs transition-colors font-medium px-2 py-0.5 rounded ${isDark ? 'text-slate-400 hover:text-indigo-400 hover:bg-slate-800' : 'text-slate-600 hover:text-indigo-600 hover:bg-slate-200'}`}
+                            onClick={handleOpenNewTab}
+                            title='Open in new tab'
+                          >
+                            <ExternalLink className='w-3.5 h-3.5' />
+                            <span>Open in new tab</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className='flex-1 bg-white relative'>
-                      {previewUrl ? (
-                        <iframe src={previewUrl} className='w-full h-full border-none bg-white' sandbox='allow-scripts' title='Preview' />
+                      {previewDoc || previewUrl ? (
+                        <iframe
+                          srcDoc={previewDoc}
+                          src={previewDoc ? undefined : (previewUrl || undefined)}
+                          className='w-full h-full border-none bg-white'
+                          sandbox='allow-scripts allow-modals allow-forms allow-popups'
+                          title='Live Preview'
+                        />
                       ) : (
                         <div className={`flex items-center justify-center h-full text-xs italic ${isDark ? 'bg-[#1e1e1e] text-slate-400' : 'bg-white text-slate-500'}`}>
                           Click "Run" to update the preview

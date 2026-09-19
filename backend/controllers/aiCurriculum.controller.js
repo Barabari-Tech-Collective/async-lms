@@ -771,6 +771,40 @@ exports.publishCourse = async (req, res) => {
       }
       activeTopicIds.add(topicId);
 
+      // Synchronize module capstone project if defined
+      if (mod.capstone_project) {
+        let cp = mod.capstone_project;
+        if (typeof cp === 'string') {
+          try {
+            cp = JSON.parse(cp);
+          } catch {
+            cp = { title: `${mod.title} Capstone Project`, instructions: cp };
+          }
+        }
+
+        const projectTitle = cp?.title || `${mod.title} Capstone Project`;
+        const instructions = typeof cp?.instructions === 'object'
+          ? JSON.stringify(cp.instructions)
+          : (cp?.instructions || cp?.description || null);
+
+        const existingProject = await client.query(
+          `SELECT id FROM projects WHERE topic_id = $1 AND is_deleted = false LIMIT 1`,
+          [topicId],
+        );
+
+        if (existingProject.rows.length > 0) {
+          await client.query(
+            `UPDATE projects SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
+            [projectTitle, instructions, 100, existingProject.rows[0].id],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO projects (topic_id, title, instructions, max_score) VALUES ($1, $2, $3, $4)`,
+            [topicId, projectTitle, instructions, 100],
+          );
+        }
+      }
+
       const existingUnitsRes = await client.query(
         `SELECT id, title, order_index FROM units WHERE topic_id = $1 AND is_deleted = false ORDER BY order_index`,
         [topicId],
