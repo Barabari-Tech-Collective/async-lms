@@ -791,7 +791,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
         }
       }
 
-      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
+      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
       const values = isFacilitator
         ? [assignmentId, facilitatorCollegeIds]
         : [assignmentId];
@@ -832,7 +832,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
           }
         }
 
-        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
+        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
         const values = isFacilitator
           ? [assignmentId, facilitatorCollegeIds]
           : [assignmentId];
@@ -884,7 +884,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
           }
         }
 
-        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
+        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
         const values = isFacilitator ? [assignmentId, facilitatorCollegeIds] : [assignmentId];
 
         const result = await pool.query(

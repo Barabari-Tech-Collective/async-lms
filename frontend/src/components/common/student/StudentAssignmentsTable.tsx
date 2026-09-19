@@ -9,7 +9,6 @@ import {
   ArrowUpRight,
   Eye,
   Send,
-  Calendar,
   ChevronLeft,
   ChevronRight,
   BookOpen,
