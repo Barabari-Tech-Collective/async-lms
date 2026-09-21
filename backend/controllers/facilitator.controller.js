@@ -2547,10 +2547,12 @@ async function fetchBatchActivityReportData(req) {
   const exercisesMap = new Map(exercisesRes.rows.map((r) => [r.user_id, r.count]));
 
   // 3. Quizzes attempted and average score % in period
+  // 3. Quizzes attempted and passed in period
   const quizzesRes = await pool.query(
     `SELECT 
        qa.user_id,
        COUNT(DISTINCT qa.quiz_id)::int AS quizzes_attempted,
+       COUNT(DISTINCT qa.quiz_id) FILTER (WHERE qa.is_passed = true OR (q.max_score > 0 AND (qa.score * 100.0 / q.max_score) >= 60))::int AS quizzes_passed,
        ROUND(AVG(LEAST(100.0, qa.score * 100.0 / NULLIF(q.max_score, 0)))::numeric, 1) AS avg_quiz_score_pct
      FROM quiz_attempts qa
      JOIN quizzes q ON q.id = qa.quiz_id AND q.is_deleted = false
@@ -2564,9 +2566,10 @@ async function fetchBatchActivityReportData(req) {
     sParams,
   );
   const quizAttemptMap = new Map(quizzesRes.rows.map((r) => [r.user_id, r.quizzes_attempted]));
+  const quizPassedMap = new Map(quizzesRes.rows.map((r) => [r.user_id, r.quizzes_passed]));
   const quizScoreMap = new Map(quizzesRes.rows.map((r) => [r.user_id, parseFloat(r.avg_quiz_score_pct)]));
 
-  // 4. Assignments submitted (curriculum + college assignments)
+  // 4. Assignments attempted and passed (curriculum + college assignments)
   let caSubjClause = '';
   const asgParams = [...sParams];
   if (subject_id && subject_id !== 'all' && UUID_RE.test(String(subject_id).trim())) {
@@ -2579,20 +2582,40 @@ async function fetchBatchActivityReportData(req) {
     caSubjClause = `AND (ca.course = ANY($${paramIdx}::text[]) OR ca.course IN (SELECT slug FROM subjects WHERE id = ANY($${paramIdx}::uuid[])))`;
   }
   const asgRes = await pool.query(
-    `SELECT user_id, COUNT(DISTINCT assignment_id)::int AS assignments_submitted
+    `SELECT 
+       user_id, 
+       COUNT(DISTINCT assignment_id)::int AS assignments_attempted,
+       COUNT(DISTINCT assignment_id) FILTER (WHERE is_passed = true)::int AS assignments_passed
      FROM (
-       SELECT asub.user_id, asub.assignment_id
+       SELECT 
+         asub.user_id, 
+         asub.assignment_id,
+         (CASE 
+           WHEN COALESCE(er.marks, asub.score) IS NOT NULL 
+                AND (COALESCE(er.marks, asub.score)::float / NULLIF(COALESCE(a.max_score, 100), 0)) >= 0.60 
+           THEN true 
+           ELSE false 
+         END) AS is_passed
        FROM assignment_submissions asub
        JOIN assignments a ON a.id = asub.assignment_id AND a.is_deleted = false
        JOIN units un ON a.unit_id = un.id AND un.is_deleted = false
        JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+       LEFT JOIN evaluation_results er ON er.submission_id = asub.id AND er.status = 'completed'
        WHERE asub.user_id = ANY($1::uuid[])
          AND asub.submitted_at >= $2::timestamptz AND asub.submitted_at <= $3::timestamptz
          ${sClause}
        UNION ALL
-       SELECT cas.student_id AS user_id, cas.assignment_id
+       SELECT 
+         cas.student_id AS user_id, 
+         cas.assignment_id,
+         (CASE 
+           WHEN er.marks IS NOT NULL AND (er.marks::float / 100.0) >= 0.60 
+           THEN true 
+           ELSE false 
+         END) AS is_passed
        FROM college_assignment_submissions cas
        JOIN college_assignments ca ON ca.id = cas.assignment_id AND ca.is_deleted = false
+       LEFT JOIN evaluation_results er ON er.submission_id = cas.id AND er.status = 'completed'
        WHERE cas.student_id = ANY($1::uuid[])
          AND (
            (cas.submitted_at IS NOT NULL AND cas.submitted_at >= $2::timestamptz AND cas.submitted_at <= $3::timestamptz)
@@ -2603,25 +2626,31 @@ async function fetchBatchActivityReportData(req) {
      GROUP BY user_id`,
     asgParams,
   );
-  const asgMap = new Map(asgRes.rows.map((r) => [r.user_id, r.assignments_submitted]));
+  const asgAttemptMap = new Map(asgRes.rows.map((r) => [r.user_id, r.assignments_attempted]));
+  const asgPassedMap = new Map(asgRes.rows.map((r) => [r.user_id, r.assignments_passed]));
 
-  // 5. Projects submitted and approved
+  // 5. Projects attempted and passed (approved or score >= 60%) in period
   const projRes = await pool.query(
     `SELECT 
        ps.user_id,
-       COUNT(DISTINCT ps.project_id)::int AS projects_submitted,
-       COUNT(DISTINCT ps.project_id) FILTER (WHERE ps.is_approved = true OR ps.score >= 60)::int AS projects_approved
+       COUNT(DISTINCT ps.project_id)::int AS projects_attempted,
+       COUNT(DISTINCT ps.project_id) FILTER (
+         WHERE ps.is_approved = true 
+            OR (ps.score IS NOT NULL AND (ps.score::float / NULLIF(COALESCE(p.max_score, 100), 0)) >= 0.60)
+            OR (er.marks IS NOT NULL AND (er.marks::float / NULLIF(COALESCE(p.max_score, 100), 0)) >= 0.60)
+       )::int AS projects_passed
      FROM project_submissions ps
      JOIN projects p ON p.id = ps.project_id AND p.is_deleted = false
      JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+     LEFT JOIN evaluation_results er ON er.submission_id = ps.id AND er.status = 'completed'
      WHERE ps.user_id = ANY($1::uuid[])
        AND ps.submitted_at >= $2::timestamptz AND ps.submitted_at <= $3::timestamptz
        ${sClause}
      GROUP BY ps.user_id`,
     sParams,
   );
-  const projMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_submitted]));
-  const projApprMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_approved]));
+  const projAttemptMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_attempted]));
+  const projPassedMap = new Map(projRes.rows.map((r) => [r.user_id, r.projects_passed]));
 
   // 6. Points / XP earned in period - Detailed Breakdown by Source
   const xpBySourceRes = await pool.query(
@@ -2746,13 +2775,15 @@ async function fetchBatchActivityReportData(req) {
     const lessonsCompleted = Math.max(lessonsMap.get(s.student_id) || 0, xpInfo.lessons_count);
     const exercisesPassed = Math.max(exercisesMap.get(s.student_id) || 0, xpInfo.exercises_count);
     const quizzesAttempted = Math.max(quizAttemptMap.get(s.student_id) || 0, xpInfo.quizzes_count);
+    const quizzesPassed = Math.min(quizzesAttempted, quizPassedMap.get(s.student_id) || 0);
     const rawAvgQuizScore = quizScoreMap.get(s.student_id);
     const avgQuizScore = (rawAvgQuizScore !== undefined && rawAvgQuizScore !== null)
       ? Math.min(100, Math.max(0, rawAvgQuizScore))
       : null;
-    const assignmentsSubmitted = Math.max(asgMap.get(s.student_id) || 0, xpInfo.assignments_count);
-    const projectsSubmitted = Math.max(projMap.get(s.student_id) || 0, xpInfo.projects_count);
-    const projectsApproved = projApprMap.get(s.student_id) || 0;
+    const assignmentsAttempted = Math.max(asgAttemptMap.get(s.student_id) || 0, xpInfo.assignments_count);
+    const assignmentsPassed = Math.min(assignmentsAttempted, asgPassedMap.get(s.student_id) || 0);
+    const projectsAttempted = Math.max(projAttemptMap.get(s.student_id) || 0, xpInfo.projects_count);
+    const projectsPassed = Math.min(projectsAttempted, projPassedMap.get(s.student_id) || 0);
     const totalXp = xpInfo.total_xp;
     const lastActiveAt = lastActiveMap.get(s.student_id) || null;
 
@@ -2761,8 +2792,8 @@ async function fetchBatchActivityReportData(req) {
       lessonsCompleted > 0 ||
       exercisesPassed > 0 ||
       quizzesAttempted > 0 ||
-      assignmentsSubmitted > 0 ||
-      projectsSubmitted > 0 ||
+      assignmentsAttempted > 0 ||
+      projectsAttempted > 0 ||
       (lastActiveAt && new Date(lastActiveAt) >= startDate)
     );
 
@@ -2780,12 +2811,17 @@ async function fetchBatchActivityReportData(req) {
       weekly_exercises_passed: exercisesPassed,
       weekly_exercises_xp: xpInfo.exercises_xp,
       weekly_quizzes_attempted: quizzesAttempted,
+      weekly_quizzes_passed: quizzesPassed,
       weekly_quizzes_xp: xpInfo.quizzes_xp,
       weekly_avg_quiz_score: avgQuizScore,
-      weekly_assignments_submitted: assignmentsSubmitted,
+      weekly_assignments_attempted: assignmentsAttempted,
+      weekly_assignments_submitted: assignmentsAttempted,
+      weekly_assignments_passed: assignmentsPassed,
       weekly_assignments_xp: xpInfo.assignments_xp,
-      weekly_projects_submitted: projectsSubmitted,
-      weekly_projects_approved: projectsApproved,
+      weekly_projects_attempted: projectsAttempted,
+      weekly_projects_submitted: projectsAttempted,
+      weekly_projects_passed: projectsPassed,
+      weekly_projects_approved: projectsPassed,
       weekly_projects_xp: xpInfo.projects_xp,
       weekly_xp_earned: totalXp,
       last_active_at: lastActiveAt,
@@ -2812,10 +2848,13 @@ async function fetchBatchActivityReportData(req) {
   const exercisesPassedTotal = students.reduce((acc, s) => acc + s.weekly_exercises_passed, 0);
   const exercisesXpTotal = students.reduce((acc, s) => acc + s.weekly_exercises_xp, 0);
   const quizzesAttemptedTotal = students.reduce((acc, s) => acc + s.weekly_quizzes_attempted, 0);
+  const quizzesPassedTotal = students.reduce((acc, s) => acc + s.weekly_quizzes_passed, 0);
   const quizzesXpTotal = students.reduce((acc, s) => acc + s.weekly_quizzes_xp, 0);
-  const assignmentsSubmittedTotal = students.reduce((acc, s) => acc + s.weekly_assignments_submitted, 0);
+  const assignmentsAttemptedTotal = students.reduce((acc, s) => acc + s.weekly_assignments_attempted, 0);
+  const assignmentsPassedTotal = students.reduce((acc, s) => acc + s.weekly_assignments_passed, 0);
   const assignmentsXpTotal = students.reduce((acc, s) => acc + s.weekly_assignments_xp, 0);
-  const projectsSubmittedTotal = students.reduce((acc, s) => acc + s.weekly_projects_submitted, 0);
+  const projectsAttemptedTotal = students.reduce((acc, s) => acc + s.weekly_projects_attempted, 0);
+  const projectsPassedTotal = students.reduce((acc, s) => acc + s.weekly_projects_passed, 0);
   const projectsXpTotal = students.reduce((acc, s) => acc + s.weekly_projects_xp, 0);
   const totalXpTotal = students.reduce((acc, s) => acc + s.weekly_xp_earned, 0);
   const avgProgress = totalEnrolled > 0
@@ -2842,11 +2881,16 @@ async function fetchBatchActivityReportData(req) {
       exercises_passed: exercisesPassedTotal,
       exercises_xp: exercisesXpTotal,
       quizzes_attempted: quizzesAttemptedTotal,
+      quizzes_passed: quizzesPassedTotal,
       quizzes_xp: quizzesXpTotal,
-      assignments_submitted: assignmentsSubmittedTotal,
+      assignments_attempted: assignmentsAttemptedTotal,
+      assignments_submitted: assignmentsAttemptedTotal,
+      assignments_passed: assignmentsPassedTotal,
       assignments_xp: assignmentsXpTotal,
-      projects_submitted: projectsSubmittedTotal,
-      projects_xp: projectsXpTotal,
+      projects_attempted: projectsAttemptedTotal,
+      projects_submitted: projectsAttemptedTotal,
+      projects_passed: projectsPassedTotal,
+      projects_approved: projectsPassedTotal,
       total_xp_earned: totalXpTotal,
       cohort_avg_progress: avgProgress,
     },
@@ -2867,7 +2911,7 @@ exports.getBatchActivityReport = async (req, res) => {
 exports.exportBatchActivityReport = async (req, res) => {
   try {
     const data = await fetchBatchActivityReportData(req);
-    const { students, meta, period } = data;
+    const { students, meta, period, summary } = data;
 
     const escapeCsv = (val) => {
       if (val === null || val === undefined) return '';
@@ -2894,12 +2938,14 @@ exports.exportBatchActivityReport = async (req, res) => {
       'Exercises Passed (Period)',
       'Quizzes XP (Period)',
       'Quizzes Attempted (Period)',
+      'Quizzes Passed (Period)',
       'Avg Quiz Score % (Period)',
       'Assignments XP (Period)',
-      'Assignments Submitted (Period)',
+      'Assignments Attempted (Period)',
+      'Assignments Passed (Period)',
       'Projects XP (Period)',
-      'Projects Submitted (Period)',
-      'Projects Approved (Period)',
+      'Projects Attempted (Period)',
+      'Projects Passed (Period)',
       'Total XP Earned (Period)',
       'Overall Course Progress %',
       'Last Active Date',
@@ -2918,12 +2964,14 @@ exports.exportBatchActivityReport = async (req, res) => {
       s.weekly_exercises_passed,
       s.weekly_quizzes_xp,
       s.weekly_quizzes_attempted,
+      s.weekly_quizzes_passed,
       s.weekly_avg_quiz_score !== null ? `${s.weekly_avg_quiz_score}%` : 'N/A',
       s.weekly_assignments_xp,
-      s.weekly_assignments_submitted,
+      s.weekly_assignments_attempted,
+      s.weekly_assignments_passed,
       s.weekly_projects_xp,
-      s.weekly_projects_submitted,
-      s.weekly_projects_approved,
+      s.weekly_projects_attempted,
+      s.weekly_projects_passed,
       s.weekly_xp_earned,
       `${s.overall_subject_progress}%`,
       s.last_active_at ? new Date(s.last_active_at).toLocaleString('en-IN') : 'Never',
@@ -2933,7 +2981,8 @@ exports.exportBatchActivityReport = async (req, res) => {
     const rangeStr = `${new Date(period.start_date).toLocaleDateString()} to ${new Date(period.end_date).toLocaleDateString()}`;
     const csvContent = '\uFEFF' + [
       `# BATCH ACTIVITY REPORT - ${meta.subject_name || 'All Subjects'}`,
-      `# College: ${meta.college_name || 'All'} | Batch: ${meta.batch || 'All'} | Timeframe: ${period.time_range} (${rangeStr})`,
+      `# College: ${meta.college_name || 'All Colleges'} | Batch: ${meta.batch || 'All Batches'} | Timeframe: ${period.time_range} (${rangeStr})`,
+      `# Total Enrolled: ${summary?.total_enrolled ?? students.length} | Active: ${summary?.active_count ?? 0} | Inactive: ${summary?.inactive_count ?? 0}`,
       `# Generated: ${new Date().toLocaleString('en-IN')}`,
       '',
       headers.join(','),

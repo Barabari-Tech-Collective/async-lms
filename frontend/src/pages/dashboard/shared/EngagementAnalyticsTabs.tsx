@@ -115,11 +115,16 @@ export type BatchReportStudent = {
   weekly_exercises_passed: number;
   weekly_exercises_xp: number;
   weekly_quizzes_attempted: number;
+  weekly_quizzes_passed?: number;
   weekly_quizzes_xp: number;
   weekly_avg_quiz_score: number | null;
+  weekly_assignments_attempted?: number;
   weekly_assignments_submitted: number;
+  weekly_assignments_passed?: number;
   weekly_assignments_xp: number;
+  weekly_projects_attempted?: number;
   weekly_projects_submitted: number;
+  weekly_projects_passed?: number;
   weekly_projects_approved: number;
   weekly_projects_xp: number;
   weekly_xp_earned: number;
@@ -147,10 +152,16 @@ export type BatchReportData = {
     exercises_passed: number;
     exercises_xp: number;
     quizzes_attempted: number;
+    quizzes_passed?: number;
     quizzes_xp: number;
+    assignments_attempted?: number;
     assignments_submitted: number;
+    assignments_passed?: number;
     assignments_xp: number;
+    projects_attempted?: number;
     projects_submitted: number;
+    projects_passed?: number;
+    projects_approved: number;
     projects_xp: number;
     total_xp_earned: number;
     cohort_avg_progress: number;
@@ -2003,12 +2014,14 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
         'Exercises Passed (Period)',
         'Quizzes XP (Period)',
         'Quizzes Attempted (Period)',
+        'Quizzes Passed (Period)',
         'Avg Quiz Score % (Period)',
         'Assignments XP (Period)',
-        'Assignments Submitted (Period)',
+        'Assignments Attempted (Period)',
+        'Assignments Passed (Period)',
         'Projects XP (Period)',
-        'Projects Submitted (Period)',
-        'Projects Approved (Period)',
+        'Projects Attempted (Period)',
+        'Projects Passed (Period)',
         'Total XP Earned (Period)',
         'Overall Course Progress %',
         'Last Active Date',
@@ -2027,12 +2040,14 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
         s.weekly_exercises_passed,
         s.weekly_quizzes_xp,
         s.weekly_quizzes_attempted,
+        s.weekly_quizzes_passed ?? 0,
         s.weekly_avg_quiz_score !== null ? `${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%` : 'N/A',
         s.weekly_assignments_xp,
-        s.weekly_assignments_submitted,
+        s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0,
+        s.weekly_assignments_passed ?? 0,
         s.weekly_projects_xp,
-        s.weekly_projects_submitted,
-        s.weekly_projects_approved,
+        s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0,
+        s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0,
         s.weekly_xp_earned,
         `${s.overall_subject_progress}%`,
         s.last_active_at ? new Date(s.last_active_at).toLocaleString('en-IN') : 'Never',
@@ -2426,11 +2441,11 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                           <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
                             <span className="text-[10px] text-slate-400 block font-semibold">Quizzes</span>
                             <span className="font-bold text-amber-600 text-sm">
-                              {s.weekly_quizzes_xp > 0 ? `+${s.weekly_quizzes_xp} XP` : s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted}` : '0 XP'}
+                              {s.weekly_quizzes_xp > 0 ? `+${s.weekly_quizzes_xp} XP` : s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted} att` : '0 XP'}
                             </span>
-                            {(s.weekly_quizzes_attempted > 0 || s.weekly_avg_quiz_score !== null) && (
+                            {(s.weekly_quizzes_attempted > 0 || (s.weekly_quizzes_passed ?? 0) > 0 || s.weekly_avg_quiz_score !== null) && (
                               <span className="text-[10px] font-medium text-slate-400 block">
-                                {s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted} att` : ''}
+                                {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} passed</span>
                                 {s.weekly_avg_quiz_score !== null ? ` (${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)` : ''}
                               </span>
                             )}
@@ -2438,22 +2453,24 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                           <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
                             <span className="text-[10px] text-slate-400 block font-semibold">Assignments</span>
                             <span className="font-bold text-purple-600 text-sm">
-                              {s.weekly_assignments_xp > 0 ? `+${s.weekly_assignments_xp} XP` : s.weekly_assignments_submitted > 0 ? `${s.weekly_assignments_submitted}` : '0 XP'}
+                              {s.weekly_assignments_xp > 0 ? `+${s.weekly_assignments_xp} XP` : (s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 ? `${s.weekly_assignments_attempted ?? s.weekly_assignments_submitted} att` : '0 XP'}
                             </span>
-                            {s.weekly_assignments_submitted > 0 && (
-                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_assignments_submitted} sub)</span>
+                            {((s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 || (s.weekly_assignments_passed ?? 0) > 0) && (
+                              <span className="text-[10px] font-medium text-slate-400 block">
+                                {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} passed</span>
+                              </span>
                             )}
                           </div>
                           <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
                             <span className="text-[10px] text-slate-400 block font-semibold">Projects</span>
                             <span className="font-bold text-blue-600 text-sm">
-                              {s.weekly_projects_xp > 0 ? `+${s.weekly_projects_xp} XP` : s.weekly_projects_submitted > 0 ? `${s.weekly_projects_submitted}` : '0 XP'}
+                              {s.weekly_projects_xp > 0 ? `+${s.weekly_projects_xp} XP` : (s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 ? `${s.weekly_projects_attempted ?? s.weekly_projects_submitted} att` : '0 XP'}
                             </span>
-                            {s.weekly_projects_approved > 0 ? (
-                              <span className="text-[10px] font-medium text-emerald-600 block">({s.weekly_projects_approved} appr)</span>
-                            ) : s.weekly_projects_submitted > 0 ? (
-                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_projects_submitted} sub)</span>
-                            ) : null}
+                            {((s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 || (s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0) > 0) && (
+                              <span className="text-[10px] font-medium text-slate-400 block">
+                                {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} passed</span>
+                              </span>
+                            )}
                           </div>
                           <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
                             <span className="text-[10px] text-slate-400 block font-semibold">Total XP</span>
@@ -2490,9 +2507,9 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                           <th className="text-left px-3 py-3">Batch</th>
                           <th className="text-center px-2 py-3" title="Lessons XP earned & completions in period">Lessons</th>
                           <th className="text-center px-2 py-3" title="Exercises XP earned & passed in period">Exercises</th>
-                          <th className="text-center px-2 py-3" title="Quizzes XP earned & attempts in period">Quizzes (Avg %)</th>
-                          <th className="text-center px-2 py-3" title="Assignments XP earned & submissions in period">Asgns</th>
-                          <th className="text-center px-2 py-3" title="Projects XP earned & submissions in period">Projects</th>
+                          <th className="text-center px-2 py-3" title="Quizzes XP, attempts & passes in period">Quizzes (Att / Pass)</th>
+                          <th className="text-center px-2 py-3" title="Assignments XP, attempts & passes in period">Asgns (Att / Pass)</th>
+                          <th className="text-center px-2 py-3" title="Projects XP, attempts & passes in period">Projects (Att / Pass)</th>
                           <th className="text-center px-2 py-3" title="Total XP points earned in period">Total XP</th>
                           <th className="text-left px-3 py-3 w-32">Course Progress</th>
                           <th className="text-left px-3 py-3">Last Active</th>
@@ -2549,35 +2566,39 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                                 <div>
                                   <span className="font-bold text-amber-600">+{s.weekly_quizzes_xp} XP</span>
                                   <span className="block text-[10px] text-slate-400 font-medium">
-                                    {s.weekly_quizzes_attempted > 0 ? `(${s.weekly_quizzes_attempted} att${s.weekly_avg_quiz_score !== null ? ` · ${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%` : ''})` : s.weekly_avg_quiz_score !== null ? `(${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)` : ''}
+                                    {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} pass</span>
+                                    {s.weekly_avg_quiz_score !== null && ` (${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)`}
                                   </span>
                                 </div>
-                              ) : s.weekly_quizzes_attempted > 0 ? (
+                              ) : s.weekly_quizzes_attempted > 0 || (s.weekly_quizzes_passed ?? 0) > 0 ? (
                                 <div>
-                                  <span className="font-semibold text-amber-600">{s.weekly_quizzes_attempted} att</span>
+                                  <span className="font-semibold text-slate-700">
+                                    {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} pass</span>
+                                  </span>
                                   {s.weekly_avg_quiz_score !== null && (
                                     <span className="block text-[10px] text-slate-400 font-medium">({Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)</span>
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-slate-400 font-medium">0 XP</span>
+                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
                               )}
                             </td>
                             <td className="px-2 py-3 text-center">
                               {s.weekly_assignments_xp > 0 ? (
                                 <div>
                                   <span className="font-bold text-purple-600">+{s.weekly_assignments_xp} XP</span>
-                                  {s.weekly_assignments_submitted > 0 && (
-                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_assignments_submitted} sub)</span>
-                                  )}
+                                  <span className="block text-[10px] text-slate-400 font-medium">
+                                    {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} pass</span>
+                                  </span>
                                 </div>
-                              ) : s.weekly_assignments_submitted > 0 ? (
+                              ) : (s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 || (s.weekly_assignments_passed ?? 0) > 0 ? (
                                 <div>
-                                  <span className="font-semibold text-purple-600">+{s.weekly_assignments_submitted} sub</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
+                                  <span className="font-semibold text-slate-700">
+                                    {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} pass</span>
+                                  </span>
                                 </div>
                               ) : (
-                                <span className="text-slate-400 font-medium">0 XP</span>
+                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
                               )}
                             </td>
                             <td className="px-2 py-3 text-center">
@@ -2585,22 +2606,17 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                                 <div>
                                   <span className="font-bold text-blue-600">+{s.weekly_projects_xp} XP</span>
                                   <span className="block text-[10px] font-medium text-slate-400">
-                                    {s.weekly_projects_approved > 0 ? (
-                                      <span className="text-emerald-600 font-medium">({s.weekly_projects_approved} appr)</span>
-                                    ) : s.weekly_projects_submitted > 0 ? (
-                                      `(${s.weekly_projects_submitted} sub)`
-                                    ) : ''}
+                                    {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} pass</span>
                                   </span>
                                 </div>
-                              ) : s.weekly_projects_submitted > 0 ? (
+                              ) : (s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 || (s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0) > 0 ? (
                                 <div>
-                                  <span className="font-semibold text-blue-600">{s.weekly_projects_submitted} sub</span>
-                                  {s.weekly_projects_approved > 0 && (
-                                    <span className="block text-[10px] text-emerald-600 font-medium">({s.weekly_projects_approved} appr)</span>
-                                  )}
+                                  <span className="font-semibold text-slate-700">
+                                    {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} pass</span>
+                                  </span>
                                 </div>
                               ) : (
-                                <span className="text-slate-400 font-medium">0 XP</span>
+                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
                               )}
                             </td>
                             <td className="px-2 py-3 text-center font-semibold text-emerald-700">
