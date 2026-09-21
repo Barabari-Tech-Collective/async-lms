@@ -305,7 +305,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
               onChange={(e) => setBulkEvaluatorType(e.target.value)}
               className='text-xs sm:text-sm border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-slate-700 min-h-[36px]'
             >
-              <option value=''>Auto (based on assignment)</option>
+              <option value=''>Auto (based on {evaluation?.is_project || evaluation?.project_id ? 'project' : 'assignment'})</option>
               <option value='REACT'>React</option>
               <option value='JS'>JavaScript</option>
               <option value='VISUAL'>Visual</option>

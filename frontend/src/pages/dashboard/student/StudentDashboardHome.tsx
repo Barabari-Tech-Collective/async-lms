@@ -20,6 +20,7 @@ import { selectUser } from '@/features/auth/authSelectors';
 import {
   useMySubjects,
   useStudentAssignmentsOverview,
+  useStudentProjectsOverview,
 } from '@/hooks/queries/useStudentDashboard';
 import { StudentAssignmentsTable } from '@/components/common/student/StudentAssignmentsTable';
 import type { Subject } from '@/utils/types';
@@ -61,8 +62,11 @@ const StudentDashboardHome: FC = () => {
   const { data: courses = [], isLoading: loadingCourses } = useMySubjects();
   const { data: overview, isLoading: loadingOverview } =
     useStudentAssignmentsOverview();
+  const { data: projectsOverview, isLoading: loadingProjects } =
+    useStudentProjectsOverview();
 
   const assignmentsList = overview?.data ?? [];
+  const projectsList = projectsOverview?.data ?? [];
   const counts = overview?.counts ?? {
     total: 0,
     pending: 0,
@@ -265,7 +269,9 @@ const StudentDashboardHome: FC = () => {
       <section id='student-assignments-section' className='space-y-4'>
         <StudentAssignmentsTable
           assignments={assignmentsList}
+          projects={projectsList}
           isLoading={loadingOverview}
+          isLoadingProjects={loadingProjects}
         />
       </section>
 

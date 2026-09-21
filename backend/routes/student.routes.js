@@ -21,6 +21,7 @@ const {
   runExerciseTests,
   getStudentAssignments,
   getStudentAssignmentsOverview,
+  getStudentProjectsOverview,
   getAssignmentById,
   submitAssignment,
   getCapstone,
@@ -100,7 +101,13 @@ router.post(
   submitAssignment,
 );
 
-// ===== PERSONAL PROJECTS =====
+// ===== PERSONAL & CAPSTONE PROJECTS =====
+router.get(
+  '/projects/overview',
+  verifyToken,
+  isStudent,
+  getStudentProjectsOverview,
+);
 router.get('/projects', verifyToken, isStudent, getStudentProjects);
 router.post('/projects', verifyToken, isStudent, createStudentProject);
 router.delete('/projects/:id', verifyToken, isStudent, deleteStudentProject);

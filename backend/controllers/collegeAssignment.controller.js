@@ -774,6 +774,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
     );
     const isUnitAssignment = unitCheck.rowCount > 0;
 
+    let isProject = false;
     let rows;
 
     if (isUnitAssignment) {
@@ -790,7 +791,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
         }
       }
 
-      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
+      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
       const values = isFacilitator
         ? [assignmentId, facilitatorCollegeIds]
         : [assignmentId];
@@ -814,63 +815,105 @@ exports.getAssignmentSubmissions = async (req, res) => {
       );
       rows = result.rows;
     } else {
-      // College assignment — check facilitator owns this college and subject
-      if (isFacilitator) {
-        const ownerCheck = await pool.query(
-          `SELECT ca.college_id, ca.course, ca.created_by FROM college_assignments ca WHERE ca.id = $1 AND ca.is_deleted = false`,
-          [assignmentId],
-        );
-        if (!ownerCheck.rowCount) {
-          return res
-            .status(404)
-            .json({ success: false, message: 'Assignment not found' });
-        }
-        const ca = ownerCheck.rows[0];
-        if (!facilitatorCollegeIds.includes(ca.college_id)) {
-          return res
-            .status(403)
-            .json({ success: false, message: 'Access denied: College not assigned to you' });
-        }
-        if (ca.course && ca.course !== 'General') {
-          const validSubj = await pool.query(
-            'SELECT 1 FROM subjects WHERE (id::text = $1 OR slug = $1 OR name = $1) AND id = ANY($2::uuid[])',
-            [ca.course, facilitatorSubjectIds],
-          );
-          if (validSubj.rows.length === 0) {
-            return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
+      // Check if it is a capstone project
+      const projectCheck = await pool.query(
+        `SELECT p.id, t.subject_id
+         FROM projects p
+         JOIN topics t ON p.topic_id = t.id
+         WHERE p.id = $1`,
+        [assignmentId],
+      );
+      isProject = projectCheck.rowCount > 0;
+
+      if (isProject) {
+        if (isFacilitator) {
+          if (!facilitatorSubjectIds.includes(projectCheck.rows[0].subject_id)) {
+            return res.status(403).json({ success: false, message: 'Access denied: Project does not belong to your assigned subjects' });
           }
         }
+
+        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
+        const values = isFacilitator
+          ? [assignmentId, facilitatorCollegeIds]
+          : [assignmentId];
+
+        const result = await pool.query(
+          `SELECT
+             ps.id,
+             ps.submission_link,
+             ps.submitted_at,
+             u.full_name  AS student_name,
+             u.email      AS student_email,
+             c.name       AS college_name
+           FROM project_submissions ps
+           JOIN users u            ON u.id  = ps.user_id
+           LEFT JOIN student_profiles sp ON sp.user_id = ps.user_id
+           LEFT JOIN colleges c    ON c.id  = sp.college_id
+           WHERE ps.project_id = $1
+           ${collegeFilter}
+           ORDER BY ps.submitted_at DESC`,
+          values,
+        );
+        rows = result.rows;
+      } else {
+        // College assignment — check facilitator owns this college and subject
+        if (isFacilitator) {
+          const ownerCheck = await pool.query(
+            `SELECT ca.college_id, ca.course, ca.created_by FROM college_assignments ca WHERE ca.id = $1 AND ca.is_deleted = false`,
+            [assignmentId],
+          );
+          if (!ownerCheck.rowCount) {
+            return res
+              .status(404)
+              .json({ success: false, message: 'Assignment not found' });
+          }
+          const ca = ownerCheck.rows[0];
+          if (!facilitatorCollegeIds.includes(ca.college_id)) {
+            return res
+              .status(403)
+              .json({ success: false, message: 'Access denied: College not assigned to you' });
+          }
+          if (ca.course && ca.course !== 'General') {
+            const validSubj = await pool.query(
+              'SELECT 1 FROM subjects WHERE (id::text = $1 OR slug = $1 OR name = $1) AND id = ANY($2::uuid[])',
+              [ca.course, facilitatorSubjectIds],
+            );
+            if (validSubj.rows.length === 0) {
+              return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
+            }
+          }
+        }
+
+        const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2::uuid[])' : '';
+        const values = isFacilitator ? [assignmentId, facilitatorCollegeIds] : [assignmentId];
+
+        const result = await pool.query(
+          `SELECT
+             cas.id,
+             cas.submission_link,
+             cas.submission_file_url,
+             cas.submission_file_name,
+             cas.submitted_at,
+             u.full_name  AS student_name,
+             u.email      AS student_email,
+             c.name       AS college_name
+           FROM college_assignment_submissions cas
+           JOIN users u            ON u.id  = cas.student_id
+           LEFT JOIN student_profiles sp ON sp.user_id = cas.student_id
+           LEFT JOIN colleges c    ON c.id  = sp.college_id
+           WHERE cas.assignment_id = $1
+           ${collegeFilter}
+           ORDER BY cas.submitted_at DESC`,
+          values,
+        );
+        rows = result.rows;
       }
-
-      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
-      const values = isFacilitator ? [assignmentId, facilitatorCollegeIds] : [assignmentId];
-
-      const result = await pool.query(
-        `SELECT
-           cas.id,
-           cas.submission_link,
-           cas.submission_file_url,
-           cas.submission_file_name,
-           cas.submitted_at,
-           u.full_name  AS student_name,
-           u.email      AS student_email,
-           c.name       AS college_name
-         FROM college_assignment_submissions cas
-         JOIN users u            ON u.id  = cas.student_id
-         LEFT JOIN student_profiles sp ON sp.user_id = cas.student_id
-         LEFT JOIN colleges c    ON c.id  = sp.college_id
-         WHERE cas.assignment_id = $1
-         ${collegeFilter}
-         ORDER BY cas.submitted_at DESC`,
-        values,
-      );
-      rows = result.rows;
     }
 
     res.json({
       success: true,
       data: rows,
-      type: isUnitAssignment ? 'unit' : 'college',
+      type: isUnitAssignment ? 'unit' : isProject ? 'capstone' : 'college',
     });
   } catch (error) {
     console.error('getAssignmentSubmissions error:', error);
@@ -881,7 +924,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
 // GET /api/v1/college-assignments/evaluation-filters
 exports.getFilteredAssignments = async (req, res) => {
   try {
-    const { collegeId, domain, search, batch } = req.query;
+    const { collegeId, domain, search, batch, tab = 'assignments' } = req.query;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(
       100,
@@ -922,6 +965,116 @@ exports.getFilteredAssignments = async (req, res) => {
     let batchParamIdx = null;
     if (batch) {
       batchParamIdx = getNextIndex(batch);
+    }
+
+    // Handle Projects Tab (Only Capstone Projects from public.projects)
+    if (tab === 'projects') {
+      const pValues = [];
+      const getPIndex = (val) => {
+        pValues.push(val);
+        return pValues.length;
+      };
+
+      let facCollegesIdx = null;
+      let facSubjectsIdx = null;
+      if (isFacilitator) {
+        facCollegesIdx = getPIndex(facilitatorCollegeIds);
+        facSubjectsIdx = getPIndex(facilitatorSubjectIds);
+      }
+
+      let collegeParamIdx = null;
+      if (collegeId) {
+        collegeParamIdx = getPIndex(collegeId);
+      }
+
+      let batchParamIdx = null;
+      if (batch) {
+        batchParamIdx = getPIndex(batch);
+      }
+
+      let submissionFilterProject = '';
+      if (facCollegesIdx) {
+        submissionFilterProject += ` AND sp.college_id = ANY($${facCollegesIdx}::uuid[])`;
+      }
+      if (collegeParamIdx) {
+        submissionFilterProject += ` AND sp.college_id = $${collegeParamIdx}::uuid`;
+      }
+      if (batchParamIdx) {
+        submissionFilterProject += ` AND sp.expected_graduation_year = $${batchParamIdx}`;
+      }
+
+      let pWhere = 'WHERE (p.is_deleted = false OR p.is_deleted IS NULL)';
+      if (isFacilitator) {
+        pWhere += ` AND t.subject_id = ANY($${facSubjectsIdx}::uuid[])`;
+      }
+
+      let query = `
+        WITH all_projects AS (
+          SELECT 
+            p.id, 
+            p.title, 
+            s.name as course, 
+            'capstone' as type,
+            p.evaluator_type,
+            NULL::uuid as college_id, 
+            'Curriculum' as college_name,
+            NULL::timestamp as created_at,
+            NULL::timestamp as due_date,
+            (
+              SELECT COUNT(DISTINCT ps.user_id)::int 
+              FROM public.project_submissions ps
+              JOIN public.student_profiles sp ON ps.user_id = sp.user_id
+              WHERE ps.project_id = p.id
+              ${submissionFilterProject}
+            ) as submissions_count,
+            CASE WHEN e.status = 'completed' THEN 'evaluated' ELSE 'pending' END as status,
+            e.id as evaluation_id
+          FROM public.projects p
+          JOIN public.topics t ON p.topic_id = t.id
+          JOIN public.subjects s ON t.subject_id = s.id
+          LEFT JOIN LATERAL (
+            SELECT * FROM public.evaluations
+            WHERE project_id = p.id
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) e ON true
+          ${pWhere}
+        )
+        SELECT * FROM all_projects
+        WHERE 1=1
+      `;
+
+      // 🎯 Domain filter
+      if (domain) {
+        const domainIdx = getPIndex(domain);
+        query += ` AND (LOWER(course) LIKE LOWER('%' || $${domainIdx} || '%') OR LOWER($${domainIdx}) LIKE '%' || LOWER(course) || '%')`;
+      }
+
+      // 🔍 Search filter
+      if (search) {
+        const searchIdx = getPIndex(`%${search}%`);
+        query += ` AND LOWER(title) LIKE LOWER($${searchIdx})`;
+      }
+
+      query += ` ORDER BY submissions_count DESC, title ASC`;
+
+      const limitIdx = getPIndex(pageSize);
+      const offsetIdx = getPIndex((page - 1) * pageSize);
+      query = `SELECT *, COUNT(*) OVER()::int AS total_count FROM (${query}) paged LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+
+      const { rows } = await pool.query(query, pValues);
+      const total = rows[0]?.total_count ?? 0;
+      const data = rows.map(({ total_count, ...rest }) => rest);
+      return res.json({
+        success: true,
+        data,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        },
+      });
     }
 
     let submissionFilterUnit = '';

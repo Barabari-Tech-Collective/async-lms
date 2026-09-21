@@ -788,6 +788,10 @@ const LearningFlow: React.FC = () => {
   const handleCreateCapstone = async (data: {
     title: string;
     instructions: string;
+    max_score: number;
+    evaluator_type?: string | null;
+    test_cases?: string | null;
+    rubric?: string | null;
   }) => {
     if (!selectedTopicForCapstone) return;
     setModalLoading(true);
@@ -796,6 +800,10 @@ const LearningFlow: React.FC = () => {
         topic_id: selectedTopicForCapstone.id,
         title: data.title,
         instructions: data.instructions,
+        max_score: data.max_score,
+        evaluator_type: data.evaluator_type,
+        test_cases: data.test_cases,
+        rubric: data.rubric,
       });
       toast.success('Capstone project created');
       refreshStructure();
@@ -811,6 +819,10 @@ const LearningFlow: React.FC = () => {
   const handleUpdateCapstone = async (data: {
     title: string;
     instructions: string;
+    max_score: number;
+    evaluator_type?: string | null;
+    test_cases?: string | null;
+    rubric?: string | null;
   }) => {
     if (!editingCapstone) return;
     setModalLoading(true);
@@ -818,6 +830,10 @@ const LearningFlow: React.FC = () => {
       await apiClient.put(`/admin/projects/${editingCapstone.id}`, {
         title: data.title,
         instructions: data.instructions,
+        max_score: data.max_score,
+        evaluator_type: data.evaluator_type,
+        test_cases: data.test_cases,
+        rubric: data.rubric,
       });
       toast.success('Capstone updated');
       refreshStructure();
@@ -1897,9 +1913,16 @@ const LearningFlow: React.FC = () => {
                                       <span className='text-xs sm:text-sm font-bold text-slate-800 truncate block'>
                                         {topic.capstone.title}
                                       </span>
-                                      <span className='text-[11px] font-semibold text-amber-700'>
-                                        +{topic.capstone.max_score} XP • Capstone Project
-                                      </span>
+                                      <div className='flex items-center gap-1.5 flex-wrap'>
+                                        <span className='text-[11px] font-semibold text-amber-700'>
+                                          +{topic.capstone.max_score || 100} XP • Capstone Project
+                                        </span>
+                                        {topic.capstone.evaluator_type && (
+                                          <span className='inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 border border-amber-300/60'>
+                                            {topic.capstone.evaluator_type} Evaluator
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                   <div className='flex items-center gap-1 text-slate-400 shrink-0 ml-2'>
@@ -2260,6 +2283,10 @@ const LearningFlow: React.FC = () => {
             ? {
                 title: editingCapstone.title,
                 instructions: editingCapstone.instructions,
+                max_score: editingCapstone.max_score,
+                evaluator_type: editingCapstone.evaluator_type,
+                test_cases: editingCapstone.test_cases,
+                rubric: editingCapstone.rubric,
               }
             : undefined
         }
