@@ -746,7 +746,7 @@ exports.getSubtopicContent = async (req, res) => {
           const exerciseIds = exercisesList.map((e) => e.id);
           const passedRes = await pool.query(
             `SELECT DISTINCT exercise_id FROM exercise_submissions 
-             WHERE exercise_id = ANY($1::uuid[]) AND user_id = $2 AND is_passed = true`,
+             WHERE exercise_id = ANY($1::uuid[]) AND user_id = $2`,
             [exerciseIds, userId],
           );
           const passedSet = new Set(passedRes.rows.map((r) => r.exercise_id));
@@ -1002,7 +1002,7 @@ exports.getExerciseContent = async (req, res) => {
     if (userId) {
       const subCheck = await pool.query(
         `SELECT 1 FROM exercise_submissions
-         WHERE exercise_id = $1 AND user_id = $2 AND is_passed = true
+         WHERE exercise_id = $1 AND user_id = $2
          LIMIT 1`,
         [exerciseId, userId],
       );

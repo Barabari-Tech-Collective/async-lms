@@ -6,6 +6,7 @@ import {
   LogOut,
   User,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import NotificationBell from '@/components/common/NotificationBell';
 import { useAppSelector, useAppDispatch } from '@/app/hooks';
@@ -26,11 +27,22 @@ interface HeaderProps {
   toggleSidebar: () => void;
   toggleMobileSidebar?: () => void;
   isSidebarOpen: boolean;
+  pendingMilestonesCount?: number;
+  onOpenMilestonesModal?: () => void;
+  mostUrgentMilestone?: {
+    urgency_level: string;
+    hours_left: number;
+    days_left: number;
+    is_overdue: boolean;
+  } | null;
 }
 
 export default function StudentHeader({
   toggleSidebar,
   toggleMobileSidebar,
+  pendingMilestonesCount = 0,
+  onOpenMilestonesModal,
+  mostUrgentMilestone,
 }: HeaderProps) {
   const user = useAppSelector(selectUser);
   const dispatch = useAppDispatch();
@@ -81,6 +93,39 @@ export default function StudentHeader({
       </div>
 
       <div className='flex items-center gap-1.5 sm:gap-3 md:gap-6 shrink-0'>
+        {/* Milestone Alert Pill */}
+        {onOpenMilestonesModal && (
+          <button
+            onClick={onOpenMilestonesModal}
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border text-[10px] sm:text-xs font-bold shrink-0 transition-all cursor-pointer shadow-xs ${
+              pendingMilestonesCount > 0
+                ? mostUrgentMilestone?.is_overdue
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 animate-pulse'
+                  : mostUrgentMilestone?.urgency_level === 'urgent'
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+            }`}
+            title="Click to view your learning pathway and progress milestones"
+          >
+            <Sparkles className="w-3.5 h-3.5 fill-current shrink-0" />
+            {pendingMilestonesCount > 0 ? (
+              <>
+                <span>{pendingMilestonesCount}</span>
+                <span className="hidden sm:inline">
+                  {mostUrgentMilestone?.is_overdue
+                    ? ' OVERDUE'
+                    : mostUrgentMilestone?.urgency_level === 'urgent'
+                    ? ' DUE TODAY'
+                    : ' DUE SOON'}
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] font-bold text-indigo-700">Learning Pathway</span>
+            )}
+          </button>
+        )}
+
         {/* Streak Badge - Compact on mobile, full on desktop */}
         <div
           className='flex items-center gap-1 sm:gap-1.5 bg-orange-50 text-orange-600 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-full border border-orange-100 text-[10px] sm:text-xs font-bold shrink-0'

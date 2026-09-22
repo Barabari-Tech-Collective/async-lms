@@ -313,16 +313,12 @@ const Lesson = () => {
     if (submittingExercise[exerciseId]) return; // prevent double-submit
     try {
       const result = await dispatch(submitExercise({ exerciseId, files, taskId })).unwrap();
-      if (result.isPassed) {
-        fireCelebrationBoom(160);
-        const hasRubric = Array.isArray(result?.testResults?.rubric_breakdown) && result.testResults.rubric_breakdown.length > 0;
-        if (hasRubric) {
-          toast.success('🎉 Exercise passed with flying colors! Great work!');
-        } else {
-          toast.success('Successfully submitted ✅');
-        }
+      fireCelebrationBoom(160);
+      const hasRubric = Array.isArray(result?.testResults?.rubric_breakdown) && result.testResults.rubric_breakdown.length > 0;
+      if (hasRubric) {
+        toast.success('🎉 Exercise passed with flying colors! Great work!');
       } else {
-        toast.error('Test cases failed. Review the results below and try again!');
+        toast.success('Successfully submitted ✅');
       }
       notifyCourseProgressUpdated();
       return result;

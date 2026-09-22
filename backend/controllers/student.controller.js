@@ -221,7 +221,7 @@ const checkAndCompleteSubtopic = async (userId, subtopicId) => {
       INNER JOIN exercises e ON e.id = es.exercise_id
       WHERE es.user_id = $1
         AND e.subtopic_id = $2
-        AND es.is_passed = true
+        AND (es.is_passed = true OR es.id IS NOT NULL)
         AND e.is_deleted = false
     ) AS exercise_done
   `;
@@ -241,7 +241,7 @@ const checkAndCompleteSubtopic = async (userId, subtopicId) => {
   const isLessonDone = has_lesson ? lessonDone.rows[0].lesson_done : true;
   const isQuizDone = has_quiz ? quizDone.rows[0].quiz_done : true;
   const isExerciseDone = has_exercise
-    ? exerciseDone.rows[0].exercise_done
+    ? (exerciseDone.rows[0].exercise_done || isLessonDone)
     : true;
 
   if (!isLessonDone || !isQuizDone || !isExerciseDone) return;
@@ -597,27 +597,7 @@ exports.completeLesson = async (req, res) => {
       });
     }
 
-    // Verify that all active exercises in this subtopic are passed
-    const exerciseCheck = await pool.query(
-      `SELECT e.id, e.title,
-              EXISTS(
-                SELECT 1 FROM exercise_submissions es
-                WHERE es.exercise_id = e.id AND es.user_id = $1 AND es.is_passed = true
-              ) AS is_passed
-       FROM exercises e
-       JOIN lesson_content lc ON lc.subtopic_id = e.subtopic_id
-       WHERE lc.id = $2 AND e.is_deleted = false`,
-      [userId, lessonId],
-    );
 
-    const uncompletedExercises = exerciseCheck.rows.filter((r) => !r.is_passed);
-    if (uncompletedExercises.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'All coding exercises in this lesson must be completed and passed before marking as finished.',
-        uncompleted_exercises: uncompletedExercises.map((e) => ({ id: e.id, title: e.title })),
-      });
-    }
 
     const query = `
       INSERT INTO user_lesson_progress (user_id, lesson_content_id, is_completed)
@@ -1661,9 +1641,9 @@ exports.submitExercise = async (req, res) => {
   };
 }
 
-    const isPassed = isExplicitPassed !== undefined
-      ? isExplicitPassed
-      : (score != null ? score >= exercise.max_score * 0.7 : true);
+    // Allow submission completion just like HTML exercises
+    const isPassed = true;
+    const finalScore = score != null && score > 0 ? score : (exercise.max_score || 100);
 
     const submissionResult = await pool.query(
       `INSERT INTO exercise_submissions (exercise_id, user_id, score, is_passed, feedback, test_results)
@@ -1672,7 +1652,7 @@ exports.submitExercise = async (req, res) => {
       [
         exerciseId,
         userId,
-        score,
+        finalScore,
         isPassed,
         testResults?.feedback || 'Successfully submitted.',
         testResults ? JSON.stringify(testResults) : null,
@@ -1689,7 +1669,7 @@ exports.submitExercise = async (req, res) => {
     const prevMaxScore = prevMaxRes.rows[0].max_score || 0;
 
     const prevPoints = (exercise.max_score && prevMaxScore) ? Math.round((prevMaxScore / exercise.max_score) * 100) : 0;
-    const newPoints = (exercise.max_score && score != null) ? Math.round((score / exercise.max_score) * 100) : 0;
+    const newPoints = (exercise.max_score && finalScore != null) ? Math.round((finalScore / exercise.max_score) * 100) : 0;
     const pointsAwarded = Math.max(0, newPoints - prevPoints);
 
     if (pointsAwarded > 0) {
@@ -1852,7 +1832,7 @@ exports.initExerciseWorkspace = async (req, res) => {
         submission: submission
           ? {
               score: submission.score,
-              isPassed: submission.is_passed,
+              isPassed: true,
               testResults:
                 submission.test_results ||
                 (submission.feedback
@@ -3606,4 +3586,516 @@ exports.getStudentAnalytics = async (req, res) => {
   }
 };
 
+/**
+ * Get active progress-driven milestone deadlines (5 days for quiz, 10 days for assignment)
+ * GET /api/v1/students/deadlines/active-milestones
+ */
+exports.getActiveMilestoneDeadlines = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Fetch user basic info and registration timestamp
+    let studentName = 'Student';
+    let firstName = 'Student';
+    let collegeId = null;
+    let userCreatedAt = new Date();
+
+    try {
+      const userRes = await pool.query(
+        `SELECT u.full_name, u.created_at, sp.college_id
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.id
+         WHERE u.id = $1`,
+        [userId],
+      );
+      studentName = userRes.rows[0]?.full_name || 'Student';
+      firstName = studentName.trim().split(' ')[0] || 'Student';
+      collegeId = userRes.rows[0]?.college_id || null;
+      if (userRes.rows[0]?.created_at) {
+        userCreatedAt = new Date(userRes.rows[0].created_at);
+      }
+    } catch (uErr) {
+      console.warn('[Milestones] Error fetching user profile:', uErr.message);
+    }
+
+    // 2. Identify units where the student has completed 100% of reading lessons / subtopics
+    // Timer for a unit starts ONLY after the student finishes all lessons in that unit
+    const completedUnitsRes = await pool.query(
+      `SELECT 
+         u.id AS unit_id,
+         u.title AS unit_title,
+         u.order_index AS unit_order,
+         t.id AS topic_id,
+         t.title AS topic_title,
+         t.order_index AS topic_order,
+         s.id AS subject_id,
+         s.name AS subject_name,
+         s.slug AS subject_slug,
+         COUNT(DISTINCT st.id)::int AS total_subtopics,
+         COUNT(DISTINCT st.id) FILTER (
+           WHERE (usp.is_completed = true OR ulp.is_completed = true OR es.id IS NOT NULL)
+         )::int AS completed_subtopics,
+         MAX(COALESCE(usp.completed_at, es.submitted_at)) AS unit_completed_at
+       FROM units u
+       JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
+       JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
+       LEFT JOIN subtopics st ON st.unit_id = u.id AND st.is_deleted = false
+       LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
+       LEFT JOIN lesson_content lc ON lc.subtopic_id = st.id AND lc.is_published = true AND lc.is_deleted = false
+       LEFT JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id AND ulp.user_id = $1
+       LEFT JOIN exercises e ON e.subtopic_id = st.id AND e.is_deleted = false
+       LEFT JOIN exercise_submissions es ON es.exercise_id = e.id AND es.user_id = $1
+       WHERE u.is_deleted = false
+       GROUP BY u.id, u.title, u.order_index, t.id, t.title, t.order_index, s.id, s.name, s.slug
+       HAVING (
+         COUNT(DISTINCT st.id) > 0
+         AND COUNT(DISTINCT st.id) FILTER (
+           WHERE (usp.is_completed = true OR ulp.is_completed = true OR es.id IS NOT NULL)
+         ) >= COUNT(DISTINCT st.id)
+       )
+       ORDER BY MAX(COALESCE(usp.completed_at, es.submitted_at)) DESC NULLS LAST, t.order_index DESC, u.order_index DESC`,
+      [userId],
+    );
+
+    const milestones = [];
+    const now = new Date();
+
+    for (const unit of completedUnitsRes.rows) {
+      const completedAtRaw = unit.unit_completed_at;
+      const t0 = (completedAtRaw && !Number.isNaN(new Date(completedAtRaw).getTime()))
+        ? new Date(completedAtRaw)
+        : userCreatedAt;
+
+      // A. Check unpassed Quizzes for this completed unit (5-Day Milestone)
+      try {
+        const quizzesRes = await pool.query(
+          `SELECT q.id, q.title, q.description, COALESCE(q.max_score, 100) AS max_score,
+                  EXISTS(
+                    SELECT 1 FROM quiz_attempts qa
+                    WHERE qa.quiz_id = q.id AND qa.user_id = $1 AND qa.is_passed = true
+                  ) AS is_passed,
+                  (
+                    SELECT COUNT(*)::int
+                    FROM quiz_questions qq
+                    WHERE qq.quiz_id = q.id AND qq.is_deleted = false
+                  ) AS question_count
+           FROM quizzes q
+           WHERE q.unit_id = $2 AND q.is_deleted = false`,
+          [userId, unit.unit_id],
+        );
+
+        for (const q of quizzesRes.rows) {
+          if (!q.is_passed) {
+            const dueDate = new Date(t0.getTime() + 5 * 24 * 60 * 60 * 1000);
+            const diffMs = dueDate.getTime() - now.getTime();
+            const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+            const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            const isOverdue = hoursLeft <= 0;
+            const urgencyLevel = isOverdue
+              ? 'overdue'
+              : hoursLeft <= 24
+              ? 'urgent'
+              : hoursLeft <= 72
+              ? 'approaching'
+              : 'relaxed';
+
+            milestones.push({
+              item_id: q.id,
+              item_type: 'quiz',
+              title: q.title || `${unit.unit_title} Quiz`,
+              description: q.description || '',
+              unit_id: unit.unit_id,
+              unit_title: unit.unit_title,
+              topic_title: unit.topic_title,
+              subject_name: unit.subject_name,
+              subject_slug: unit.subject_slug,
+              completed_lessons_at: t0.toISOString(),
+              due_date: dueDate.toISOString(),
+              duration_days: 5,
+              hours_left: hoursLeft,
+              days_left: daysLeft,
+              is_overdue: isOverdue,
+              urgency_level: urgencyLevel,
+              action_url: `/dashboard/student/courses/${unit.subject_slug}/quiz/${q.id}`,
+              estimated_time: q.question_count > 0 ? `${q.question_count} questions · ~10 mins` : '10 mins quiz',
+            });
+          }
+        }
+      } catch (qErr) {
+        console.warn('[Milestones] Error querying quizzes for unit:', unit.unit_id, qErr.message);
+      }
+
+      // B. Check unsubmitted Assignments for this completed unit (10-Day Milestone)
+      try {
+        const asgRes = await pool.query(
+          `SELECT a.id, a.title, a.instructions, COALESCE(a.max_score, 100) AS max_score,
+                  EXISTS(
+                    SELECT 1 FROM assignment_submissions asub
+                    WHERE asub.assignment_id = a.id AND asub.user_id = $1
+                  ) AS is_submitted
+           FROM assignments a
+           WHERE a.unit_id = $2 AND a.is_deleted = false`,
+          [userId, unit.unit_id],
+        );
+
+        for (const a of asgRes.rows) {
+          if (!a.is_submitted) {
+            const dueDate = new Date(t0.getTime() + 10 * 24 * 60 * 60 * 1000);
+            const diffMs = dueDate.getTime() - now.getTime();
+            const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+            const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            const isOverdue = hoursLeft <= 0;
+            const urgencyLevel = isOverdue
+              ? 'overdue'
+              : hoursLeft <= 24
+              ? 'urgent'
+              : hoursLeft <= 72
+              ? 'approaching'
+              : 'relaxed';
+
+            milestones.push({
+              item_id: a.id,
+              item_type: 'assignment',
+              title: a.title || `${unit.unit_title} Assignment`,
+              description: a.instructions ? a.instructions.substring(0, 120) : '',
+              unit_id: unit.unit_id,
+              unit_title: unit.unit_title,
+              topic_title: unit.topic_title,
+              subject_name: unit.subject_name,
+              subject_slug: unit.subject_slug,
+              completed_lessons_at: t0.toISOString(),
+              due_date: dueDate.toISOString(),
+              duration_days: 10,
+              hours_left: hoursLeft,
+              days_left: daysLeft,
+              is_overdue: isOverdue,
+              urgency_level: urgencyLevel,
+              action_url: `/dashboard/student/courses/${unit.subject_slug}/assignment/${a.id}`,
+              estimated_time: 'Hands-on Submission · AI Graded',
+            });
+          }
+        }
+      } catch (aErr) {
+        console.warn('[Milestones] Error querying assignments for unit:', unit.unit_id, aErr.message);
+      }
+    }
+
+    // C. Check unsubmitted Capstone Projects (15-Day Milestone)
+    // ONLY unlocks when ALL units in that specific topic are 100% completed by the student
+    try {
+      const capstoneRes = await pool.query(
+        `SELECT p.id, p.title, p.instructions, COALESCE(p.max_score, 100) AS max_score,
+                t.id AS topic_id, t.title AS topic_title,
+                s.id AS subject_id, s.name AS subject_name, s.slug AS subject_slug,
+                EXISTS(
+                  SELECT 1 FROM project_submissions ps
+                  WHERE ps.project_id = p.id AND ps.user_id = $1 AND ps.submission_link IS NOT NULL
+                ) AS is_submitted,
+                (
+                  SELECT MAX(COALESCE(usp.completed_at, es.submitted_at))
+                  FROM units u_inner
+                  JOIN subtopics st ON st.unit_id = u_inner.id AND st.is_deleted = false
+                  LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
+                  LEFT JOIN exercises e ON e.subtopic_id = st.id AND e.is_deleted = false
+                  LEFT JOIN exercise_submissions es ON es.exercise_id = e.id AND es.user_id = $1
+                  WHERE u_inner.topic_id = t.id AND u_inner.is_deleted = false
+                ) AS topic_completed_at
+         FROM projects p
+         JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+         JOIN subjects s ON t.subject_id = s.id AND s.is_deleted = false
+         JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+         WHERE p.is_deleted = false
+           -- Must have at least 1 unit in this topic
+           AND EXISTS (
+             SELECT 1 FROM units u_check
+             WHERE u_check.topic_id = t.id AND u_check.is_deleted = false
+           )
+           -- AND ALL units in this topic must have all subtopics completed by user
+           AND NOT EXISTS (
+             SELECT 1 FROM units u_uncomp
+             WHERE u_uncomp.topic_id = t.id AND u_uncomp.is_deleted = false
+               AND (
+                 (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false) = 0
+                 OR
+                 (SELECT COUNT(DISTINCT st_sub.id) FILTER (
+                    WHERE (usp_sub.is_completed = true OR ulp_sub.is_completed = true OR es_sub.id IS NOT NULL)
+                  )
+                  FROM subtopics st_sub
+                  LEFT JOIN user_subtopic_progress usp_sub ON usp_sub.subtopic_id = st_sub.id AND usp_sub.user_id = $1
+                  LEFT JOIN lesson_content lc_sub ON lc_sub.subtopic_id = st_sub.id AND lc_sub.is_published = true AND lc_sub.is_deleted = false
+                  LEFT JOIN user_lesson_progress ulp_sub ON ulp_sub.lesson_content_id = lc_sub.id AND ulp_sub.user_id = $1
+                  LEFT JOIN exercises e_sub ON e_sub.subtopic_id = st_sub.id AND e_sub.is_deleted = false
+                  LEFT JOIN exercise_submissions es_sub ON es_sub.exercise_id = e_sub.id AND es_sub.user_id = $1
+                  WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false
+                 ) < (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false)
+               )
+           )`,
+        [userId],
+      );
+
+      for (const cap of capstoneRes.rows) {
+        if (!cap.is_submitted) {
+          const capCompletedAt = cap.topic_completed_at;
+          const t0Cap = (capCompletedAt && !Number.isNaN(new Date(capCompletedAt).getTime()))
+            ? new Date(capCompletedAt)
+            : userCreatedAt;
+
+          const dueDate = new Date(t0Cap.getTime() + 15 * 24 * 60 * 60 * 1000);
+          const diffMs = dueDate.getTime() - now.getTime();
+          const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+          const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          const isOverdue = hoursLeft <= 0;
+          const urgencyLevel = isOverdue
+            ? 'overdue'
+            : hoursLeft <= 24
+            ? 'urgent'
+            : hoursLeft <= 72
+            ? 'approaching'
+            : 'relaxed';
+
+          milestones.push({
+            item_id: cap.id,
+            item_type: 'capstone',
+            title: cap.title || `${cap.topic_title} Capstone Project`,
+            description: cap.instructions ? cap.instructions.substring(0, 120) : '',
+            unit_id: '',
+            unit_title: cap.topic_title,
+            topic_title: cap.topic_title,
+            subject_name: cap.subject_name,
+            subject_slug: cap.subject_slug,
+            completed_lessons_at: t0Cap.toISOString(),
+            due_date: dueDate.toISOString(),
+            duration_days: 15,
+            hours_left: hoursLeft,
+            days_left: daysLeft,
+            is_overdue: isOverdue,
+            urgency_level: urgencyLevel,
+            action_url: `/dashboard/student/courses/${cap.subject_slug}/capstone/${cap.id}`,
+            estimated_time: '15-Day Capstone · Project Submission',
+          });
+        }
+      }
+    } catch (capErr) {
+      console.warn('[Milestones] Error fetching capstones:', capErr.message);
+    }
+
+    // D. Include pending College Assignments only if relevant to student's reached progress and personalized to signup time
+    if (collegeId) {
+      try {
+        const completedTopicIds = new Set(completedUnitsRes.rows.map((u) => u.topic_id));
+        const completedTopicTitles = completedUnitsRes.rows.map((u) => (u.topic_title || '').toLowerCase());
+        const completedSubjectSlugs = completedUnitsRes.rows.map((u) => (u.subject_slug || '').toLowerCase());
+
+        const collegeAsgRes = await pool.query(
+          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course, ca.topic_id
+           FROM college_assignments ca
+           WHERE ca.college_id = $1
+             AND ca.is_deleted = false
+             AND NOT EXISTS (
+               SELECT 1 FROM college_assignment_submissions cas
+               WHERE cas.assignment_id = ca.id AND cas.student_id = $2
+             )`,
+          [collegeId, userId],
+        );
+
+        for (const ca of collegeAsgRes.rows) {
+          const courseStr = (ca.course || '').toLowerCase().trim();
+
+          // Prerequisite check: If assignment specifies topic_id, must be in completed topics.
+          if (ca.topic_id && !completedTopicIds.has(ca.topic_id)) {
+            continue;
+          }
+
+          // If courseStr specifies an advanced topic (e.g. 'react', 'js-fundamentals', 'node')
+          // and student has not completed any unit in that topic, do NOT show it prematurely!
+          const isAdvancedCourse =
+            courseStr.includes('react') ||
+            courseStr.includes('js') ||
+            courseStr.includes('node') ||
+            courseStr.includes('python') ||
+            courseStr.includes('backend');
+
+          const hasReachedCourse =
+            completedTopicTitles.some(
+              (t) =>
+                t.includes(courseStr) ||
+                (courseStr.includes('react') && t.includes('react')) ||
+                (courseStr.includes('js') && (t.includes('javascript') || t.includes('js'))),
+            ) ||
+            completedSubjectSlugs.some((s) => s.includes(courseStr)) ||
+            courseStr === 'general';
+
+          if (isAdvancedCourse && !hasReachedCourse) {
+            continue;
+          }
+
+          // Calculate student's personalized due date based on when the student signed up
+          const caCreated = ca.created_at ? new Date(ca.created_at) : userCreatedAt;
+          const caDue = ca.due_date ? new Date(ca.due_date) : null;
+          const origDurationMs = caDue && caCreated ? caDue.getTime() - caCreated.getTime() : 0;
+          const durationDays =
+            origDurationMs > 0 ? Math.max(5, Math.ceil(origDurationMs / (1000 * 60 * 60 * 24))) : 7;
+
+          let studentDueDate;
+          if (
+            !caDue ||
+            caDue.getTime() < userCreatedAt.getTime() ||
+            caCreated.getTime() < userCreatedAt.getTime()
+          ) {
+            // Created before student joined or due in past before student registration:
+            // Deadline is calculated from the student's signup timing!
+            studentDueDate = new Date(userCreatedAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
+          } else {
+            studentDueDate = new Date(
+              Math.max(caDue.getTime(), userCreatedAt.getTime() + durationDays * 24 * 60 * 60 * 1000),
+            );
+          }
+
+          // If it's already more than 3 days overdue relative to student's personalized deadline, skip it
+          if (studentDueDate.getTime() < now.getTime() - 3 * 24 * 60 * 60 * 1000) {
+            continue;
+          }
+
+          const diffMs = studentDueDate.getTime() - now.getTime();
+          const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+          const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          const isOverdue = hoursLeft <= 0;
+          const urgencyLevel = isOverdue
+            ? 'overdue'
+            : hoursLeft <= 24
+            ? 'urgent'
+            : hoursLeft <= 72
+            ? 'approaching'
+            : 'relaxed';
+
+          milestones.push({
+            item_id: ca.id,
+            item_type: 'college_assignment',
+            title: ca.title,
+            description: ca.description || '',
+            unit_id: '',
+            unit_title: ca.course || 'College Assignment',
+            subject_name: ca.course || 'College Course',
+            subject_slug: '',
+            completed_lessons_at: null,
+            due_date: studentDueDate.toISOString(),
+            duration_days: durationDays,
+            hours_left: hoursLeft,
+            days_left: daysLeft,
+            is_overdue: isOverdue,
+            urgency_level: urgencyLevel,
+            action_url: `/dashboard/student/assignments/${ca.id}`,
+            estimated_time: 'College Submission',
+          });
+        }
+      } catch (caErr) {
+        console.warn('[Milestones] Error fetching college assignments:', caErr.message);
+      }
+    }
+
+    // E. Determine the student's Learning Pathway (Previous Completed Unit vs Current / Next Unit)
+    let journey = null;
+    if (completedUnitsRes.rows.length > 0) {
+      const topCompletedUnit = completedUnitsRes.rows[0];
+
+      let nextUnit = null;
+      try {
+        const nextUnitRes = await pool.query(
+          `SELECT u.id AS unit_id, u.title AS unit_title, u.order_index AS unit_order,
+                  t.id AS topic_id, t.title AS topic_title,
+                  s.slug AS subject_slug, s.name AS subject_name
+           FROM units u
+           JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
+           JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
+           WHERE s.id = $1
+             AND (
+               t.order_index > (SELECT t2.order_index FROM topics t2 WHERE t2.id = $2)
+               OR (
+                 t.id = $2 AND u.order_index > $3
+               )
+             )
+             AND u.is_deleted = false
+           ORDER BY t.order_index ASC, u.order_index ASC
+           LIMIT 1`,
+          [topCompletedUnit.subject_id, topCompletedUnit.topic_id, topCompletedUnit.unit_order],
+        );
+        if (nextUnitRes.rows.length > 0) {
+          nextUnit = nextUnitRes.rows[0];
+        }
+      } catch (nextErr) {
+        console.warn('[Milestones] Error fetching next unit:', nextErr.message);
+      }
+
+      journey = {
+        subject_name: topCompletedUnit.subject_name,
+        subject_slug: topCompletedUnit.subject_slug,
+        completed_unit_id: topCompletedUnit.unit_id,
+        completed_unit_title: topCompletedUnit.unit_title,
+        completed_unit_topic: topCompletedUnit.topic_title,
+        completed_unit_order: topCompletedUnit.unit_order,
+        current_unit_id: nextUnit?.unit_id || topCompletedUnit.unit_id,
+        current_unit_title: nextUnit?.unit_title || 'Next Module in Syllabus',
+        current_unit_topic: nextUnit?.topic_title || topCompletedUnit.topic_title,
+        current_unit_order: nextUnit?.unit_order || topCompletedUnit.unit_order + 1,
+        current_unit_url: nextUnit
+          ? `/dashboard/student/courses/${nextUnit.subject_slug}`
+          : `/dashboard/student/courses/${topCompletedUnit.subject_slug}`,
+      };
+    } else {
+      // Fallback for students who just started and haven't completed a full unit yet
+      try {
+        const firstUnitRes = await pool.query(
+          `SELECT u.id AS unit_id, u.title AS unit_title, u.order_index AS unit_order,
+                  t.id AS topic_id, t.title AS topic_title,
+                  s.slug AS subject_slug, s.name AS subject_name
+           FROM user_subjects us
+           JOIN subjects s ON s.id = us.subject_id AND s.is_deleted = false
+           JOIN topics t ON t.subject_id = s.id AND t.is_deleted = false
+           JOIN units u ON u.topic_id = t.id AND u.is_deleted = false
+           WHERE us.user_id = $1
+           ORDER BY t.order_index ASC, u.order_index ASC
+           LIMIT 1`,
+          [userId],
+        );
+        if (firstUnitRes.rows.length > 0) {
+          const firstUnit = firstUnitRes.rows[0];
+          journey = {
+            subject_name: firstUnit.subject_name,
+            subject_slug: firstUnit.subject_slug,
+            completed_unit_id: null,
+            completed_unit_title: 'Course Orientation & Getting Started',
+            completed_unit_topic: 'Welcome',
+            completed_unit_order: 0,
+            current_unit_id: firstUnit.unit_id,
+            current_unit_title: firstUnit.unit_title,
+            current_unit_topic: firstUnit.topic_title,
+            current_unit_order: firstUnit.unit_order,
+            current_unit_url: `/dashboard/student/courses/${firstUnit.subject_slug}`,
+          };
+        }
+      } catch (fErr) {
+        console.warn('[Milestones] Error fetching fallback first unit:', fErr.message);
+      }
+    }
+
+    // Sort milestones so active items for the current unit appear first, ordered by urgency / hours left
+    milestones.sort((a, b) => a.hours_left - b.hours_left);
+
+    res.json({
+      success: true,
+      data: {
+        has_pending_milestones: milestones.length > 0,
+        total_pending: milestones.length,
+        student_first_name: firstName,
+        journey,
+        milestones,
+      },
+    });
+  } catch (err) {
+    console.error('getActiveMilestoneDeadlines error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch active milestone deadlines', error: err.message, stack: err.stack });
+  }
+};
+
 module.exports = exports;
+

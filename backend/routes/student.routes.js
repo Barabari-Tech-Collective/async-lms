@@ -30,7 +30,16 @@ const {
   enrollInSubject,
   getStudentAnalytics,
   getStudentModuleAnalytics,
+  getActiveMilestoneDeadlines,
 } = require('../controllers/student.controller');
+
+// ===== PROGRESS-DRIVEN MILESTONE DEADLINES =====
+router.get(
+  '/deadlines/active-milestones',
+  verifyToken,
+  isStudent,
+  getActiveMilestoneDeadlines,
+);
 
 // ===== PROGRESS TRACKING =====
 router.get('/progress', verifyToken, isStudent, getMyProgress);

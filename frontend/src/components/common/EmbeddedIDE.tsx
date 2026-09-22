@@ -246,8 +246,8 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
           const sub = res.data.data.submission;
           const testRes = sub.testResults;
           if (testRes) {
-            let outputText = `=== SUBMISSION EVALUATION ===\n`;
-            outputText += `Status: ${sub.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+            let outputText = `=== SUBMISSION ===\n`;
+            outputText += `Status: Successfully submitted ✅\n`;
 
             if (testRes.feedback) {
               outputText += `\n--- Detailed Feedback ---\n${testRes.feedback}\n`;
@@ -784,7 +784,6 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       const result = await onSubmit(exercise.id, tabs, activeTask?.id);
       
       const testRes = result?.testResults || result?.data?.test_results;
-      const submissionPassed = result?.isPassed !== undefined ? result.isPassed : result?.data?.submission?.is_passed;
       const pointsAwarded = result?.data?.points_awarded || 0;
 
       const hasRubric = Array.isArray(testRes?.rubric_breakdown) && testRes.rubric_breakdown.length > 0;
@@ -795,8 +794,8 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
 
       let outputText = '';
       if (hasRubric) {
-        outputText = `=== SUBMISSION EVALUATION ===\n`;
-        outputText += `Status: ${submissionPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+        outputText = `=== SUBMISSION ===\n`;
+        outputText += `Status: Successfully submitted ✅\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
@@ -811,8 +810,8 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
           if (item.feedback) outputText += `  Feedback: ${item.feedback}\n`;
         });
       } else if (hasUnitTests) {
-        outputText = `=== SUBMISSION EVALUATION ===\n`;
-        outputText += `Status: ${submissionPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+        outputText = `=== SUBMISSION ===\n`;
+        outputText += `Status: Successfully submitted ✅\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
