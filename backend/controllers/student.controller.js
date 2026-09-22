@@ -455,20 +455,25 @@ exports.getMyProgress = async (req, res) => {
     // Get user stats
     const statsQuery = `
       SELECT 
-        COALESCE(us.current_streak, 0) as current_streak,
+        CASE 
+          WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+          ELSE 0 
+        END as current_streak,
         COALESCE(us.longest_streak, 0) as longest_streak,
+        (us.last_activity::date = CURRENT_DATE) as practiced_today,
         COALESCE(SUM(pl.points), 0) as total_points
       FROM users u
       LEFT JOIN user_streaks us ON u.id = us.user_id
       LEFT JOIN points_log pl ON u.id = pl.user_id
       WHERE u.id = $1
-      GROUP BY us.current_streak, us.longest_streak;
+      GROUP BY us.current_streak, us.longest_streak, us.last_activity;
     `;
 
     const statsResult = await pool.query(statsQuery, [userId]);
     const stats = statsResult.rows[0] || {
       current_streak: 0,
       longest_streak: 0,
+      practiced_today: false,
       total_points: 0,
     };
 
@@ -3545,9 +3550,11 @@ exports.getStudentAnalytics = async (req, res) => {
          (SELECT COUNT(DISTINCT assignment_id)::int FROM assignment_submissions WHERE user_id = $1) AS assignments_submitted,
          (SELECT COUNT(DISTINCT project_id)::int FROM project_submissions WHERE user_id = $1 AND is_approved = true)
                                                                                AS projects_completed,
-         (SELECT current_streak FROM user_streaks WHERE user_id = $1)          AS current_streak,
-         (SELECT last_activity FROM user_streaks WHERE user_id = $1)           AS last_activity,
-         (SELECT (CURRENT_DATE - last_activity::date) FROM user_streaks WHERE user_id = $1) AS days_since_active`,
+          (SELECT CASE WHEN last_activity::date >= CURRENT_DATE - 1 THEN current_streak ELSE 0 END FROM user_streaks WHERE user_id = $1) AS current_streak,
+          (SELECT COALESCE(longest_streak, 0) FROM user_streaks WHERE user_id = $1) AS longest_streak,
+          (SELECT (last_activity::date = CURRENT_DATE) FROM user_streaks WHERE user_id = $1) AS practiced_today,
+          (SELECT last_activity FROM user_streaks WHERE user_id = $1)           AS last_activity,
+          (SELECT (CURRENT_DATE - last_activity::date) FROM user_streaks WHERE user_id = $1) AS days_since_active`,
       [userId],
     );
 
@@ -3593,6 +3600,8 @@ exports.getStudentAnalytics = async (req, res) => {
           assignments_pending: pendingRes.rows[0].assignments_pending,
           projects_completed: m.projects_completed,
           current_streak: m.current_streak || 0,
+          longest_streak: m.longest_streak || 0,
+          practiced_today: Boolean(m.practiced_today),
           last_activity: m.last_activity || null,
           days_since_active: m.days_since_active || 0,
           total_xp: totalXp,
@@ -4167,6 +4176,141 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch active milestone deadlines' 
+    });
+  }
+};
+
+/**
+ * GET /api/v1/students/streak-details
+ * Returns detailed Duolingo-style streak status, personal best, and 7-day weekly calendar (Mon-Sun)
+ */
+exports.getStudentStreakDetails = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Fetch user streak state
+    const streakRes = await pool.query(
+      `SELECT 
+         CASE 
+           WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
+         COALESCE(us.longest_streak, 0) AS longest_streak,
+         (us.last_activity::date = CURRENT_DATE) AS practiced_today,
+         (us.last_activity::date = CURRENT_DATE - 1 AND COALESCE(us.current_streak, 0) > 0) AS streak_in_jeopardy,
+         us.last_activity::date AS last_activity,
+         CASE 
+           WHEN us.last_activity IS NOT NULL THEN (CURRENT_DATE - us.last_activity::date)
+           ELSE 999 
+         END AS days_since_active
+       FROM users u
+       LEFT JOIN user_streaks us ON us.user_id = u.id
+       WHERE u.id = $1`,
+      [userId],
+    );
+
+    const streakData = streakRes.rows[0] || {
+      current_streak: 0,
+      longest_streak: 0,
+      practiced_today: false,
+      streak_in_jeopardy: false,
+      last_activity: null,
+      days_since_active: 999,
+    };
+
+    const currentStreak = parseInt(streakData.current_streak, 10) || 0;
+    const longestStreak = parseInt(streakData.longest_streak, 10) || 0;
+    const practicedToday = Boolean(streakData.practiced_today);
+    const streakInJeopardy = Boolean(streakData.streak_in_jeopardy);
+
+    // 2. Fetch 7-day Monday through Sunday activity for current week
+    const weekRes = await pool.query(
+      `WITH week_days AS (
+         SELECT 
+           (DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval)::date AS day_date,
+           TRIM(TO_CHAR(DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval, 'Dy')) AS day_name,
+           EXTRACT(DAY FROM (DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval))::int AS day_number
+         FROM generate_series(0, 6) AS i
+       ),
+       user_actions AS (
+         SELECT completed_at::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1 AND completed_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT COALESCE(attempted_at, created_at)::date AS act_date FROM public.quiz_attempts WHERE user_id = $1 AND COALESCE(attempted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT COALESCE(submitted_at, created_at)::date AS act_date FROM public.exercise_submissions WHERE user_id = $1 AND COALESCE(submitted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT submitted_at::date AS act_date FROM public.assignment_submissions WHERE user_id = $1 AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT submitted_at::date AS act_date FROM public.project_submissions WHERE user_id = $1 AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT COALESCE(submitted_at, created_at)::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1 AND COALESCE(submitted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT created_at::date AS act_date FROM public.points_log WHERE user_id = $1 AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT last_activity::date AS act_date FROM public.user_streaks WHERE user_id = $1 AND last_activity >= DATE_TRUNC('week', CURRENT_DATE)
+       )
+       SELECT 
+         w.day_name,
+         w.day_date::text AS date,
+         w.day_number,
+         (w.day_date = CURRENT_DATE) AS is_today,
+         (w.day_date > CURRENT_DATE) AS is_future,
+         EXISTS(SELECT 1 FROM user_actions ua WHERE ua.act_date = w.day_date) AS is_active
+       FROM week_days w
+       ORDER BY w.day_date ASC`,
+      [userId],
+    );
+
+    const weeklyCalendar = weekRes.rows.map((row) => {
+      let status = 'future';
+      if (row.is_today) {
+        status = row.is_active || practicedToday ? 'today_completed' : 'today_pending';
+      } else if (row.is_future) {
+        status = 'future';
+      } else {
+        status = row.is_active ? 'completed' : 'missed';
+      }
+
+      return {
+        day: row.day_name,
+        date: row.date,
+        day_number: row.day_number,
+        is_today: row.is_today,
+        is_future: row.is_future,
+        is_active: Boolean(row.is_active || (row.is_today && practicedToday)),
+        status,
+      };
+    });
+
+    // 3. Dynamic motivational message
+    let motivationalMessage = 'Start practicing today to build your streak!';
+    if (practicedToday) {
+      motivationalMessage = currentStreak > 1
+        ? `🔥 You're on a roll! ${currentStreak} days strong. Keep it up tomorrow!`
+        : "🎉 Great job! You started your 1-day streak today!";
+    } else if (streakInJeopardy) {
+      motivationalMessage = `⚠️ Practice today to keep your ${currentStreak}-day streak alive!`;
+    } else if (longestStreak > 0 && currentStreak === 0) {
+      motivationalMessage = `Your streak reset. Complete a lesson today to start fresh! Personal best: ${longestStreak} days.`;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        practiced_today: practicedToday,
+        streak_in_jeopardy: streakInJeopardy,
+        last_activity: streakData.last_activity,
+        weekly_calendar: weeklyCalendar,
+        motivational_message: motivationalMessage,
+      },
+    });
+  } catch (err) {
+    console.error('getStudentStreakDetails error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch streak details',
     });
   }
 };

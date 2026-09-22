@@ -6,6 +6,8 @@ import {
   Activity,
   BookOpen,
   CheckCircle2,
+  Flame,
+  Trophy,
   type LucideIcon,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -91,9 +93,27 @@ const StudentDashboardHome: FC = () => {
       {/* 1. Hero Section */}
       <section className='relative overflow-hidden rounded-2xl sm:rounded-[2rem] bg-[#1e293b] text-white p-5 sm:p-8 md:p-12 shadow-xl'>
         <div className='relative z-10 max-w-2xl'>
-          <Badge className='bg-slate-700/50 hover:bg-slate-700 text-slate-100 border-none px-2.5 py-0.5 sm:px-3 sm:py-1 mb-4 sm:mb-6 text-[10px] sm:text-xs backdrop-blur-md'>
-            WELCOME BACK
-          </Badge>
+          <div className='flex items-center gap-2 mb-4 sm:mb-6 flex-wrap'>
+            <Badge className='bg-slate-700/50 hover:bg-slate-700 text-slate-100 border-none px-2.5 py-0.5 sm:px-3 sm:py-1 text-[10px] sm:text-xs backdrop-blur-md'>
+              WELCOME BACK
+            </Badge>
+            {(user?.current_streak ?? 0) > 0 ? (
+              <div className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 backdrop-blur-md'>
+                <Flame className='w-3.5 h-3.5 text-orange-400 fill-orange-400 animate-pulse' />
+                <span>{user?.current_streak} Day Streak!</span>
+                {user?.practiced_today ? (
+                  <span className='text-[10px] text-emerald-400 ml-1 font-semibold'>✓ Kept today</span>
+                ) : (
+                  <span className='text-[10px] text-amber-300 ml-1 font-semibold'>• Practice today!</span>
+                )}
+              </div>
+            ) : (user?.longest_streak ?? 0) > 0 ? (
+              <div className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-700/40 text-slate-300 border border-slate-600/30 backdrop-blur-md'>
+                <Trophy className='w-3.5 h-3.5 text-amber-400' />
+                <span>Personal Best: {user?.longest_streak} Days</span>
+              </div>
+            ) : null}
+          </div>
           <h1 className='text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-3 sm:mb-4 leading-[1.15]'>
             Ready to continue,{' '}
             <span className='text-yellow-400'>
@@ -137,7 +157,21 @@ const StudentDashboardHome: FC = () => {
       </section>
 
       {/* 2. Stats Grid */}
-      <section className='grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4'>
+      <section className='grid gap-3 sm:gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6'>
+        <StatCard
+          label='Current Streak'
+          value={user?.current_streak ? `${user.current_streak} d` : '0 d'}
+          icon={Flame}
+          iconColor={user?.current_streak ? 'text-orange-500 fill-orange-500' : 'text-slate-400'}
+          bgColor={user?.current_streak ? 'bg-orange-50' : 'bg-slate-50'}
+        />
+        <StatCard
+          label='Personal Best'
+          value={user?.longest_streak ? `${user.longest_streak} d` : '0 d'}
+          icon={Trophy}
+          iconColor='text-amber-500'
+          bgColor='bg-amber-50'
+        />
         <StatCard
           label='Enrolled Courses'
           value={loadingCourses ? '—' : courses.length}
@@ -149,8 +183,8 @@ const StudentDashboardHome: FC = () => {
           label='Pending Tasks'
           value={loadingOverview ? '—' : counts.pending}
           icon={FileText}
-          iconColor='text-orange-500'
-          bgColor='bg-orange-50'
+          iconColor='text-rose-500'
+          bgColor='bg-rose-50'
         />
         <StatCard
           label='Evaluated'

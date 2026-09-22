@@ -28,15 +28,15 @@ async function triggerStreakUpdate(userId) {
        VALUES ($1, 1, 1, CURRENT_DATE)
        ON CONFLICT (user_id) DO UPDATE SET
          current_streak = CASE
-           WHEN user_streaks.last_activity = CURRENT_DATE THEN user_streaks.current_streak
-           WHEN user_streaks.last_activity = CURRENT_DATE - INTERVAL '1 day' THEN user_streaks.current_streak + 1
+           WHEN user_streaks.last_activity::date = CURRENT_DATE THEN user_streaks.current_streak
+           WHEN user_streaks.last_activity::date = CURRENT_DATE - 1 THEN user_streaks.current_streak + 1
            ELSE 1
          END,
          longest_streak = GREATEST(
-           user_streaks.longest_streak,
+           COALESCE(user_streaks.longest_streak, 0),
            CASE
-             WHEN user_streaks.last_activity = CURRENT_DATE THEN user_streaks.current_streak
-             WHEN user_streaks.last_activity = CURRENT_DATE - INTERVAL '1 day' THEN user_streaks.current_streak + 1
+             WHEN user_streaks.last_activity::date = CURRENT_DATE THEN user_streaks.current_streak
+             WHEN user_streaks.last_activity::date = CURRENT_DATE - 1 THEN user_streaks.current_streak + 1
              ELSE 1
            END
          ),

@@ -31,7 +31,11 @@ const {
   getStudentAnalytics,
   getStudentModuleAnalytics,
   getActiveMilestoneDeadlines,
+  getStudentStreakDetails,
 } = require('../controllers/student.controller');
+
+// ===== DUOLINGO-STYLE STREAK DETAILS =====
+router.get('/streak-details', verifyToken, isStudent, getStudentStreakDetails);
 
 // ===== PROGRESS-DRIVEN MILESTONE DEADLINES =====
 router.get(

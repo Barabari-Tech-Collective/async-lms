@@ -16,6 +16,9 @@ export interface User {
   onboarding_step: string;
   must_change_password?: boolean;
   current_streak?: number;
+  longest_streak?: number;
+  practiced_today?: boolean;
+  streak_in_jeopardy?: boolean;
   total_points?: number;
 }
 

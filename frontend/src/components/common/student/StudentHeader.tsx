@@ -1,5 +1,4 @@
 import {
-  Flame,
   Star,
   ChevronDown,
   Menu,
@@ -22,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { StreakPopover } from '@/components/common/student/StreakPopover';
 
 interface HeaderProps {
   toggleSidebar: () => void;
@@ -126,15 +126,8 @@ export default function StudentHeader({
           </button>
         )}
 
-        {/* Streak Badge - Compact on mobile, full on desktop */}
-        <div
-          className='flex items-center gap-1 sm:gap-1.5 bg-orange-50 text-orange-600 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-full border border-orange-100 text-[10px] sm:text-xs font-bold shrink-0'
-          title={`${user?.current_streak ?? 0} Day Streak`}
-        >
-          <Flame className='w-3.5 h-3.5 fill-orange-500 shrink-0' />
-          <span>{user?.current_streak ?? 0}</span>
-          <span className='hidden sm:inline'> DAY STREAK</span>
-        </div>
+        {/* Streak Popover - Interactive Duolingo-style streak tracker */}
+        <StreakPopover />
 
         {/* XP Badge - Compact on mobile, full on desktop */}
         <div

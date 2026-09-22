@@ -190,7 +190,7 @@ exports.getFacilitatorStudentProfile = async (req, res) => {
            COUNT(DISTINCT us.subject_id)::int AS enrolled_subjects,
            COALESCE((SELECT COUNT(*)::int FROM user_subtopic_progress WHERE user_id = $1 AND is_completed = true), 0) AS completed_subtopics,
            COALESCE((SELECT SUM(points)::int FROM points_log WHERE user_id = $1), 0) AS total_points,
-           COALESCE(MAX(str.current_streak), 0)::int AS current_streak,
+           COALESCE(MAX(CASE WHEN str.last_activity::date >= CURRENT_DATE - 1 THEN str.current_streak ELSE 0 END), 0)::int AS current_streak,
            COALESCE(MAX(str.longest_streak), 0)::int AS longest_streak
          FROM users u
          LEFT JOIN user_subjects us ON u.id = us.user_id
@@ -2394,7 +2394,9 @@ exports.getBatchDashboard = async (req, res) => {
 
     // Average batch streak
     const streakRes = await pool.query(
-      `SELECT COALESCE(AVG(current_streak), 0) as avg_streak FROM user_streaks WHERE user_id = ANY($1::uuid[])`,
+      `SELECT COALESCE(AVG(
+        CASE WHEN last_activity::date >= CURRENT_DATE - 1 THEN current_streak ELSE 0 END
+      ), 0) as avg_streak FROM user_streaks WHERE user_id = ANY($1::uuid[])`,
       [enrolledIds]
     );
     const avgBatchStreak = Math.round(parseFloat(streakRes.rows[0]?.avg_streak || 0));

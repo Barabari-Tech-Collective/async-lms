@@ -3136,7 +3136,7 @@ exports.getAllStudentsProgressSummary = async (req, res) => {
         COUNT(DISTINCT usp.subtopic_id) FILTER (WHERE usp.is_completed = true) as completed_subtopics,
         COUNT(DISTINCT usp.subtopic_id) as total_assigned_subtopics,
         COALESCE(SUM(pl.points), 0) as total_points,
-        MAX(us.current_streak) as current_streak,
+        MAX(CASE WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN us.current_streak ELSE 0 END) as current_streak,
         COUNT(*) OVER ()::integer as total_count
       FROM users u
       LEFT JOIN student_profiles sp ON u.id = sp.user_id
@@ -3868,7 +3868,7 @@ exports.getStudentProfile = async (req, res) => {
              WHERE ulp.user_id = $1 AND ulp.is_completed = true AND lc.is_deleted = false
            ), 0) AS completed_subtopics,
            COALESCE((SELECT SUM(points)::int FROM points_log WHERE user_id = $1), 0) AS total_points,
-           COALESCE(MAX(str.current_streak), 0)::int AS current_streak,
+           COALESCE(MAX(CASE WHEN str.last_activity::date >= CURRENT_DATE - 1 THEN str.current_streak ELSE 0 END), 0)::int AS current_streak,
            COALESCE(MAX(str.longest_streak), 0)::int AS longest_streak
          FROM users u
          LEFT JOIN user_subjects us ON u.id = us.user_id

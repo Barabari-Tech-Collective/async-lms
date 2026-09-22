@@ -877,7 +877,13 @@ exports.getMe = async (req, res) => {
               sp.college_id, sp.degree, sp.year,
               c.is_verified AS college_is_verified,
               c.name AS college_name,
-              COALESCE(us.current_streak, 0) AS current_streak,
+              CASE 
+                WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+                ELSE 0 
+              END AS current_streak,
+              COALESCE(us.longest_streak, 0) AS longest_streak,
+              (us.last_activity::date = CURRENT_DATE) AS practiced_today,
+              (us.last_activity::date = CURRENT_DATE - 1 AND COALESCE(us.current_streak, 0) > 0) AS streak_in_jeopardy,
               COALESCE(SUM(pl.points), 0)::integer AS total_points
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id
@@ -887,7 +893,7 @@ exports.getMe = async (req, res) => {
        LEFT JOIN points_log pl ON pl.user_id = u.id
        WHERE u.id = $1
        GROUP BY u.id, u.full_name, u.email, r.role_key, u.domain, u.role_focus, u.onboarding_step, u.is_verified, u.must_change_password,
-                sp.college_id, sp.degree, sp.year, c.is_verified, c.name, us.current_streak`,
+                sp.college_id, sp.degree, sp.year, c.is_verified, c.name, us.current_streak, us.longest_streak, us.last_activity`,
       [userID],
     );
 
