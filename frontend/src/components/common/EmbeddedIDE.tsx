@@ -247,7 +247,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
           const testRes = sub.testResults;
           if (testRes) {
             let outputText = `=== SUBMISSION ===\n`;
-            outputText += `Status: Successfully submitted ✅\n`;
+            outputText += `Status: ${sub.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
 
             if (testRes.feedback) {
               outputText += `\n--- Detailed Feedback ---\n${testRes.feedback}\n`;
@@ -795,7 +795,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       let outputText = '';
       if (hasRubric) {
         outputText = `=== SUBMISSION ===\n`;
-        outputText += `Status: Successfully submitted ✅\n`;
+        outputText += `Status: ${result?.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
@@ -811,7 +811,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
         });
       } else if (hasUnitTests) {
         outputText = `=== SUBMISSION ===\n`;
-        outputText += `Status: Successfully submitted ✅\n`;
+        outputText += `Status: ${result?.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }

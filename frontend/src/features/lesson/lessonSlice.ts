@@ -168,10 +168,11 @@ export const submitExercise = createAsyncThunk<
       { files: payload.files, taskId: payload.taskId }
     );
     dispatch(loadUser());
+    const isPassed = Boolean(res.data.data?.submission?.is_passed ?? res.data.data?.is_passed);
     return { 
       exerciseId: payload.exerciseId, 
       score: res.data.data?.submission?.score ?? res.data.data?.score ?? null,
-      isPassed: true,
+      isPassed,
       testResults: res.data.data?.test_results,
     };
   } catch (error: any) {
@@ -345,7 +346,9 @@ const lessonSlice = createSlice({
       })
       .addCase(submitExercise.fulfilled, (state, action) => {
         state.submittingExercise[action.payload.exerciseId] = false;
-        state.passedExercises[action.payload.exerciseId] = true;
+        if (action.payload.isPassed) {
+          state.passedExercises[action.payload.exerciseId] = true;
+        }
       })
       .addCase(submitExercise.rejected, (state, action) => {
         const exerciseId = action.meta.arg.exerciseId;

@@ -221,7 +221,7 @@ const checkAndCompleteSubtopic = async (userId, subtopicId) => {
       INNER JOIN exercises e ON e.id = es.exercise_id
       WHERE es.user_id = $1
         AND e.subtopic_id = $2
-        AND (es.is_passed = true OR es.id IS NOT NULL)
+        AND es.is_passed = true
         AND e.is_deleted = false
     ) AS exercise_done
   `;
@@ -241,7 +241,7 @@ const checkAndCompleteSubtopic = async (userId, subtopicId) => {
   const isLessonDone = has_lesson ? lessonDone.rows[0].lesson_done : true;
   const isQuizDone = has_quiz ? quizDone.rows[0].quiz_done : true;
   const isExerciseDone = has_exercise
-    ? (exerciseDone.rows[0].exercise_done || isLessonDone)
+    ? exerciseDone.rows[0].exercise_done
     : true;
 
   if (!isLessonDone || !isQuizDone || !isExerciseDone) return;
@@ -586,7 +586,7 @@ exports.completeLesson = async (req, res) => {
     }
 
     const lessonExists = await pool.query(
-      'SELECT id FROM lesson_content WHERE id = $1 LIMIT 1',
+      'SELECT id, subtopic_id FROM lesson_content WHERE id = $1 LIMIT 1',
       [lessonId],
     );
 
@@ -597,7 +597,27 @@ exports.completeLesson = async (req, res) => {
       });
     }
 
+    const subtopicId = lessonExists.rows[0].subtopic_id;
 
+    // Verify that if this subtopic has active exercises, they are passed
+    if (subtopicId) {
+      const unpassedExercises = await pool.query(
+        `SELECT e.id FROM exercises e
+         WHERE e.subtopic_id = $1 AND e.is_deleted = false
+           AND NOT EXISTS (
+             SELECT 1 FROM exercise_submissions es
+             WHERE es.exercise_id = e.id AND es.user_id = $2 AND es.is_passed = true
+           )`,
+        [subtopicId, userId],
+      );
+
+      if (unpassedExercises.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please complete and pass all exercises for this lesson before marking it as completed.',
+        });
+      }
+    }
 
     const query = `
       INSERT INTO user_lesson_progress (user_id, lesson_content_id, is_completed)
@@ -615,9 +635,9 @@ exports.completeLesson = async (req, res) => {
         'INSERT INTO points_log (user_id, source, points) VALUES ($1, $2, $3)',
         [userId, 'lesson_completion', 10],
       );
-      markActionToday(userId);
       await checkAndAwardBadges(userId);
     }
+    markActionToday(userId);
 
     const subtopicResult = await pool.query(
       `SELECT lc.subtopic_id, t.subject_id 
@@ -629,7 +649,6 @@ exports.completeLesson = async (req, res) => {
       [lessonId],
     );
 
-    const subtopicId = subtopicResult.rows[0]?.subtopic_id;
     const subjectId = subtopicResult.rows[0]?.subject_id;
 
     if (subtopicId) {
@@ -1641,9 +1660,10 @@ exports.submitExercise = async (req, res) => {
   };
 }
 
-    // Allow submission completion just like HTML exercises
-    const isPassed = true;
-    const finalScore = score != null && score > 0 ? score : (exercise.max_score || 100);
+    const isPassed = isExplicitPassed !== undefined
+      ? isExplicitPassed
+      : (score != null ? score >= (exercise.max_score || 100) * 0.7 : true);
+    const finalScore = score;
 
     const submissionResult = await pool.query(
       `INSERT INTO exercise_submissions (exercise_id, user_id, score, is_passed, feedback, test_results)
@@ -1654,7 +1674,7 @@ exports.submitExercise = async (req, res) => {
         userId,
         finalScore,
         isPassed,
-        testResults?.feedback || 'Successfully submitted.',
+        testResults?.feedback || (isPassed ? 'Successfully submitted.' : 'Test evaluation failed.'),
         testResults ? JSON.stringify(testResults) : null,
       ],
     );
@@ -1663,14 +1683,14 @@ exports.submitExercise = async (req, res) => {
     const prevMaxRes = await pool.query(
       `SELECT MAX(score) as max_score 
        FROM exercise_submissions 
-       WHERE user_id = $1 AND exercise_id = $2 AND id != $3`,
+       WHERE user_id = $1 AND exercise_id = $2 AND id != $3 AND is_passed = true`,
       [userId, exerciseId, submissionResult.rows[0].id],
     );
     const prevMaxScore = prevMaxRes.rows[0].max_score || 0;
 
     const prevPoints = (exercise.max_score && prevMaxScore) ? Math.round((prevMaxScore / exercise.max_score) * 100) : 0;
     const newPoints = (exercise.max_score && finalScore != null) ? Math.round((finalScore / exercise.max_score) * 100) : 0;
-    const pointsAwarded = Math.max(0, newPoints - prevPoints);
+    const pointsAwarded = isPassed ? Math.max(0, newPoints - prevPoints) : 0;
 
     if (pointsAwarded > 0) {
       await pool.query(
@@ -1832,7 +1852,7 @@ exports.initExerciseWorkspace = async (req, res) => {
         submission: submission
           ? {
               score: submission.score,
-              isPassed: true,
+              isPassed: Boolean(submission.is_passed),
               testResults:
                 submission.test_results ||
                 (submission.feedback
@@ -2405,6 +2425,8 @@ exports.submitAssignment = async (req, res) => {
        RETURNING submission_link, submitted_at`,
       [id, userId, submission_link.trim()],
     );
+
+    markActionToday(userId);
 
     logAction({
       req,
@@ -2999,9 +3021,9 @@ exports.submitCapstone = async (req, res) => {
         'INSERT INTO points_log (user_id, source, points) VALUES ($1, $2, $3)',
         [userId, source, 20],
       );
-      markActionToday(userId);
       await checkAndAwardBadges(userId);
     }
+    markActionToday(userId);
 
     logAction({
       req,
@@ -3633,43 +3655,77 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
          s.slug AS subject_slug,
          COUNT(DISTINCT st.id)::int AS total_subtopics,
          COUNT(DISTINCT st.id) FILTER (
-           WHERE (usp.is_completed = true OR ulp.is_completed = true OR es.id IS NOT NULL)
+           WHERE usp.is_completed = true
+              OR (
+                EXISTS(
+                  SELECT 1 FROM lesson_content lc 
+                  JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id 
+                  WHERE lc.subtopic_id = st.id AND ulp.user_id = $1 AND ulp.is_completed = true
+                )
+                AND NOT EXISTS(
+                  SELECT 1 FROM exercises e 
+                  WHERE e.subtopic_id = st.id AND e.is_deleted = false 
+                    AND NOT EXISTS(
+                      SELECT 1 FROM exercise_submissions es 
+                      WHERE es.exercise_id = e.id AND es.user_id = $1 AND es.is_passed = true
+                    )
+                )
+              )
          )::int AS completed_subtopics,
-         MAX(COALESCE(usp.completed_at, ulp.completed_at, es.submitted_at)) AS unit_completed_at
+         MAX(usp.completed_at) AS unit_completed_at
        FROM units u
        JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
        JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
-       LEFT JOIN subtopics st ON st.unit_id = u.id AND st.is_deleted = false
+       JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       JOIN subtopics st ON st.unit_id = u.id AND st.is_deleted = false
        LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
-       LEFT JOIN lesson_content lc ON lc.subtopic_id = st.id AND lc.is_published = true AND lc.is_deleted = false
-       LEFT JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id AND ulp.user_id = $1
-       LEFT JOIN exercises e ON e.subtopic_id = st.id AND e.is_deleted = false
-       LEFT JOIN exercise_submissions es ON es.exercise_id = e.id AND es.user_id = $1
        WHERE u.is_deleted = false
        GROUP BY u.id, u.title, u.order_index, t.id, t.title, t.order_index, s.id, s.name, s.slug
        HAVING (
          COUNT(DISTINCT st.id) > 0
          AND COUNT(DISTINCT st.id) FILTER (
-           WHERE (usp.is_completed = true OR ulp.is_completed = true OR es.id IS NOT NULL)
+           WHERE usp.is_completed = true
+              OR (
+                EXISTS(
+                  SELECT 1 FROM lesson_content lc 
+                  JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id 
+                  WHERE lc.subtopic_id = st.id AND ulp.user_id = $1 AND ulp.is_completed = true
+                )
+                AND NOT EXISTS(
+                  SELECT 1 FROM exercises e 
+                  WHERE e.subtopic_id = st.id AND e.is_deleted = false 
+                    AND NOT EXISTS(
+                      SELECT 1 FROM exercise_submissions es 
+                      WHERE es.exercise_id = e.id AND es.user_id = $1 AND es.is_passed = true
+                    )
+                )
+              )
          ) >= COUNT(DISTINCT st.id)
        )
-       ORDER BY MAX(COALESCE(usp.completed_at, es.submitted_at)) DESC NULLS LAST, t.order_index DESC, u.order_index DESC`,
+       ORDER BY MAX(usp.completed_at) DESC NULLS LAST, t.order_index DESC, u.order_index DESC`,
       [userId],
     );
 
     const milestones = [];
     const now = new Date();
 
-    for (const unit of completedUnitsRes.rows) {
-      const completedAtRaw = unit.unit_completed_at;
-      const t0 = (completedAtRaw && !Number.isNaN(new Date(completedAtRaw).getTime()))
-        ? new Date(completedAtRaw)
-        : userCreatedAt;
+    if (completedUnitsRes.rows.length > 0) {
+      const unitMap = new Map();
+      const unitIds = [];
 
-      // A. Check unpassed Quizzes for this completed unit (5-Day Milestone)
+      for (const unit of completedUnitsRes.rows) {
+        unitIds.push(unit.unit_id);
+        const completedAtRaw = unit.unit_completed_at;
+        const t0 = (completedAtRaw && !Number.isNaN(new Date(completedAtRaw).getTime()))
+          ? new Date(completedAtRaw)
+          : userCreatedAt;
+        unitMap.set(unit.unit_id, { unit, t0 });
+      }
+
+      // A. Batch query unpassed Quizzes for all completed units (5-Day Milestone)
       try {
         const quizzesRes = await pool.query(
-          `SELECT q.id, q.title, q.description, COALESCE(q.max_score, 100) AS max_score,
+          `SELECT q.id, q.title, q.description, q.unit_id, COALESCE(q.max_score, 100) AS max_score,
                   EXISTS(
                     SELECT 1 FROM quiz_attempts qa
                     WHERE qa.quiz_id = q.id AND qa.user_id = $1 AND qa.is_passed = true
@@ -3680,12 +3736,15 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
                     WHERE qq.quiz_id = q.id AND qq.is_deleted = false
                   ) AS question_count
            FROM quizzes q
-           WHERE q.unit_id = $2 AND q.is_deleted = false`,
-          [userId, unit.unit_id],
+           WHERE q.unit_id = ANY($2::uuid[]) AND q.is_deleted = false`,
+          [userId, unitIds],
         );
 
         for (const q of quizzesRes.rows) {
           if (!q.is_passed) {
+            const unitData = unitMap.get(q.unit_id);
+            if (!unitData) continue;
+            const { unit, t0 } = unitData;
             const dueDate = new Date(t0.getTime() + 5 * 24 * 60 * 60 * 1000);
             const diffMs = dueDate.getTime() - now.getTime();
             const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
@@ -3722,24 +3781,27 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
           }
         }
       } catch (qErr) {
-        console.warn('[Milestones] Error querying quizzes for unit:', unit.unit_id, qErr.message);
+        console.warn('[Milestones] Error querying batched quizzes:', qErr.message);
       }
 
-      // B. Check unsubmitted Assignments for this completed unit (10-Day Milestone)
+      // B. Batch query unsubmitted Assignments for all completed units (10-Day Milestone)
       try {
         const asgRes = await pool.query(
-          `SELECT a.id, a.title, a.instructions, COALESCE(a.max_score, 100) AS max_score,
+          `SELECT a.id, a.title, a.instructions, a.unit_id, COALESCE(a.max_score, 100) AS max_score,
                   EXISTS(
                     SELECT 1 FROM assignment_submissions asub
                     WHERE asub.assignment_id = a.id AND asub.user_id = $1
                   ) AS is_submitted
            FROM assignments a
-           WHERE a.unit_id = $2 AND a.is_deleted = false`,
-          [userId, unit.unit_id],
+           WHERE a.unit_id = ANY($2::uuid[]) AND a.is_deleted = false`,
+          [userId, unitIds],
         );
 
         for (const a of asgRes.rows) {
           if (!a.is_submitted) {
+            const unitData = unitMap.get(a.unit_id);
+            if (!unitData) continue;
+            const { unit, t0 } = unitData;
             const dueDate = new Date(t0.getTime() + 10 * 24 * 60 * 60 * 1000);
             const diffMs = dueDate.getTime() - now.getTime();
             const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
@@ -3776,7 +3838,7 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
           }
         }
       } catch (aErr) {
-        console.warn('[Milestones] Error querying assignments for unit:', unit.unit_id, aErr.message);
+        console.warn('[Milestones] Error querying batched assignments:', aErr.message);
       }
     }
 
@@ -3792,12 +3854,10 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
                   WHERE ps.project_id = p.id AND ps.user_id = $1 AND ps.submission_link IS NOT NULL
                 ) AS is_submitted,
                 (
-                  SELECT MAX(COALESCE(usp.completed_at, es.submitted_at))
+                  SELECT MAX(usp.completed_at)
                   FROM units u_inner
                   JOIN subtopics st ON st.unit_id = u_inner.id AND st.is_deleted = false
                   LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
-                  LEFT JOIN exercises e ON e.subtopic_id = st.id AND e.is_deleted = false
-                  LEFT JOIN exercise_submissions es ON es.exercise_id = e.id AND es.user_id = $1
                   WHERE u_inner.topic_id = t.id AND u_inner.is_deleted = false
                 ) AS topic_completed_at
          FROM projects p
@@ -3818,14 +3878,25 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
                  (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false) = 0
                  OR
                  (SELECT COUNT(DISTINCT st_sub.id) FILTER (
-                    WHERE (usp_sub.is_completed = true OR ulp_sub.is_completed = true OR es_sub.id IS NOT NULL)
+                    WHERE usp_sub.is_completed = true
+                       OR (
+                         EXISTS(
+                           SELECT 1 FROM lesson_content lc_sub 
+                           JOIN user_lesson_progress ulp_sub ON ulp_sub.lesson_content_id = lc_sub.id 
+                           WHERE lc_sub.subtopic_id = st_sub.id AND ulp_sub.user_id = $1 AND ulp_sub.is_completed = true
+                         )
+                         AND NOT EXISTS(
+                           SELECT 1 FROM exercises e_sub 
+                           WHERE e_sub.subtopic_id = st_sub.id AND e_sub.is_deleted = false 
+                             AND NOT EXISTS(
+                               SELECT 1 FROM exercise_submissions es_sub 
+                               WHERE es_sub.exercise_id = e_sub.id AND es_sub.user_id = $1 AND es_sub.is_passed = true
+                             )
+                         )
+                       )
                   )
                   FROM subtopics st_sub
                   LEFT JOIN user_subtopic_progress usp_sub ON usp_sub.subtopic_id = st_sub.id AND usp_sub.user_id = $1
-                  LEFT JOIN lesson_content lc_sub ON lc_sub.subtopic_id = st_sub.id AND lc_sub.is_published = true AND lc_sub.is_deleted = false
-                  LEFT JOIN user_lesson_progress ulp_sub ON ulp_sub.lesson_content_id = lc_sub.id AND ulp_sub.user_id = $1
-                  LEFT JOIN exercises e_sub ON e_sub.subtopic_id = st_sub.id AND e_sub.is_deleted = false
-                  LEFT JOIN exercise_submissions es_sub ON es_sub.exercise_id = e_sub.id AND es_sub.user_id = $1
                   WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false
                  ) < (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false)
                )

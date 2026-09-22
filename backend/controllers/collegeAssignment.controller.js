@@ -2,6 +2,7 @@ const serverError = require('../utils/serverError');
 const pool = require('../config/pg');
 const { logAction } = require('../utils/auditLogger');
 const { notifyCollege } = require('../services/notificationService');
+const { markActionToday } = require('../services/presenceService');
 const {
   S3Client,
   PutObjectCommand,
@@ -713,6 +714,8 @@ exports.submitCollegeAssignment = async (req, res) => {
       entityId: id,
       details: { submission_link },
     });
+
+    markActionToday(student_id);
     res.json({
       success: true,
       data: rows[0],
