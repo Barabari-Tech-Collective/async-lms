@@ -3635,7 +3635,7 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
          COUNT(DISTINCT st.id) FILTER (
            WHERE (usp.is_completed = true OR ulp.is_completed = true OR es.id IS NOT NULL)
          )::int AS completed_subtopics,
-         MAX(COALESCE(usp.completed_at, es.submitted_at)) AS unit_completed_at
+         MAX(COALESCE(usp.completed_at, ulp.completed_at, es.submitted_at)) AS unit_completed_at
        FROM units u
        JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
        JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
@@ -4093,7 +4093,10 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
     });
   } catch (err) {
     console.error('getActiveMilestoneDeadlines error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch active milestone deadlines', error: err.message, stack: err.stack });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch active milestone deadlines' 
+    });
   }
 };
 

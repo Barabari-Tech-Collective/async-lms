@@ -80,7 +80,16 @@ const LiveCountdownBadge: React.FC<{ dueDateStr: string }> = ({ dueDateStr }) =>
       const overdueMs = Math.abs(diff);
       const overdueDays = Math.floor(overdueMs / (1000 * 60 * 60 * 24));
       const overdueHours = Math.floor((overdueMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const text = overdueDays > 0 ? `Overdue by ${overdueDays}d ${overdueHours}h` : `Overdue by ${overdueHours}h`;
+      const overdueMins = Math.floor((overdueMs % (1000 * 60 * 60)) / (1000 * 60));
+
+      let text = '';
+      if (overdueDays > 0) {
+        text = `Overdue by ${overdueDays}d ${overdueHours}h`;
+      } else if (overdueHours > 0) {
+        text = `Overdue by ${overdueHours}h ${overdueMins}m`;
+      } else {
+        text = `Overdue by ${Math.max(1, overdueMins)}m`;
+      }
       return { isOverdue: true, text, urgency: 'overdue' };
     }
 

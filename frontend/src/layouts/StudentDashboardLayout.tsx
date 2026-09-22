@@ -33,20 +33,25 @@ const StudentDashboardLayout = () => {
           const data: ActiveMilestonesData = res.data.data;
           setMilestonesData(data);
 
-          // Trigger on student dashboard and course pages
-          const isRelevantPage =
+          // Only auto-trigger modal on the main student dashboard home, not inside course/lesson views
+          const isHome =
             location.pathname === '/dashboard/student' ||
-            location.pathname === '/dashboard/student/' ||
-            (location.pathname.startsWith('/dashboard/student/courses') &&
-              !location.pathname.includes('/quiz/'));
+            location.pathname === '/dashboard/student/';
 
-          // Pop up should come no matter if the person has pending work or not
-          if (isRelevantPage && (data.has_pending_milestones || data.journey || data.total_pending !== undefined)) {
+          const snoozedUntilStr = localStorage.getItem('lms_milestone_snoozed_until');
+          const isSnoozed =
+            snoozedUntilStr && Number(snoozedUntilStr) > Date.now();
+
+          // Auto-open only once per session on home page if not snoozed
+          const sessionShown = sessionStorage.getItem('lms_milestone_shown_session');
+
+          if (isHome && !isSnoozed && !sessionShown) {
+            sessionStorage.setItem('lms_milestone_shown_session', 'true');
             setTimeout(() => {
               if (isMounted) {
                 setIsMilestonesModalOpen(true);
               }
-            }, 600);
+            }, 1200);
           }
         }
       } catch (err: any) {
@@ -68,6 +73,8 @@ const StudentDashboardLayout = () => {
   }, [location.pathname]);
 
   const handleSnooze = () => {
+    const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
+    localStorage.setItem('lms_milestone_snoozed_until', String(tomorrow));
     setIsMilestonesModalOpen(false);
   };
 
