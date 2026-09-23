@@ -5,6 +5,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { logAction } = require('../utils/auditLogger');
 const crypto = require('crypto');
 const { sendMail } = require('../utils/mailer');
+const { reconcileUserStreak } = require('../services/presenceService');
 
 const oauth2Client = new OAuth2Client(
   process.env.GOOGLE_AUTH_CLIENT_ID,
@@ -872,6 +873,10 @@ exports.getMe = async (req, res) => {
   const userID = req.user?.id; // Extracted from JWT by middleware
 
   try {
+    if (req.user?.role === 'student' || !req.user?.role) {
+      await reconcileUserStreak(userID);
+    }
+
     const userRes = await pool.query(
       `SELECT u.id, u.full_name, u.email, LOWER(r.role_key) AS role, u.domain, u.role_focus, u.onboarding_step, u.is_verified, u.must_change_password,
               sp.college_id, sp.degree, sp.year,

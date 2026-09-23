@@ -21,7 +21,7 @@ const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
  * - Yesterday → increment streak
  * - Older     → reset to 1
  */
-const { markActionToday } = require('../services/presenceService');
+const { markActionToday, reconcileUserStreak } = require('../services/presenceService');
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3533,6 +3533,9 @@ exports.getStudentModuleAnalytics = async (req, res) => {
 exports.getStudentAnalytics = async (req, res) => {
   const userId = req.user.id;
   try {
+    // Reconcile user streak to ensure dashboard metrics reflect true activity
+    await reconcileUserStreak(userId);
+
     // Fetch data sequentially to prevent Neon connection pool exhaustion/timeouts
     const metricsRes = await pool.query(
       `SELECT
@@ -4188,6 +4191,9 @@ exports.getStudentStreakDetails = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Self-heal and synchronize streak state directly from user's real activity history
+    await reconcileUserStreak(userId);
+
     // 1. Fetch user streak state
     const streakRes = await pool.query(
       `SELECT 
@@ -4339,7 +4345,8 @@ exports.getStudentActivityCalendar = async (req, res) => {
       });
     }
 
-    // 1. Fetch streak data for current user to accurately tag today's state
+    // 1. Reconcile and fetch streak data for current user to accurately tag today's state
+    await reconcileUserStreak(userId);
     const streakRes = await pool.query(
       `SELECT 
          CASE 
