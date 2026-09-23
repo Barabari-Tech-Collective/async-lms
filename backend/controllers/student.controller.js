@@ -4182,7 +4182,7 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
 
 /**
  * GET /api/v1/students/streak-details
- * Returns detailed Duolingo-style streak status, personal best, and 7-day weekly calendar (Mon-Sun)
+ * Returns detailed habit streak status, personal best, and 7-day weekly calendar (Mon-Sun)
  */
 exports.getStudentStreakDetails = async (req, res) => {
   try {
@@ -4233,21 +4233,21 @@ exports.getStudentStreakDetails = async (req, res) => {
          FROM generate_series(0, 6) AS i
        ),
        user_actions AS (
-         SELECT completed_at::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1 AND completed_at >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT completed_at::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1::uuid AND completed_at >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT COALESCE(attempted_at, created_at)::date AS act_date FROM public.quiz_attempts WHERE user_id = $1 AND COALESCE(attempted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT COALESCE(attempted_at, created_at)::date AS act_date FROM public.quiz_attempts WHERE user_id = $1::uuid AND COALESCE(attempted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT COALESCE(submitted_at, created_at)::date AS act_date FROM public.exercise_submissions WHERE user_id = $1 AND COALESCE(submitted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT submitted_at::date AS act_date FROM public.exercise_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT submitted_at::date AS act_date FROM public.assignment_submissions WHERE user_id = $1 AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT submitted_at::date AS act_date FROM public.assignment_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT submitted_at::date AS act_date FROM public.project_submissions WHERE user_id = $1 AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT submitted_at::date AS act_date FROM public.project_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT COALESCE(submitted_at, created_at)::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1 AND COALESCE(submitted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT COALESCE(submitted_at, updated_at)::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1::uuid AND COALESCE(submitted_at, updated_at) >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT created_at::date AS act_date FROM public.points_log WHERE user_id = $1 AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT created_at::date AS act_date FROM public.points_log WHERE user_id = $1::uuid AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
          UNION
-         SELECT last_activity::date AS act_date FROM public.user_streaks WHERE user_id = $1 AND last_activity >= DATE_TRUNC('week', CURRENT_DATE)
+         SELECT last_activity::date AS act_date FROM public.user_streaks WHERE user_id = $1::uuid AND last_activity >= DATE_TRUNC('week', CURRENT_DATE)
        )
        SELECT 
          w.day_name,
@@ -4283,16 +4283,19 @@ exports.getStudentStreakDetails = async (req, res) => {
     });
 
     // 3. Dynamic motivational message
-    let motivationalMessage = 'Start practicing today to build your streak!';
-    if (practicedToday) {
-      motivationalMessage = currentStreak > 1
-        ? `🔥 You're on a roll! ${currentStreak} days strong. Keep it up tomorrow!`
-        : "🎉 Great job! You started your 1-day streak today!";
-    } else if (streakInJeopardy) {
-      motivationalMessage = `⚠️ Practice today to keep your ${currentStreak}-day streak alive!`;
-    } else if (longestStreak > 0 && currentStreak === 0) {
-      motivationalMessage = `Your streak reset. Complete a lesson today to start fresh! Personal best: ${longestStreak} days.`;
-    }
+    const getMotivationalMessage = (currentStreak, practicedToday, longestStreak) => {
+      let motivationalMessage = 'Start practicing today to build your streak!';
+      if (practicedToday) {
+        motivationalMessage = currentStreak > 1
+          ? `🔥 You're on a roll! ${currentStreak} days strong. Keep it up tomorrow!`
+          : "🎉 Great job! You started your 1-day streak today!";
+      } else if (streakInJeopardy) {
+        motivationalMessage = `⚠️ Practice today to keep your ${currentStreak}-day streak alive!`;
+      } else if (longestStreak > 0 && currentStreak === 0) {
+        motivationalMessage = `Your streak reset. Complete a lesson today to start fresh! Personal best: ${longestStreak} days.`;
+      }
+      return motivationalMessage;
+    };
 
     res.json({
       success: true,
@@ -4301,16 +4304,275 @@ exports.getStudentStreakDetails = async (req, res) => {
         longest_streak: longestStreak,
         practiced_today: practicedToday,
         streak_in_jeopardy: streakInJeopardy,
-        last_activity: streakData.last_activity,
         weekly_calendar: weeklyCalendar,
-        motivational_message: motivationalMessage,
+        motivational_message: getMotivationalMessage(currentStreak, practicedToday, longestStreak),
       },
     });
   } catch (err) {
     console.error('getStudentStreakDetails error:', err);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch streak details',
+      message: 'Failed to fetch student streak details',
+    });
+  }
+};
+
+/**
+ * GET /api/v1/students/activity-calendar
+ * Query params: ?year=YYYY&month=MM (1-12)
+ * Returns full monthly activity calendar with daily habit markings,
+ * activity counts, contribution heatmap levels (0-3), and detailed breakdown.
+ */
+exports.getStudentActivityCalendar = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const now = new Date();
+    const queryYear = parseInt(req.query.year, 10) || now.getFullYear();
+    const queryMonth = parseInt(req.query.month, 10) || (now.getMonth() + 1);
+
+    // Validate bounds
+    if (queryMonth < 1 || queryMonth > 12 || queryYear < 2020 || queryYear > 2100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid year or month parameter',
+      });
+    }
+
+    // 1. Fetch streak data for current user to accurately tag today's state
+    const streakRes = await pool.query(
+      `SELECT 
+         CASE 
+           WHEN last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
+         COALESCE(longest_streak, 0) AS longest_streak,
+         (last_activity::date = CURRENT_DATE) AS practiced_today
+       FROM user_streaks
+       WHERE user_id = $1::uuid`,
+      [userId],
+    );
+
+    const userStreak = streakRes.rows[0] || {
+      current_streak: 0,
+      longest_streak: 0,
+      practiced_today: false,
+    };
+    const currentStreak = parseInt(userStreak.current_streak, 10) || 0;
+    const longestStreak = parseInt(userStreak.longest_streak, 10) || 0;
+    const practicedToday = Boolean(userStreak.practiced_today);
+
+    // 2. Query month calendar and all 7 activity touchpoints
+    const query = `
+      WITH month_days AS (
+        SELECT 
+          d::date AS day_date,
+          TRIM(TO_CHAR(d, 'Dy')) AS day_name,
+          EXTRACT(DAY FROM d)::int AS day_number,
+          EXTRACT(ISODOW FROM d)::int AS iso_dow
+        FROM generate_series(
+          make_date($2::int, $3::int, 1)::timestamp,
+          (make_date($2::int, $3::int, 1) + INTERVAL '1 month - 1 day')::timestamp,
+          '1 day'::interval
+        ) AS d
+      ),
+      user_actions AS (
+        SELECT completed_at::date AS act_date, 'lesson' AS action_type, 1 AS count, 0 AS xp
+        FROM public.user_subtopic_progress
+        WHERE user_id = $1::uuid 
+          AND completed_at IS NOT NULL
+          AND completed_at >= make_date($2::int, $3::int, 1) 
+          AND completed_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT COALESCE(attempted_at, created_at)::date AS act_date, 'quiz' AS action_type, 1 AS count, 0 AS xp
+        FROM public.quiz_attempts
+        WHERE user_id = $1::uuid 
+          AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
+          AND COALESCE(attempted_at, created_at) >= make_date($2::int, $3::int, 1) 
+          AND COALESCE(attempted_at, created_at) < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'exercise' AS action_type, 1 AS count, 0 AS xp
+        FROM public.exercise_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'assignment' AS action_type, 1 AS count, 0 AS xp
+        FROM public.assignment_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'project' AS action_type, 1 AS count, 0 AS xp
+        FROM public.project_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT COALESCE(submitted_at, updated_at)::date AS act_date, 'college_assignment' AS action_type, 1 AS count, 0 AS xp
+        FROM public.college_assignment_submissions
+        WHERE student_id = $1::uuid 
+          AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
+          AND COALESCE(submitted_at, updated_at) >= make_date($2::int, $3::int, 1) 
+          AND COALESCE(submitted_at, updated_at) < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT last_activity::date AS act_date, 'streak' AS action_type, 1 AS count, 0 AS xp
+        FROM public.user_streaks
+        WHERE user_id = $1::uuid
+          AND last_activity IS NOT NULL
+          AND last_activity >= make_date($2::int, $3::int, 1)
+          AND last_activity < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT created_at::date AS act_date, 'points' AS action_type, 0 AS count, points AS xp
+        FROM public.points_log
+        WHERE user_id = $1::uuid 
+          AND created_at IS NOT NULL
+          AND created_at >= make_date($2::int, $3::int, 1) 
+          AND created_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+      )
+      SELECT 
+        d.day_date::text AS date,
+        d.day_number,
+        d.day_name,
+        d.iso_dow,
+        (d.day_date = CURRENT_DATE) AS is_today,
+        (d.day_date > CURRENT_DATE) AS is_future,
+        COALESCE(COUNT(CASE WHEN ua.action_type != 'points' THEN 1 END), 0)::int AS activity_count,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'lesson' THEN 1 END), 0)::int AS lessons_completed,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'quiz' THEN 1 END), 0)::int AS quizzes_attempted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'exercise' THEN 1 END), 0)::int AS exercises_completed,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'assignment' THEN 1 END), 0)::int AS assignments_submitted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'project' THEN 1 END), 0)::int AS projects_submitted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'college_assignment' THEN 1 END), 0)::int AS college_assignments_submitted,
+        COALESCE(SUM(ua.xp), 0)::int AS xp_earned
+      FROM month_days d
+      LEFT JOIN user_actions ua ON ua.act_date = d.day_date
+      GROUP BY d.day_date, d.day_number, d.day_name, d.iso_dow
+      ORDER BY d.day_date ASC;
+    `;
+
+    const { rows } = await pool.query(query, [userId, queryYear, queryMonth]);
+
+    let totalActiveDays = 0;
+    let totalActionsCount = 0;
+    let totalXpEarned = 0;
+
+    const days = rows.map((row) => {
+      let activityCount = parseInt(row.activity_count, 10) || 0;
+      const xpEarned = parseInt(row.xp_earned, 10) || 0;
+
+      // If practiced today is true, guarantee today has at least 1 action
+      if (row.is_today && practicedToday && activityCount === 0) {
+        activityCount = 1;
+      }
+
+      const isActive = activityCount > 0;
+      if (isActive) totalActiveDays++;
+      totalActionsCount += activityCount;
+      totalXpEarned += xpEarned;
+
+      // Heatmap Intensity Level: 0 (none), 1 (light), 2 (medium), 3 (intense)
+      let activityLevel = 0;
+      if (activityCount >= 4) {
+        activityLevel = 3;
+      } else if (activityCount >= 2) {
+        activityLevel = 2;
+      } else if (activityCount >= 1) {
+        activityLevel = 1;
+      }
+
+      // Daily Status
+      let status = 'future';
+      if (row.is_today) {
+        status = isActive || practicedToday ? 'today_completed' : 'today_pending';
+      } else if (row.is_future) {
+        status = 'future';
+      } else {
+        status = isActive ? 'completed' : 'missed';
+      }
+
+      return {
+        date: row.date,
+        day_number: row.day_number,
+        day_name: row.day_name,
+        iso_dow: row.iso_dow, // 1 (Mon) to 7 (Sun)
+        is_today: row.is_today,
+        is_future: row.is_future,
+        is_active: isActive,
+        activity_count: activityCount,
+        activity_level: activityLevel,
+        status,
+        details: {
+          lessons: row.lessons_completed,
+          quizzes: row.quizzes_attempted,
+          exercises: row.exercises_completed,
+          assignments: row.assignments_submitted,
+          projects: row.projects_submitted,
+          college_assignments: row.college_assignments_submitted,
+          xp_earned: xpEarned,
+        },
+      };
+    });
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+
+    const firstDayIsoDow = days.length > 0 ? days[0].iso_dow : 1; // 1 = Monday
+    const daysInMonth = days.length;
+
+    // Elapsed days in month for consistency calculation
+    let elapsedDays = daysInMonth;
+    const isCurrentMonth = queryYear === now.getFullYear() && queryMonth === (now.getMonth() + 1);
+    if (isCurrentMonth) {
+      elapsedDays = Math.max(1, now.getDate());
+    } else if (queryYear > now.getFullYear() || (queryYear === now.getFullYear() && queryMonth > (now.getMonth() + 1))) {
+      elapsedDays = 0;
+    }
+
+    const consistencyPct = elapsedDays > 0 ? Math.round((totalActiveDays / elapsedDays) * 100) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        year: queryYear,
+        month: queryMonth,
+        month_name: `${monthNames[queryMonth - 1]} ${queryYear}`,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        practiced_today: practicedToday,
+        total_active_days: totalActiveDays,
+        total_actions_count: totalActionsCount,
+        total_xp_earned: totalXpEarned,
+        monthly_consistency_pct: consistencyPct,
+        first_day_iso_dow: firstDayIsoDow,
+        days_in_month: daysInMonth,
+        days,
+      },
+    });
+  } catch (err) {
+    console.error('getStudentActivityCalendar error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student activity calendar',
     });
   }
 };

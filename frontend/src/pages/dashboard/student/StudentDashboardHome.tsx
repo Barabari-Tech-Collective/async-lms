@@ -25,6 +25,7 @@ import {
   useStudentProjectsOverview,
 } from '@/hooks/queries/useStudentDashboard';
 import { StudentAssignmentsTable } from '@/components/common/student/StudentAssignmentsTable';
+import { ActivityCalendar } from '@/components/common/student/ActivityCalendar';
 import type { Subject } from '@/utils/types';
 
 interface StatCardProps {
@@ -299,7 +300,20 @@ const StudentDashboardHome: FC = () => {
         )}
       </section>
 
-      {/* 4. Full-Featured Unified Assignments & Evaluations Table */}
+      {/* 4. Learning Activity & Consistency Calendar */}
+      <section className='space-y-4'>
+        <div className='flex items-center justify-between px-1'>
+          <h2 className='text-lg sm:text-xl font-bold tracking-tight text-slate-900'>
+            Monthly Activity & Consistency
+          </h2>
+          <span className='text-xs font-semibold text-slate-400'>
+            Daily Habit Heatmap
+          </span>
+        </div>
+        <ActivityCalendar />
+      </section>
+
+      {/* 5. Full-Featured Unified Assignments & Evaluations Table */}
       <section id='student-assignments-section' className='space-y-4'>
         <StudentAssignmentsTable
           assignments={assignmentsList}

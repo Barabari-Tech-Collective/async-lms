@@ -126,7 +126,7 @@ export default function StudentHeader({
           </button>
         )}
 
-        {/* Streak Popover - Interactive Duolingo-style streak tracker */}
+        {/* Streak Popover - Interactive habit streak tracker */}
         <StreakPopover />
 
         {/* XP Badge - Compact on mobile, full on desktop */}
