@@ -20,6 +20,8 @@ import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
+import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
+import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
 
 /* =======================
    Course-wide "next item" navigation
@@ -67,6 +69,9 @@ interface AssignmentDetail {
   title: string;
   instructions?: string;
   max_score: number;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
   unit_title?: string;
   subject_title?: string;
   submission_link?: string | null;
@@ -221,6 +226,11 @@ export default function AssignmentView() {
               {assignment.unit_title}
             </Badge>
           )}
+          {assignment.evaluator_type && (
+            <Badge className='bg-indigo-50 text-indigo-700 border-indigo-200 text-xs font-semibold uppercase'>
+              {assignment.evaluator_type} Evaluator
+            </Badge>
+          )}
           {isSubmitted && (
             <Badge className='bg-emerald-50 text-emerald-700 border-none text-xs'>
               <CheckCircle2 className='h-3 w-3 mr-1' />
@@ -258,6 +268,22 @@ export default function AssignmentView() {
           )}
         </div>
       </Card>
+
+      {/* Grading Rubric */}
+      {assignment.rubric && (
+        <AssignmentRubricsViewer
+          rubric={assignment.rubric}
+          maxScore={assignment.max_score}
+        />
+      )}
+
+      {/* Test Cases */}
+      {assignment.test_cases && (
+        <AssignmentTestCasesViewer
+          testCases={assignment.test_cases}
+          evaluatorType={assignment.evaluator_type}
+        />
+      )}
 
       {/* Submission */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0'>

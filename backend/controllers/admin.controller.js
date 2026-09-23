@@ -2003,7 +2003,7 @@ exports.getAssignment = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, title, instructions, max_score, unit_id FROM assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, title, instructions, max_score, unit_id, evaluator_type, test_cases, rubric FROM assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!result.rowCount)

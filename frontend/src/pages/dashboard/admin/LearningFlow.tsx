@@ -64,6 +64,7 @@ import {
   setStructure,
 } from '@/features/learningFlow/learningFlowSlice';
 import AdminLessonPreviewModal from '@/components/common/admin/AdminLessonPreview';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 
 const LearningFlow: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -145,6 +146,8 @@ const LearningFlow: React.FC = () => {
   const [lessonPreviewVideoUrl, setLessonPreviewVideoUrl] = useState<
     string | undefined
   >(undefined);
+  const [assignmentPreviewOpen, setAssignmentPreviewOpen] = useState(false);
+  const [previewAssignment, setPreviewAssignment] = useState<any | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{
     kind:
@@ -660,6 +663,7 @@ const LearningFlow: React.FC = () => {
         max_score: data.max_score,
         evaluator_type: data.evaluator_type,
         test_cases: data.test_cases,
+        rubric: data.rubric,
       });
 
       if (response.data.success) {
@@ -1396,10 +1400,7 @@ const LearningFlow: React.FC = () => {
                                                              );
                                                            setEditingAssignment({
                                                              ...a,
-                                                             instructions:
-                                                               res.data.data
-                                                                 .instructions ??
-                                                               '',
+                                                             ...(res.data?.data || {}),
                                                            });
                                                          } catch {
                                                            setEditingAssignment(
@@ -1411,6 +1412,20 @@ const LearningFlow: React.FC = () => {
                                                        title='Edit Assignment'
                                                      >
                                                        <Edit2 className='h-3 w-3' />
+                                                     </button>
+                                                     <button
+                                                       type='button'
+                                                       onClick={() => {
+                                                         setPreviewAssignment({
+                                                           ...a,
+                                                           unit_title: unit.title,
+                                                         });
+                                                         setAssignmentPreviewOpen(true);
+                                                       }}
+                                                       className='rounded-md p-1 hover:bg-blue-100 text-blue-600'
+                                                       title='Preview Assignment (Student View)'
+                                                     >
+                                                       <Eye className='h-3 w-3' />
                                                      </button>
                                                      <button
                                                        type='button'
@@ -1809,8 +1824,7 @@ const LearningFlow: React.FC = () => {
                                                                              res
                                                                                .data
                                                                                .data
-                                                                               .instructions ??
-                                                                             '',
+                                                                                .instructions ?? '',
                                                                            initial_files:
                                                                              res
                                                                                .data
@@ -2258,6 +2272,19 @@ const LearningFlow: React.FC = () => {
         unitTitle={selectedUnitForAssignment?.title || ''}
         loading={modalLoading}
       />
+
+      {assignmentPreviewOpen && previewAssignment && (
+        <AdminAssignmentPreviewModal
+          isOpen={assignmentPreviewOpen}
+          onClose={() => {
+            setAssignmentPreviewOpen(false);
+            setPreviewAssignment(null);
+          }}
+          assignmentId={previewAssignment.id}
+          assignmentData={previewAssignment}
+          unitTitle={previewAssignment.unit_title}
+        />
+      )}
 
       <CapstoneModal
         isOpen={capstoneModalOpen}
