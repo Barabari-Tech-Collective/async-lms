@@ -6,7 +6,7 @@ import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 type Props = {
   tab?: 'assignments' | 'projects';
@@ -38,6 +38,11 @@ const EvaluationTable = ({
   selectedDomain,
   selectedBatch,
 }: Props) => {
+  const location = useLocation();
+  const basePath = location.pathname.includes('/dashboard/admin')
+    ? '/dashboard/admin'
+    : '/dashboard/facilitator';
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [submissionsOpen, setSubmissionsOpen] = useState(false);
@@ -205,7 +210,7 @@ const EvaluationTable = ({
                   <Eye size={13} /> Submissions
                 </button>
                 <Link
-                  to={`/dashboard/facilitator/results/${item.id}`}
+                  to={`${basePath}/results/${item.id}`}
                   className='inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 font-semibold px-2.5 py-1.5 rounded-lg transition'
                   title='View Evaluation Results'
                 >
@@ -308,7 +313,7 @@ const EvaluationTable = ({
                         <Eye size={13} /> Submissions
                       </button>
                       <Link
-                        to={`/dashboard/facilitator/results/${item.id}`}
+                        to={`${basePath}/results/${item.id}`}
                         className='inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition min-h-[30px]'
                         title='View Evaluation Results'
                       >

@@ -137,7 +137,7 @@ const ResultsPage = () => {
             <StudentTable 
               results={filteredResults} 
               evaluation={evaluation} 
-              assignmentId={id}
+              assignmentId={String((evaluation as any)?.college_assignment_id || (evaluation as any)?.assignment_id || (evaluation as any)?.project_id || id)}
               onRefresh={fetchResults}
             />
           </div>

@@ -177,7 +177,9 @@ export const ActivityCalendar: React.FC<ActivityCalendarProps> = ({
       const dayName = WEEKDAY_NAMES[isoDow - 1];
 
       // Check if user practiced or streak was updated
-      const hasApiActivity = Boolean(apiDay && (apiDay.is_active || apiDay.activity_count > 0));
+      const hasApiActivity = Boolean(
+        apiDay && (apiDay.is_active || apiDay.activity_count > 0 || (apiDay.details?.xp_earned && apiDay.details.xp_earned > 0))
+      );
       const isTodayPracticed = isToday && Boolean(data?.practiced_today || (user as { practiced_today?: boolean })?.practiced_today);
       const isActive = hasApiActivity || isTodayPracticed;
 

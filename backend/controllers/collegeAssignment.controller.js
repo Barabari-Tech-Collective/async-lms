@@ -205,12 +205,15 @@ exports.getMyCollegeAssignments = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
+      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at,
+              COALESCE(s.name, ca.course) AS course,
+              ca.course AS raw_course,
               ca.instruction_file_url, ca.instruction_file_name,
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
               u.full_name AS created_by_name,
               cas.submission_link, cas.submission_file_url, cas.submitted_at
        FROM college_assignments ca
+       LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
        LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $2
        WHERE ca.college_id = $1 AND ca.is_deleted = false
@@ -236,7 +239,10 @@ exports.manageAssignments = async (req, res) => {
 
     if (req.user.role === 'admin') {
       query = `
-        SELECT ca.id, ca.title, ca.description, ca.due_date, ca.course, ca.created_at, ca.updated_at,
+        SELECT ca.id, ca.title, ca.description, ca.due_date,
+               COALESCE(s.name, ca.course) AS course,
+               ca.course AS raw_course,
+               ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
                ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
                ca.college_id, c.name AS college_name,
@@ -251,18 +257,54 @@ exports.manageAssignments = async (req, res) => {
                  FROM student_profiles sp 
                  WHERE sp.college_id = ca.college_id
                ) as submissions_total,
+               (
+                 SELECT COUNT(*)::int
+                 FROM college_assignment_submissions cas
+                 WHERE cas.assignment_id = ca.id
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM evaluation_results er
+                     JOIN evaluations e ON er.evaluation_id = e.id
+                     WHERE (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+                       AND er.submission_id = cas.id
+                       AND er.status IN ('completed', 'failed')
+                   )
+               ) as pending_submissions_count,
+               (
+                 SELECT COUNT(*)::int
+                 FROM college_assignment_submissions cas
+                 WHERE cas.assignment_id = ca.id
+                   AND EXISTS (
+                     SELECT 1
+                     FROM evaluation_results er
+                     JOIN evaluations e ON er.evaluation_id = e.id
+                     WHERE (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+                       AND er.submission_id = cas.id
+                       AND er.status IN ('completed', 'failed')
+                   )
+               ) as evaluated_submissions_count,
                e.status as evaluation_status
         FROM college_assignments ca
+        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
         LEFT JOIN colleges c ON c.id = ca.college_id
         LEFT JOIN users u ON u.id = ca.created_by
-        LEFT JOIN evaluations e ON (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+        LEFT JOIN LATERAL (
+          SELECT status 
+          FROM evaluations 
+          WHERE college_assignment_id = ca.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) e ON true
         WHERE ca.is_deleted = false
-        ORDER BY c.name ASC, ca.due_date ASC NULLS LAST`;
+        ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
       values = [];
     } else {
       // Facilitator: assignments they created OR assignments for their assigned colleges
       query = `
-        SELECT ca.id, ca.title, ca.description, ca.due_date, ca.course, ca.created_at, ca.updated_at,
+        SELECT ca.id, ca.title, ca.description, ca.due_date,
+               COALESCE(s.name, ca.course) AS course,
+               ca.course AS raw_course,
+               ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
                ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
                ca.college_id, c.name AS college_name,
@@ -277,13 +319,46 @@ exports.manageAssignments = async (req, res) => {
                  FROM student_profiles sp 
                  WHERE sp.college_id = ca.college_id
                ) as submissions_total,
+               (
+                 SELECT COUNT(*)::int
+                 FROM college_assignment_submissions cas
+                 WHERE cas.assignment_id = ca.id
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM evaluation_results er
+                     JOIN evaluations e ON er.evaluation_id = e.id
+                     WHERE (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+                       AND er.submission_id = cas.id
+                       AND er.status IN ('completed', 'failed')
+                   )
+               ) as pending_submissions_count,
+               (
+                 SELECT COUNT(*)::int
+                 FROM college_assignment_submissions cas
+                 WHERE cas.assignment_id = ca.id
+                   AND EXISTS (
+                     SELECT 1
+                     FROM evaluation_results er
+                     JOIN evaluations e ON er.evaluation_id = e.id
+                     WHERE (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+                       AND er.submission_id = cas.id
+                       AND er.status IN ('completed', 'failed')
+                   )
+               ) as evaluated_submissions_count,
                e.status as evaluation_status
         FROM college_assignments ca
+        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
         LEFT JOIN colleges c ON c.id = ca.college_id
         LEFT JOIN users u ON u.id = ca.created_by
-        LEFT JOIN evaluations e ON (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+        LEFT JOIN LATERAL (
+          SELECT status 
+          FROM evaluations 
+          WHERE college_assignment_id = ca.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) e ON true
         WHERE (ca.created_by = $1 OR ca.college_id = ANY($2::uuid[])) AND ca.is_deleted = false
-        ORDER BY c.name ASC, ca.due_date ASC NULLS LAST`;
+        ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
       values = [req.user.id, req.user.college_ids || []];
     }
 

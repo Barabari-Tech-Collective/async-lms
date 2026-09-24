@@ -4112,6 +4112,35 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
         console.warn('[Milestones] Error fetching next unit:', nextErr.message);
       }
 
+      let completedUnitXp = 0;
+      try {
+        const xpRes = await pool.query(
+          `SELECT (
+             COALESCE(
+               (SELECT COUNT(DISTINCT ulp.lesson_content_id) * 10
+                FROM lesson_content lc
+                JOIN subtopics st ON lc.subtopic_id = st.id
+                JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id
+                WHERE st.unit_id = $1 AND ulp.user_id = $2 AND ulp.is_completed = true), 0
+             ) +
+             COALESCE(
+               (SELECT SUM(es.score)
+                FROM exercise_submissions es
+                JOIN exercises e ON es.exercise_id = e.id
+                JOIN subtopics st ON e.subtopic_id = st.id
+                WHERE st.unit_id = $1 AND es.user_id = $2 AND es.is_passed = true), 0
+             )
+           )::int AS earned_unit_xp`,
+          [topCompletedUnit.unit_id, userId],
+        );
+        completedUnitXp = Number(xpRes.rows[0]?.earned_unit_xp) || 0;
+        if (completedUnitXp === 0 && topCompletedUnit.completed_subtopics > 0) {
+          completedUnitXp = topCompletedUnit.completed_subtopics * 10;
+        }
+      } catch (xpErr) {
+        console.warn('[Milestones] Error fetching completed unit XP:', xpErr.message);
+      }
+
       journey = {
         subject_name: topCompletedUnit.subject_name,
         subject_slug: topCompletedUnit.subject_slug,
@@ -4119,6 +4148,7 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
         completed_unit_title: topCompletedUnit.unit_title,
         completed_unit_topic: topCompletedUnit.topic_title,
         completed_unit_order: topCompletedUnit.unit_order,
+        completed_unit_xp: completedUnitXp,
         current_unit_id: nextUnit?.unit_id || topCompletedUnit.unit_id,
         current_unit_title: nextUnit?.unit_title || 'Next Module in Syllabus',
         current_unit_topic: nextUnit?.topic_title || topCompletedUnit.topic_title,
@@ -4488,12 +4518,17 @@ exports.getStudentActivityCalendar = async (req, res) => {
       let activityCount = parseInt(row.activity_count, 10) || 0;
       const xpEarned = parseInt(row.xp_earned, 10) || 0;
 
+      // If points were earned on this day but no separate action row, count as at least 1 activity
+      if (activityCount === 0 && xpEarned > 0) {
+        activityCount = 1;
+      }
+
       // If practiced today is true, guarantee today has at least 1 action
       if (row.is_today && practicedToday && activityCount === 0) {
         activityCount = 1;
       }
 
-      const isActive = activityCount > 0;
+      const isActive = activityCount > 0 || xpEarned > 0;
       if (isActive) totalActiveDays++;
       totalActionsCount += activityCount;
       totalXpEarned += xpEarned;

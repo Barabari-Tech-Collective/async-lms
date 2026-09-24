@@ -735,8 +735,8 @@ exports.getResultsByAssignment = async (req, res) => {
        LEFT JOIN assignments a ON e.assignment_id = a.id
        LEFT JOIN college_assignments c ON e.college_assignment_id = c.id
        LEFT JOIN projects p ON e.project_id = p.id
-       WHERE e.assignment_id = $1 OR e.college_assignment_id = $1 OR e.project_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
+       WHERE e.id::text = $1 OR e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1
+       ORDER BY e.created_at DESC LIMIT 1`,
       [assignmentId],
     );
 
@@ -782,7 +782,8 @@ exports.getResultsByAssignment = async (req, res) => {
       const isProj = !!evaluation.project_id;
       const evaluatedSubmissionIds = resultsRes.rows.map((r) => r.submission_id).filter(Boolean);
 
-      let newSubValues = [assignmentId];
+      const resolvedAssignmentId = evaluation.college_assignment_id || evaluation.project_id || evaluation.assignment_id || assignmentId;
+      let newSubValues = [resolvedAssignmentId];
       let newSubCollegeFilter = '';
       if (isFacilitator) {
         newSubValues.push(facilitatorCollegeIds);
@@ -871,10 +872,10 @@ exports.getResultsByAssignment = async (req, res) => {
     }
 
     // No evaluation exists, fetch all submissions and generate pending results
-    const isCollegeAssignment = await pool.query(`SELECT id FROM college_assignments WHERE id = $1`, [assignmentId]);
+    const isCollegeAssignment = await pool.query(`SELECT id FROM college_assignments WHERE id::text = $1`, [assignmentId]);
     const isCollege = isCollegeAssignment.rows.length > 0;
 
-    const isProjectAssignment = await pool.query(`SELECT id FROM projects WHERE id = $1`, [assignmentId]);
+    const isProjectAssignment = await pool.query(`SELECT id FROM projects WHERE id::text = $1`, [assignmentId]);
     const isProject = isProjectAssignment.rows.length > 0;
 
     let submissionQuery = '';
@@ -894,7 +895,7 @@ exports.getResultsByAssignment = async (req, res) => {
         JOIN users u ON s.student_id = u.id
         LEFT JOIN student_profiles sp ON u.id = sp.user_id
         LEFT JOIN colleges col ON sp.college_id = col.id
-        WHERE s.assignment_id = $1
+        WHERE s.assignment_id::text = $1
       `;
     } else if (isProject) {
       submissionQuery = `
