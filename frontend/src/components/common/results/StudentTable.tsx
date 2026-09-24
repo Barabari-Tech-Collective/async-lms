@@ -220,7 +220,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, results]);
+  }, [searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
   const paginatedResults = useMemo(() => {

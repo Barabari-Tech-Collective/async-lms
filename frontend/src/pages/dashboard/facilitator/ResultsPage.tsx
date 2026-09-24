@@ -29,9 +29,9 @@ const ResultsPage = () => {
 
   const assignmentName =
     evaluation?.assignment_name || evaluation?.assignment_id;
-  const fetchResults = async () => {
+  const fetchResults = async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`);
 
       setEvaluation(data.evaluation);
@@ -39,12 +39,12 @@ const ResultsPage = () => {
     } catch (err) {
       console.error('Failed to fetch results', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (id) fetchResults();
+    if (id) fetchResults(true);
   }, [id]);
 
   const filteredResults = (results || []).filter((r) => {
