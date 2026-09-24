@@ -199,8 +199,12 @@ export default function AssignmentManagement() {
         const mapped = res.data.data.map((item) => {
           const subsCount = parseInt(item.submissions_count) || 0;
           const subsTotal = parseInt(item.submissions_total) || 0;
-          const isOverdue =
-            item.due_date && new Date(item.due_date) < new Date();
+          let isOverdue = false;
+          if (item.due_date) {
+            const due = new Date(item.due_date);
+            due.setHours(23, 59, 59, 999);
+            isOverdue = due < new Date();
+          }
 
           let status: Assignment['status'] = 'Active';
           if (item.evaluation_status === 'completed') {
@@ -265,9 +269,9 @@ export default function AssignmentManagement() {
       collegeFilter === 'all' || a.collegeId === collegeFilter;
     const matchesTab =
       activeTab === 'Active'
-        ? a.status === 'Active' || a.status === 'Submitted'
+        ? a.status === 'Active' || a.status === 'Submitted' || a.status === 'Overdue'
         : activeTab === 'Completed'
-          ? a.status === 'Overdue' || a.status === 'Completed'
+          ? a.status === 'Completed'
           : a.status === 'Submitted';
     return matchesSearch && matchesCollege && matchesTab;
   });

@@ -238,6 +238,7 @@ exports.manageAssignments = async (req, res) => {
       query = `
         SELECT ca.id, ca.title, ca.description, ca.due_date, ca.course, ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
+               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
                ca.college_id, c.name AS college_name,
                u.full_name AS created_by_name,
                (
@@ -254,15 +255,16 @@ exports.manageAssignments = async (req, res) => {
         FROM college_assignments ca
         LEFT JOIN colleges c ON c.id = ca.college_id
         LEFT JOIN users u ON u.id = ca.created_by
-        LEFT JOIN evaluations e ON e.assignment_id = ca.id
+        LEFT JOIN evaluations e ON (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
         WHERE ca.is_deleted = false
         ORDER BY c.name ASC, ca.due_date ASC NULLS LAST`;
       values = [];
     } else {
-      // Facilitator: only assignments they created
+      // Facilitator: assignments they created OR assignments for their assigned colleges
       query = `
         SELECT ca.id, ca.title, ca.description, ca.due_date, ca.course, ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
+               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
                ca.college_id, c.name AS college_name,
                u.full_name AS created_by_name,
                (
@@ -279,10 +281,10 @@ exports.manageAssignments = async (req, res) => {
         FROM college_assignments ca
         LEFT JOIN colleges c ON c.id = ca.college_id
         LEFT JOIN users u ON u.id = ca.created_by
-        LEFT JOIN evaluations e ON e.assignment_id = ca.id
-        WHERE ca.created_by = $1 AND ca.is_deleted = false
+        LEFT JOIN evaluations e ON (e.college_assignment_id = ca.id OR e.assignment_id = ca.id)
+        WHERE (ca.created_by = $1 OR ca.college_id = ANY($2::uuid[])) AND ca.is_deleted = false
         ORDER BY c.name ASC, ca.due_date ASC NULLS LAST`;
-      values = [req.user.id];
+      values = [req.user.id, req.user.college_ids || []];
     }
 
     const { rows } = await pool.query(query, values);
@@ -293,6 +295,23 @@ exports.manageAssignments = async (req, res) => {
     serverError(res, error);
   }
 };
+
+function formatJsonField(val, fallback = null) {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (typeof val === 'string') {
+    try {
+      JSON.parse(val);
+      return val;
+    } catch {
+      return JSON.stringify(val);
+    }
+  }
+  try {
+    return JSON.stringify(val);
+  } catch {
+    return fallback;
+  }
+}
 
 // POST /api/v1/college-assignments
 // Body: { college_id, college_ids, title, description?, due_date? }
@@ -379,8 +398,8 @@ exports.createAssignment = async (req, res) => {
           req.body.topic_id || null,
           req.body.instruction_file_url || null,
           req.body.instruction_file_name || null,
-          test_cases ? JSON.stringify(test_cases) : '[]',
-          rubric ? JSON.stringify(rubric) : null,
+          formatJsonField(test_cases, '[]'),
+          formatJsonField(rubric, null),
           evaluator_type || null,
           assignment_description || null,
         ],
@@ -529,8 +548,8 @@ exports.updateAssignment = async (req, res) => {
         req.body.topic_id || null,
         req.body.instruction_file_url || null,
         req.body.instruction_file_name || null,
-        test_cases ? JSON.stringify(test_cases) : null,
-        rubric ? JSON.stringify(rubric) : null,
+        test_cases !== undefined ? formatJsonField(test_cases, '[]') : null,
+        rubric !== undefined ? formatJsonField(rubric, null) : null,
         evaluator_type || null,
         assignment_description || null,
         id,
@@ -623,7 +642,7 @@ exports.deleteAssignment = async (req, res) => {
 // Returns a single assignment with student's specific submission
 exports.getCollegeAssignmentById = async (req, res) => {
   const { id } = req.params;
-  const student_id = req.user.id;
+  const student_id = req.user?.role === 'student' ? req.user.id : null;
 
   try {
     const { rows } = await pool.query(
@@ -731,7 +750,7 @@ exports.submitCollegeAssignment = async (req, res) => {
 // Returns a single assignment with student's specific submission
 exports.getCollegeAssignmentById = async (req, res) => {
   const { id } = req.params;
-  const student_id = req.user.id;
+  const student_id = req.user?.role === 'student' ? req.user.id : null;
 
   try {
     const { rows } = await pool.query(
