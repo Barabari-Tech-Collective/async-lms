@@ -148,14 +148,27 @@ export default function AssignmentView() {
   }, [assignmentId]);
 
   const handleSubmit = async () => {
-    if (!link.trim()) {
-      toast.error('Please enter a submission link');
+    const clean = link.trim();
+    if (!clean) {
+      toast.error('Please enter your GitHub repository link');
       return;
     }
+
+    const lower = clean.toLowerCase();
+    if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
+      toast.error('Google Drive links are not accepted. Please provide a public GitHub repository link.');
+      return;
+    }
+
+    if (!lower.includes('github.com')) {
+      toast.error('Only public GitHub repository links (https://github.com/...) are accepted for automated evaluation.');
+      return;
+    }
+
     try {
-      new URL(link.trim());
+      new URL(clean);
     } catch {
-      toast.error('Please enter a valid URL');
+      toast.error('Please enter a valid URL (e.g. https://github.com/username/project)');
       return;
     }
 
@@ -293,8 +306,8 @@ export default function AssignmentView() {
           </p>
           <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
             {isSubmitted
-              ? 'Already submitted — you can update your link below'
-              : 'Paste the link to your solution (GitHub, Google Drive, etc.)'}
+              ? 'Already submitted — you can update your GitHub link below'
+              : 'Paste your public GitHub repository link (e.g. https://github.com/username/project)'}
           </p>
         </div>
         <div className='px-4 py-5 sm:px-8 sm:py-6 space-y-4'>
@@ -321,7 +334,7 @@ export default function AssignmentView() {
               <Input
                 type='url'
                 disabled={isSubmitted}
-                placeholder='https://github.com/your-repo'
+                placeholder='https://github.com/username/project'
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
                 className='pl-9 h-11 text-sm'

@@ -114,6 +114,7 @@ export default function CreateAssignment() {
 
   const dashboardType = location.pathname.includes('/dashboard/admin') ? 'admin' : 'facilitator';
   const basePath = `/dashboard/${dashboardType}`;
+  const managementPath = dashboardType === 'admin' ? `${basePath}/assignment-management` : `${basePath}/assignments`;
 
   // ── Basic Information ──
   const editId = editData.editId || null;
@@ -512,7 +513,7 @@ export default function CreateAssignment() {
         <div className='flex items-center gap-3'>
           <button
             className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
-            onClick={() => navigate(`${basePath}/assignment-management`)}
+            onClick={() => navigate(managementPath)}
           >
             <ArrowLeft className='w-5 h-5' />
           </button>
@@ -1006,7 +1007,7 @@ export default function CreateAssignment() {
               type='button'
               variant='outline'
               className='flex-1 sm:flex-none px-6 h-10 text-xs sm:text-sm'
-              onClick={() => navigate(`${basePath}/assignment-management`)}
+              onClick={() => navigate(managementPath)}
             >
               Cancel
             </Button>

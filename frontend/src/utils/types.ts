@@ -117,7 +117,7 @@ export interface CollegeAssignment {
   submission_file_name?: string | null;
   submitted_at?: string | null;
   test_cases?: AssignmentTestCase[];
-  rubric?: { name: string; score: number }[];
+  rubric?: any;
   evaluator_type?: string | null;
   assignment_description?: string | null;
 }

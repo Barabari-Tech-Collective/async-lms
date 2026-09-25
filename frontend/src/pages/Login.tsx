@@ -76,6 +76,8 @@ export default function Login() {
       const toastId = toast.loading('Signing in...');
       const sanitizedValues = { ...values, email: values.email.trim().toLowerCase() };
       try {
+        sessionStorage.removeItem('lms_milestone_shown_session');
+        localStorage.removeItem('lms_milestone_snoozed_until');
         await dispatch(loginUser(sanitizedValues)).unwrap();
         toast.success('Login successful!', { id: toastId });
       } catch (err: any) {

@@ -497,7 +497,12 @@ exports.createAssignment = async (req, res) => {
         body: due_date
           ? `Due ${new Date(due_date).toLocaleDateString()}: ${description || title}`
           : description || title,
-        link: '/dashboard/student/assignments',
+        link: `/dashboard/student/assignments/${assignment.id}`,
+        meta: {
+          assignmentId: assignment.id,
+          dueDate: due_date,
+          course: course || 'General',
+        },
       });
     }
 

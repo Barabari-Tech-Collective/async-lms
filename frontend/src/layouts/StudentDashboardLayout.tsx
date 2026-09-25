@@ -4,6 +4,7 @@ import StudentSidebar from '@/components/common/student/StudentSidebar';
 import StudentHeader from '@/components/common/student/StudentHeader';
 import { Outlet, useLocation } from 'react-router';
 import apiClient from '@/services/api';
+import toast from 'react-hot-toast';
 import {
   PendingTasksReminderModal,
   type ActiveMilestonesData,
@@ -16,6 +17,13 @@ const StudentDashboardLayout = () => {
 
   const [milestonesData, setMilestonesData] = useState<ActiveMilestonesData | null>(null);
   const [isMilestonesModalOpen, setIsMilestonesModalOpen] = useState(false);
+  const [hasAutoOpened, setHasAutoOpened] = useState(false);
+
+  // Clean up any stale legacy lockout keys from previous sessions
+  useEffect(() => {
+    sessionStorage.removeItem('lms_milestone_shown_session');
+    localStorage.removeItem('lms_milestone_snoozed_until');
+  }, []);
 
   // Automatically close mobile sidebar on route change
   useEffect(() => {
@@ -33,25 +41,23 @@ const StudentDashboardLayout = () => {
           const data: ActiveMilestonesData = res.data.data;
           setMilestonesData(data);
 
-          // Only auto-trigger modal on the main student dashboard home, not inside course/lesson views
+          // Only auto-trigger modal on the main student dashboard home
           const isHome =
             location.pathname === '/dashboard/student' ||
             location.pathname === '/dashboard/student/';
 
-          const snoozedUntilStr = localStorage.getItem('lms_milestone_snoozed_until');
-          const isSnoozed =
-            snoozedUntilStr && Number(snoozedUntilStr) > Date.now();
+          const hasPendingTasks =
+            Boolean(data.total_pending && data.total_pending > 0) ||
+            Boolean(data.milestones && data.milestones.length > 0);
 
-          // Auto-open only once per session on home page if not snoozed
-          const sessionShown = sessionStorage.getItem('lms_milestone_shown_session');
-
-          if (isHome && !isSnoozed && !sessionShown) {
-            sessionStorage.setItem('lms_milestone_shown_session', 'true');
+          // Pop up automatically on login / dashboard load whenever pending tasks exist
+          if (isHome && hasPendingTasks && !hasAutoOpened) {
+            setHasAutoOpened(true);
             setTimeout(() => {
               if (isMounted) {
                 setIsMilestonesModalOpen(true);
               }
-            }, 1200);
+            }, 500);
           }
         }
       } catch (err: any) {
@@ -64,17 +70,40 @@ const StudentDashboardLayout = () => {
     const handleProgress = () => {
       fetchMilestones();
     };
+
+    const handleAssignmentCreated = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const notification = customEvent.detail;
+
+      // 1. Instantly refetch active milestones in background
+      fetchMilestones();
+
+      // 2. Display friendly notification toast
+      toast.success(notification?.title || 'New Assignment Assigned!', {
+        icon: '📋',
+        duration: 4000,
+      });
+
+      // 3. Open pop-up modal if student is on dashboard home
+      const isHome =
+        location.pathname === '/dashboard/student' ||
+        location.pathname === '/dashboard/student/';
+      if (isHome) {
+        setIsMilestonesModalOpen(true);
+      }
+    };
+
     window.addEventListener('course-progress-updated', handleProgress);
+    window.addEventListener('assignment:created', handleAssignmentCreated);
 
     return () => {
       isMounted = false;
       window.removeEventListener('course-progress-updated', handleProgress);
+      window.removeEventListener('assignment:created', handleAssignmentCreated);
     };
   }, [location.pathname]);
 
   const handleSnooze = () => {
-    const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
-    localStorage.setItem('lms_milestone_snoozed_until', String(tomorrow));
     setIsMilestonesModalOpen(false);
   };
 

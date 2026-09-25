@@ -3965,15 +3965,11 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
       console.warn('[Milestones] Error fetching capstones:', capErr.message);
     }
 
-    // D. Include pending College Assignments only if relevant to student's reached progress and personalized to signup time
+    // D. Include pending College Assignments
     if (collegeId) {
       try {
-        const completedTopicIds = new Set(completedUnitsRes.rows.map((u) => u.topic_id));
-        const completedTopicTitles = completedUnitsRes.rows.map((u) => (u.topic_title || '').toLowerCase());
-        const completedSubjectSlugs = completedUnitsRes.rows.map((u) => (u.subject_slug || '').toLowerCase());
-
         const collegeAsgRes = await pool.query(
-          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course, ca.topic_id
+          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course
            FROM college_assignments ca
            WHERE ca.college_id = $1
              AND ca.is_deleted = false
@@ -3985,64 +3981,17 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
         );
 
         for (const ca of collegeAsgRes.rows) {
-          const courseStr = (ca.course || '').toLowerCase().trim();
+          // 1. Direct Facilitator Deadline Preservation
+          const dueDate = ca.due_date
+            ? new Date(ca.due_date)
+            : new Date(userCreatedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-          // Prerequisite check: If assignment specifies topic_id, must be in completed topics.
-          if (ca.topic_id && !completedTopicIds.has(ca.topic_id)) {
+          // 2. Discard only if archived/overdue by more than 7 days
+          if (dueDate.getTime() < now.getTime() - 7 * 24 * 60 * 60 * 1000) {
             continue;
           }
 
-          // If courseStr specifies an advanced topic (e.g. 'react', 'js-fundamentals', 'node')
-          // and student has not completed any unit in that topic, do NOT show it prematurely!
-          const isAdvancedCourse =
-            courseStr.includes('react') ||
-            courseStr.includes('js') ||
-            courseStr.includes('node') ||
-            courseStr.includes('python') ||
-            courseStr.includes('backend');
-
-          const hasReachedCourse =
-            completedTopicTitles.some(
-              (t) =>
-                t.includes(courseStr) ||
-                (courseStr.includes('react') && t.includes('react')) ||
-                (courseStr.includes('js') && (t.includes('javascript') || t.includes('js'))),
-            ) ||
-            completedSubjectSlugs.some((s) => s.includes(courseStr)) ||
-            courseStr === 'general';
-
-          if (isAdvancedCourse && !hasReachedCourse) {
-            continue;
-          }
-
-          // Calculate student's personalized due date based on when the student signed up
-          const caCreated = ca.created_at ? new Date(ca.created_at) : userCreatedAt;
-          const caDue = ca.due_date ? new Date(ca.due_date) : null;
-          const origDurationMs = caDue && caCreated ? caDue.getTime() - caCreated.getTime() : 0;
-          const durationDays =
-            origDurationMs > 0 ? Math.max(5, Math.ceil(origDurationMs / (1000 * 60 * 60 * 24))) : 7;
-
-          let studentDueDate;
-          if (
-            !caDue ||
-            caDue.getTime() < userCreatedAt.getTime() ||
-            caCreated.getTime() < userCreatedAt.getTime()
-          ) {
-            // Created before student joined or due in past before student registration:
-            // Deadline is calculated from the student's signup timing!
-            studentDueDate = new Date(userCreatedAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
-          } else {
-            studentDueDate = new Date(
-              Math.max(caDue.getTime(), userCreatedAt.getTime() + durationDays * 24 * 60 * 60 * 1000),
-            );
-          }
-
-          // If it's already more than 3 days overdue relative to student's personalized deadline, skip it
-          if (studentDueDate.getTime() < now.getTime() - 3 * 24 * 60 * 60 * 1000) {
-            continue;
-          }
-
-          const diffMs = studentDueDate.getTime() - now.getTime();
+          const diffMs = dueDate.getTime() - now.getTime();
           const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
           const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
           const isOverdue = hoursLeft <= 0;
@@ -4064,8 +4013,8 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
             subject_name: ca.course || 'College Course',
             subject_slug: '',
             completed_lessons_at: null,
-            due_date: studentDueDate.toISOString(),
-            duration_days: durationDays,
+            due_date: dueDate.toISOString(),
+            duration_days: Math.max(1, daysLeft),
             hours_left: hoursLeft,
             days_left: daysLeft,
             is_overdue: isOverdue,

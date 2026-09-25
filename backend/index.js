@@ -221,8 +221,13 @@ const io = new Server(server, {
 notificationService.setIo(io);
 
 io.on('connection', (socket) => {
-  socket.on('notification:subscribe', (userId) => {
-    if (userId) socket.join(`user:${userId}`);
+  socket.on('notification:subscribe', (payload) => {
+    // Normalizes both { userId: '...' } and raw string '...'
+    const userId = typeof payload === 'object' && payload?.userId ? payload.userId : payload;
+    if (userId) {
+      socket.join(`user:${userId}`);
+      console.log(`[Socket] User joined room: user:${userId}`);
+    }
   });
   socket.on('disconnect', () => {});
 });
