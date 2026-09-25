@@ -166,47 +166,48 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
   const hasPending = results.some((r) => r.status === 'pending' && r.id);
   const hasActiveEvaluation = hasPending || bulkReEvaluating || evaluation?.status === 'running';
 
-  // Poll for updates if any row is pending — interval is only created once per evaluation
+  // Poll for updates whenever any row is pending
   useEffect(() => {
-    if (!evaluation?.id) return;
+    if (!evaluation?.id || !hasPending) return;
 
     let retries = 0;
-    const MAX_RETRIES = 200; // ~10 minutes at 3s interval (defense against large class queue delays)
-    let lastCompletedCount = -1; // Track progress — only refresh when count increases
+    const MAX_RETRIES = 240; // ~10 minutes at 2.5s interval
+    let lastCompletedCount = resultsRef.current.filter(
+      (r) => (r.status === 'completed' || r.status === 'failed') && r.id
+    ).length;
 
-    const interval = setInterval(async () => {
-      // Only poll for REAL pending rows (those with an `id` in evaluation_results).
-      // Virtual rows (new submissions not yet queued) have no `id` — they need
-      // manual 'Evaluate Selected', not automatic polling.
+    const pollSync = async () => {
       const isStillPending = resultsRef.current.some((r) => r.status === 'pending' && r.id);
       if (!isStillPending || retries >= MAX_RETRIES) {
-        clearInterval(interval);
         return;
       }
       retries++;
       try {
-        const { data } = await apiClient.get(`/evaluations/sync/${evaluation.id}`);
+        const { data } = await apiClient.get(`/evaluations/sync/${evaluation.id}`, {
+          params: { _t: Date.now() },
+        });
         const newCount = data?.progress?.completed ?? 0;
         const isFinished = data?.progress?.isFinished ?? false;
+
         if (isFinished) {
-          // Evaluation done — refresh once and stop polling entirely
           onRefreshRef.current?.();
-          clearInterval(interval);
           return;
         }
-        // Only refresh when a new job just completed (count went up)
-        if (newCount > lastCompletedCount) {
+
+        // Refresh when a new job completed, or periodically every 4 polls (~10s) as a safety net
+        if (newCount > lastCompletedCount || retries % 4 === 0) {
           lastCompletedCount = newCount;
           onRefreshRef.current?.();
         }
       } catch (err) {
-        console.error('Failed to sync', err);
+        console.error('Failed to sync evaluation status:', err);
       }
-    }, 3000);
+    };
+
+    const interval = setInterval(pollSync, 2500);
 
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [evaluation?.id]);
+  }, [evaluation?.id, hasPending]);
 
   const filteredResults = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -241,7 +242,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
         evaluatorType: type
       });
       setSelectedSubmissions([]); // Clear selection on success
-      onRefresh();
+      await onRefresh();
     } catch (err: any) {
       alert("Failed to bulk re-evaluate: " + (err.response?.data?.message || err.message));
     } finally {

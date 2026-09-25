@@ -1,16 +1,41 @@
 const { Pool } = require('pg');
-const pool = new Pool({
-  host: (process.env.PGHOST || '').trim(),
-  database: (process.env.PGDATABASE || '').trim(),
-  user: (process.env.PGUSER || '').trim(),
-  password: (process.env.PGPASSWORD || '').trim(),
-  port: process.env.PGPORT,
-  ssl: { rejectUnauthorized: false },
-  family: 4,
-  connectionTimeoutMillis: 30000, // Increased to 30s so sleeping Neon DBs have time to wake up!
-  idleTimeoutMillis: 10000, // Close idle connections after 10s to prevent Neon pooler disconnects
-  keepAlive: true,
-});
+
+let dbHost = (process.env.PGHOST || '').trim();
+// Use Neon's connection pooler endpoint if using Neon to prevent cold-start ETIMEDOUT
+if (dbHost.includes('.neon.tech') && !dbHost.includes('-pooler')) {
+  const parts = dbHost.split('.');
+  parts[0] = parts[0] + '-pooler';
+  dbHost = parts.join('.');
+}
+
+let connectionString = (process.env.DATABASE_URL || '').trim();
+if (connectionString && connectionString.includes('.neon.tech') && !connectionString.includes('-pooler')) {
+  connectionString = connectionString.replace(/(@[a-zA-Z0-9_-]+)(\.c-[^/:]+)/, '$1-pooler$2');
+}
+
+const poolConfig = connectionString
+  ? {
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000,
+      idleTimeoutMillis: 30000,
+      keepAlive: true,
+    }
+  : {
+      host: dbHost,
+      database: (process.env.PGDATABASE || '').trim(),
+      user: (process.env.PGUSER || '').trim(),
+      password: (process.env.PGPASSWORD || '').trim(),
+      port: process.env.PGPORT || 5432,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000, // Allow 60s for Neon cold starts / wake-ups
+      idleTimeoutMillis: 30000,
+      keepAlive: true,
+    };
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);

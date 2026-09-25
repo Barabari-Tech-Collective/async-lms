@@ -3740,7 +3740,7 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
       // A. Batch query unpassed Quizzes for all completed units (5-Day Milestone)
       try {
         const quizzesRes = await pool.query(
-          `SELECT q.id, q.title, q.description, q.unit_id, COALESCE(q.max_score, 100) AS max_score,
+          `SELECT q.id, q.unit_id, COALESCE(q.max_score, 100) AS max_score,
                   EXISTS(
                     SELECT 1 FROM quiz_attempts qa
                     WHERE qa.quiz_id = q.id AND qa.user_id = $1 AND qa.is_passed = true
@@ -3776,8 +3776,8 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
             milestones.push({
               item_id: q.id,
               item_type: 'quiz',
-              title: q.title || `${unit.unit_title} Quiz`,
-              description: q.description || '',
+              title: `${unit.unit_title} Quiz`,
+              description: '',
               unit_id: unit.unit_id,
               unit_title: unit.unit_title,
               topic_title: unit.topic_title,

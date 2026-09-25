@@ -32,7 +32,9 @@ const ResultsPage = () => {
   const fetchResults = async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
-      const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`);
+      const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`, {
+        params: { _t: Date.now() },
+      });
 
       setEvaluation(data.evaluation);
       setResults(data.results);

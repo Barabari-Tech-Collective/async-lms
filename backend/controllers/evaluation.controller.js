@@ -545,6 +545,7 @@ exports.syncEvaluationStatus = async (req, res) => {
           console.log(`Job ${job.id} state: ${jobState}`);
           let marks = 0;
           let feedback = '';
+          let rowStatus = 'completed';
 
           if (jobState === 'completed' && jobData.result) {
             const resData =
@@ -554,36 +555,52 @@ exports.syncEvaluationStatus = async (req, res) => {
               jobData.result;
             const finalData = Array.isArray(resData) ? resData[0] : resData;
 
-            marks = finalData?.score ?? finalData?.marks ?? 0;
-            if (marks !== null && typeof marks === 'object' && marks.score !== undefined) {
-              marks = marks.score;
-            }
-            feedback =
-              finalData?.rubricFeedback ||
-              finalData?.feedback ||
-              finalData?.error ||
-              'Evaluation completed successfully.';
-            if (typeof feedback === 'string') {
-              try {
-                const parsedFb = JSON.parse(feedback);
-                if (parsedFb && typeof parsedFb === 'object') {
-                  feedback = parsedFb;
-                } else {
+            if (!finalData || (typeof finalData === 'object' && Object.keys(finalData).length === 0)) {
+              rowStatus = 'failed';
+              feedback = {
+                summary: 'Evaluation completed without scoring output from grader. Please re-evaluate.',
+                strengths: [],
+                issues: ['Grader returned empty evaluation result'],
+                breakdown: [],
+              };
+            } else {
+              marks = finalData?.score ?? finalData?.marks ?? 0;
+              if (marks !== null && typeof marks === 'object' && marks.score !== undefined) {
+                marks = marks.score;
+              }
+              feedback =
+                finalData?.rubricFeedback ||
+                finalData?.feedback ||
+                finalData?.error ||
+                'Evaluation completed.';
+              if (typeof feedback === 'string') {
+                try {
+                  const parsedFb = JSON.parse(feedback);
+                  if (parsedFb && typeof parsedFb === 'object') {
+                    feedback = parsedFb;
+                  } else {
+                    const s = String(feedback || '').trim();
+                    feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
+                  }
+                } catch {
                   const s = String(feedback || '').trim();
                   feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
                 }
-              } catch {
-                const s = String(feedback || '').trim();
-                feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
               }
             }
-          } else if (jobState === 'failed') {
-            feedback = { summary: `Evaluation Failed: ${jobData.failedReason || 'Unknown error'}`, strengths: [], issues: [], breakdown: [] };
+          } else {
+            rowStatus = 'failed';
+            const failureReason =
+              jobData.failedReason ||
+              (jobData.stacktrace && jobData.stacktrace[0] ? jobData.stacktrace[0].split('\n')[0] : null) ||
+              jobData.error ||
+              'Evaluation worker was interrupted or encountered an unexpected error. Please retry evaluation.';
+            feedback = { summary: `Evaluation Failed: ${failureReason}`, strengths: [], issues: [failureReason], breakdown: [] };
           }
 
           await pool.query(
-            `UPDATE evaluation_results SET status = 'completed', marks = $1, feedback = $2::jsonb WHERE id = $3`,
-            [marks, JSON.stringify(feedback), job.id],
+            `UPDATE evaluation_results SET status = $1, marks = $2, feedback = $3::jsonb WHERE id = $4`,
+            [rowStatus, marks, JSON.stringify(feedback), job.id],
           );
           newlyCompleted++;
 
