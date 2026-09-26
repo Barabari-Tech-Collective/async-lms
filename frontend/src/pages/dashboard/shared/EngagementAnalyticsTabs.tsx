@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { StudentDetailsModal } from './StudentDetailsModal';
 import { StudentSubmissionsDrawer } from './StudentSubmissionsDrawer';
+import { StudentCohortProgressDrawer } from './StudentCohortProgressDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1928,6 +1929,8 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
   const [studentPage, setStudentPage] = useState(1);
   const studentPageSize = 10;
   const [exporting, setExporting] = useState(false);
+  const [drawerStudent, setDrawerStudent] = useState<BatchReportStudent | null>(null);
+  const [detailsModalStudent, setDetailsModalStudent] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
@@ -2395,261 +2398,157 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                 </div>
               ) : (
                 <>
-                  {/* Mobile Student Cards */}
+                  {/* Mobile Student Cards (Responsive Touch-friendly) */}
                   <div className="divide-y divide-slate-100 lg:hidden">
-                    {paginatedStudents.map((s) => (
-                      <div key={s.student_id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-900 text-sm truncate">{s.full_name}</p>
-                            <p className="text-xs text-slate-500 truncate">{s.email}</p>
-                            <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-400">
-                              <span className="font-medium text-slate-600">{s.college_code || s.college_name}</span>
-                              <span>·</span>
-                              <span>{s.batch}</span>
+                    {paginatedStudents.map((s) => {
+                      const initials = s.full_name
+                        .split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((n) => n[0].toUpperCase())
+                        .join('');
+
+                      const isSelected = drawerStudent?.student_id === s.student_id;
+
+                      return (
+                        <div
+                          key={s.student_id}
+                          onClick={() => setDrawerStudent(s)}
+                          className={`p-4 space-y-3 transition-colors cursor-pointer ${
+                            isSelected ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : 'hover:bg-indigo-50/40 active:bg-indigo-100/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="relative shrink-0">
+                                <div className="w-10 h-10 rounded-xl bg-slate-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                                  {initials || 'ST'}
+                                </div>
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                                    s.engagement_status === 'Active' ? 'bg-emerald-500' : 'bg-slate-300'
+                                  }`}
+                                  title={s.engagement_status}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-900 text-sm truncate">{s.full_name}</p>
+                                <p className="text-xs text-slate-500 truncate">{s.email}</p>
+                                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-400">
+                                  <span className="font-semibold text-slate-600">{s.college_code || s.college_name}</span>
+                                  <span>·</span>
+                                  <span>Batch {s.batch}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
+                          </div>
+
+                          {/* Progress Bar & Rate */}
+                          <div className="pt-1">
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                              <span className="font-medium">
+                                {s.overall_subject_progress >= 100
+                                  ? '100% Completed'
+                                  : `${s.overall_subject_progress}% Complete`}
+                              </span>
+                              <span className="font-semibold text-emerald-700">+{s.weekly_xp_earned} XP</span>
+                            </div>
+                            <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
+                            <div className="mt-1.5 text-[10px] text-slate-400 flex items-center justify-between">
+                              <span>Last active: {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) : 'Never'}</span>
+                              <span className="text-indigo-600 font-medium">View activity details &rarr;</span>
                             </div>
                           </div>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                            s.engagement_status === 'Active'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-slate-100 text-slate-500 border border-slate-200'
-                          }`}>
-                            {s.engagement_status}
-                          </span>
                         </div>
-
-                        {/* Metric Grid */}
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Lessons</span>
-                            <span className="font-bold text-indigo-600 text-sm">
-                              {s.weekly_lessons_xp > 0 ? `+${s.weekly_lessons_xp} XP` : s.weekly_lessons_completed > 0 ? `${s.weekly_lessons_completed}` : '0 XP'}
-                            </span>
-                            {s.weekly_lessons_completed > 0 && (
-                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_lessons_completed} completed)</span>
-                            )}
-                          </div>
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Exercises</span>
-                            <span className="font-bold text-emerald-600 text-sm">
-                              {s.weekly_exercises_xp > 0 ? `+${s.weekly_exercises_xp} XP` : s.weekly_exercises_passed > 0 ? `${s.weekly_exercises_passed}` : '0 XP'}
-                            </span>
-                            {s.weekly_exercises_passed > 0 && (
-                              <span className="text-[10px] font-medium text-slate-400 block">({s.weekly_exercises_passed} passed)</span>
-                            )}
-                          </div>
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Quizzes</span>
-                            <span className="font-bold text-amber-600 text-sm">
-                              {s.weekly_quizzes_xp > 0 ? `+${s.weekly_quizzes_xp} XP` : s.weekly_quizzes_attempted > 0 ? `${s.weekly_quizzes_attempted} att` : '0 XP'}
-                            </span>
-                            {(s.weekly_quizzes_attempted > 0 || (s.weekly_quizzes_passed ?? 0) > 0 || s.weekly_avg_quiz_score !== null) && (
-                              <span className="text-[10px] font-medium text-slate-400 block">
-                                {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} passed</span>
-                                {s.weekly_avg_quiz_score !== null ? ` (${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)` : ''}
-                              </span>
-                            )}
-                          </div>
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Assignments</span>
-                            <span className="font-bold text-purple-600 text-sm">
-                              {s.weekly_assignments_xp > 0 ? `+${s.weekly_assignments_xp} XP` : (s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 ? `${s.weekly_assignments_attempted ?? s.weekly_assignments_submitted} att` : '0 XP'}
-                            </span>
-                            {((s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 || (s.weekly_assignments_passed ?? 0) > 0) && (
-                              <span className="text-[10px] font-medium text-slate-400 block">
-                                {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} passed</span>
-                              </span>
-                            )}
-                          </div>
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Projects</span>
-                            <span className="font-bold text-blue-600 text-sm">
-                              {s.weekly_projects_xp > 0 ? `+${s.weekly_projects_xp} XP` : (s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 ? `${s.weekly_projects_attempted ?? s.weekly_projects_submitted} att` : '0 XP'}
-                            </span>
-                            {((s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 || (s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0) > 0) && (
-                              <span className="text-[10px] font-medium text-slate-400 block">
-                                {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} passed</span>
-                              </span>
-                            )}
-                          </div>
-                          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Total XP</span>
-                            <span className="font-bold text-emerald-700 text-sm">
-                              {s.weekly_xp_earned > 0 ? `+${s.weekly_xp_earned} XP` : '0 XP'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Progress Bar & Last Active */}
-                        <div className="pt-1">
-                          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-                            <span>Course Progress</span>
-                            <span className="font-bold text-slate-800">{s.overall_subject_progress}%</span>
-                          </div>
-                          <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
-                          <div className="mt-1.5 text-[10px] text-slate-400 flex items-center justify-between">
-                            <span>Last Active:</span>
-                            <span className="font-medium text-slate-600">
-                              {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
-                  {/* Desktop Table */}
+                  {/* Desktop Table (High-signal 3 Columns) */}
                   <div className="hidden lg:block overflow-x-auto no-scrollbar w-full min-w-0">
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase font-semibold border-b border-slate-100">
                         <tr>
-                          <th className="text-left px-4 py-3">Student</th>
-                          <th className="text-left px-3 py-3">Batch</th>
-                          <th className="text-center px-2 py-3" title="Lessons XP earned & completions in period">Lessons</th>
-                          <th className="text-center px-2 py-3" title="Exercises XP earned & passed in period">Exercises</th>
-                          <th className="text-center px-2 py-3" title="Quizzes XP, attempts & passes in period">Quizzes (Att / Pass)</th>
-                          <th className="text-center px-2 py-3" title="Assignments XP, attempts & passes in period">Asgns (Att / Pass)</th>
-                          <th className="text-center px-2 py-3" title="Projects XP, attempts & passes in period">Projects (Att / Pass)</th>
-                          <th className="text-center px-2 py-3" title="Total XP points earned in period">Total XP</th>
-                          <th className="text-left px-3 py-3 w-32">Course Progress</th>
-                          <th className="text-left px-3 py-3">Last Active</th>
-                          <th className="text-center px-3 py-3">Status</th>
+                          <th className="text-left px-5 py-3 w-2/5">Student</th>
+                          <th className="text-left px-5 py-3 w-1/4">Cohort Batch</th>
+                          <th className="text-left px-5 py-3 w-1/3">Course Progress</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {paginatedStudents.map((s) => (
-                          <tr key={s.student_id} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="px-4 py-3">
-                              <p className="font-semibold text-slate-900">{s.full_name}</p>
-                              <p className="text-[11px] text-slate-400">{s.email}</p>
-                            </td>
-                            <td className="px-3 py-3 text-slate-600">
-                              <span className="font-medium">{s.batch}</span>
-                              <span className="block text-[10px] text-slate-400 truncate max-w-[100px]">{s.college_code || s.college_name}</span>
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              {s.weekly_lessons_xp > 0 ? (
-                                <div>
-                                  <span className="font-bold text-indigo-600">+{s.weekly_lessons_xp} XP</span>
-                                  {s.weekly_lessons_completed > 0 && (
-                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_lessons_completed} lessons)</span>
-                                  )}
+                        {paginatedStudents.map((s) => {
+                          const initials = s.full_name
+                            .split(' ')
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((n) => n[0].toUpperCase())
+                            .join('');
+
+                          const isSelected = drawerStudent?.student_id === s.student_id;
+
+                          return (
+                            <tr
+                              key={s.student_id}
+                              onClick={() => setDrawerStudent(s)}
+                              className={`transition-colors cursor-pointer group ${
+                                isSelected ? 'bg-indigo-50/70' : 'hover:bg-indigo-50/40'
+                              }`}
+                            >
+                              {/* Column 1: Student */}
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative shrink-0">
+                                    <div className="w-9 h-9 rounded-xl bg-slate-100 text-indigo-700 font-bold flex items-center justify-center text-xs group-hover:bg-indigo-100 transition-colors">
+                                      {initials || 'ST'}
+                                    </div>
+                                    <span
+                                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                                        s.engagement_status === 'Active' ? 'bg-emerald-500' : 'bg-slate-300'
+                                      }`}
+                                      title={s.engagement_status}
+                                    />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">
+                                      {s.full_name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                                  </div>
                                 </div>
-                              ) : s.weekly_lessons_completed > 0 ? (
-                                <div>
-                                  <span className="font-semibold text-indigo-600">+{s.weekly_lessons_completed} lessons</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium">0 XP</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              {s.weekly_exercises_xp > 0 ? (
-                                <div>
-                                  <span className="font-bold text-emerald-600">+{s.weekly_exercises_xp} XP</span>
-                                  {s.weekly_exercises_passed > 0 && (
-                                    <span className="block text-[10px] text-slate-400 font-medium">({s.weekly_exercises_passed} passed)</span>
-                                  )}
-                                </div>
-                              ) : s.weekly_exercises_passed > 0 ? (
-                                <div>
-                                  <span className="font-semibold text-emerald-600">+{s.weekly_exercises_passed} passed</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">0 XP</span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium">0 XP</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              {s.weekly_quizzes_xp > 0 ? (
-                                <div>
-                                  <span className="font-bold text-amber-600">+{s.weekly_quizzes_xp} XP</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">
-                                    {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} pass</span>
-                                    {s.weekly_avg_quiz_score !== null && ` (${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)`}
-                                  </span>
-                                </div>
-                              ) : s.weekly_quizzes_attempted > 0 || (s.weekly_quizzes_passed ?? 0) > 0 ? (
-                                <div>
-                                  <span className="font-semibold text-slate-700">
-                                    {s.weekly_quizzes_attempted} att · <span className="text-emerald-600 font-semibold">{s.weekly_quizzes_passed ?? 0} pass</span>
-                                  </span>
-                                  {s.weekly_avg_quiz_score !== null && (
-                                    <span className="block text-[10px] text-slate-400 font-medium">({Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%)</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              {s.weekly_assignments_xp > 0 ? (
-                                <div>
-                                  <span className="font-bold text-purple-600">+{s.weekly_assignments_xp} XP</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">
-                                    {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} pass</span>
-                                  </span>
-                                </div>
-                              ) : (s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0) > 0 || (s.weekly_assignments_passed ?? 0) > 0 ? (
-                                <div>
-                                  <span className="font-semibold text-slate-700">
-                                    {s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_assignments_passed ?? 0} pass</span>
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              {s.weekly_projects_xp > 0 ? (
-                                <div>
-                                  <span className="font-bold text-blue-600">+{s.weekly_projects_xp} XP</span>
-                                  <span className="block text-[10px] font-medium text-slate-400">
-                                    {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} pass</span>
-                                  </span>
-                                </div>
-                              ) : (s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0) > 0 || (s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0) > 0 ? (
-                                <div>
-                                  <span className="font-semibold text-slate-700">
-                                    {s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0} att · <span className="text-emerald-600 font-semibold">{s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0} pass</span>
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium">0 att · 0 pass</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-3 text-center font-semibold text-emerald-700">
-                              {s.weekly_xp_earned > 0 ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  +{s.weekly_xp_earned} XP
+                              </td>
+
+                              {/* Column 2: Cohort Batch */}
+                              <td className="px-5 py-3.5 text-slate-600">
+                                <span className="font-medium text-slate-800">Batch {s.batch}</span>
+                                <span className="block text-[11px] text-slate-400 truncate max-w-[220px]">
+                                  {s.college_code || s.college_name} {s.degree ? `· ${s.degree}` : ''}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 font-medium text-xs">0 XP</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1">
-                                  <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
+                              </td>
+
+                              {/* Column 3: Course Progress */}
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1 font-medium">
+                                      <span>
+                                        {s.overall_subject_progress >= 100
+                                          ? '100% Completed'
+                                          : `${s.overall_subject_progress}% Complete`}
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                      <div
+                                        className="h-2 rounded-full bg-indigo-600 transition-all duration-300"
+                                        style={{ width: `${Math.min(100, Math.max(0, s.overall_subject_progress))}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all shrink-0" />
                                 </div>
-                                <span className="text-[11px] font-bold text-slate-700 w-8 text-right">{s.overall_subject_progress}%</span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-3 text-slate-500 whitespace-nowrap text-[11px]">
-                              {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
-                            </td>
-                            <td className="px-3 py-3 text-center">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                s.engagement_status === 'Active'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-slate-100 text-slate-500 border border-slate-200'
-                              }`}>
-                                {s.engagement_status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2667,6 +2566,41 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
             </div>
           )}
         </>
+      )}
+
+      {/* Student Cohort Progress Drawer */}
+      <StudentCohortProgressDrawer
+        student={drawerStudent}
+        isOpen={!!drawerStudent}
+        onClose={() => setDrawerStudent(null)}
+        timeRangeLabel={
+          timeRange === '1d'
+            ? 'Last 24 Hours'
+            : timeRange === '7d'
+            ? 'Past 7 Days'
+            : timeRange === '10d'
+            ? 'Past 10 Days'
+            : timeRange === '15d'
+            ? 'Past 15 Days'
+            : timeRange === '30d'
+            ? 'Past 30 Days'
+            : 'Custom Period'
+        }
+        onOpenDetailsModal={(studentId, studentName) => {
+          setDetailsModalStudent({ id: studentId, name: studentName });
+        }}
+      />
+
+      {/* Syllabi and Module Submissions Modal */}
+      {detailsModalStudent && (
+        <StudentDetailsModal
+          isOpen={!!detailsModalStudent}
+          onClose={() => setDetailsModalStudent(null)}
+          studentId={detailsModalStudent.id}
+          studentName={detailsModalStudent.name}
+          subjectId={subject}
+          mode="all"
+        />
       )}
     </div>
   );
