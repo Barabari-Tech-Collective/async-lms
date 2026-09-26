@@ -18,20 +18,112 @@ exports.getAllColleges = async (req, res) => {
   }
 };
 
-// CREATE college
+// CREATE or REACTIVATE college
 exports.createCollege = async (req, res) => {
   const { name, short_code, city, state } = req.body;
+  const cleanName = name?.trim();
+  if (!cleanName) {
+    return res.status(400).json({
+      success: false,
+      message: 'College name is required',
+    });
+  }
+  const cleanCity = city?.trim() || null;
+  const cleanState = state?.trim() || null;
+  const cleanShortCode = short_code?.trim() || null;
+  const is_verified = req.user.role === 'admin';
+
   try {
-    const is_verfied = req.user.role === 'admin';
-    const query = `
+    // 1. Check for existing college with case-insensitive and trimmed name
+    const existingRes = await pool.query(
+      `SELECT id, name, is_deleted 
+       FROM colleges 
+       WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+       ORDER BY is_deleted ASC, created_at DESC 
+       LIMIT 1`,
+      [cleanName],
+    );
+
+    if (existingRes.rows.length > 0) {
+      const existing = existingRes.rows[0];
+      // A. Active college with same name already exists
+      if (!existing.is_deleted) {
+        return res.status(409).json({
+          success: false,
+          message: 'College already exists',
+        });
+      }
+
+      // B. Soft-deleted college exists -> Reactivate and update details
+      const reactivateQuery = `
+        UPDATE colleges
+        SET name = $1,
+            short_code = COALESCE($2, short_code),
+            city = COALESCE($3, city),
+            state = COALESCE($4, state),
+            is_verified = $5,
+            is_deleted = false,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $6
+        RETURNING *`;
+      const reactivated = await pool.query(reactivateQuery, [
+        cleanName,
+        cleanShortCode,
+        cleanCity,
+        cleanState,
+        is_verified,
+        existing.id,
+      ]);
+
+      logAction({
+        req,
+        action: 'CREATE',
+        entityType: 'college',
+        entityId: existing.id,
+        details: { name: cleanName, reactivated: true },
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: reactivated.rows[0],
+        message: 'College created',
+      });
+    }
+
+    // 2. Fresh Insertion
+    const insertQuery = `
       INSERT INTO colleges (name, short_code, city, state, is_verified) 
       VALUES ($1, $2, $3, $4, $5) 
       RETURNING *`;
-    const values = [name, short_code, city, state, is_verfied];
-    const result = await pool.query(query, values);
-    logAction({ req, action: 'CREATE', entityType: 'college', entityId: result.rows[0].id, details: { name } });
-    res.status(201).json({ success: true, data: result.rows[0] });
+    const result = await pool.query(insertQuery, [
+      cleanName,
+      cleanShortCode,
+      cleanCity,
+      cleanState,
+      is_verified,
+    ]);
+
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'college',
+      entityId: result.rows[0].id,
+      details: { name: cleanName },
+    });
+
+    return res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
+    console.error('createCollege error:', error);
+    // PostgreSQL Unique Constraint Violation fallback (code 23505)
+    if (error.code === '23505') {
+      const isShortCode = error.detail?.includes('short_code');
+      return res.status(409).json({
+        success: false,
+        message: isShortCode
+          ? 'A college with this short code already exists'
+          : 'College already exists',
+      });
+    }
     res.status(400).json({
       success: false,
       message: 'Error creating college',
@@ -43,7 +135,32 @@ exports.createCollege = async (req, res) => {
 exports.updateCollege = async (req, res) => {
   const { id } = req.params;
   const { name, short_code, city, state, is_verified } = req.body;
+  const cleanName = name ? name.trim() : null;
+  const cleanCity = city !== undefined ? (city?.trim() || null) : undefined;
+  const cleanState = state !== undefined ? (state?.trim() || null) : undefined;
+  const cleanShortCode = short_code !== undefined ? (short_code?.trim() || null) : undefined;
+
   try {
+    // Check if another college already uses this name
+    if (cleanName) {
+      const duplicateCheck = await pool.query(
+        `SELECT id, is_deleted 
+         FROM colleges 
+         WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) AND id != $2
+         LIMIT 1`,
+        [cleanName, id],
+      );
+
+      if (duplicateCheck.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: duplicateCheck.rows[0].is_deleted
+            ? 'A deleted college with this name already exists. Please choose a different name.'
+            : 'A college with this name already exists',
+        });
+      }
+    }
+
     const query = `
       UPDATE colleges
       SET name = COALESCE($1, name),
@@ -52,16 +169,27 @@ exports.updateCollege = async (req, res) => {
           state = COALESCE($4, state),
           is_verified = COALESCE($5, is_verified),
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $6
+      WHERE id = $6 AND is_deleted = false
       RETURNING *`;
-    const values = [name, short_code, city, state, is_verified, id];
+    const values = [cleanName, cleanShortCode, cleanCity, cleanState, is_verified, id];
     const result = await pool.query(query, values);
-    if (result.rowCount === 0)
-      return res.status(404).json({ message: 'College not found' });
-    logAction({ req, action: 'UPDATE', entityType: 'college', entityId: id, details: { name } });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'College not found' });
+    }
+
+    logAction({ req, action: 'UPDATE', entityType: 'college', entityId: id, details: { name: cleanName } });
     res.status(200).json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('updateCollege:', error);
+    if (error.code === '23505') {
+      const isShortCode = error.detail?.includes('short_code');
+      return res.status(409).json({
+        success: false,
+        message: isShortCode
+          ? 'A college with this short code already exists'
+          : 'A college with this name already exists',
+      });
+    }
     res.status(400).json({
       success: false,
       message: 'Error updating college',

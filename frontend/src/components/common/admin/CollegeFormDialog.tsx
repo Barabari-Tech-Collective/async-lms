@@ -51,25 +51,37 @@ export default function CollegeFormDialog({
   }, [college]);
 
   const handleSubmit = async () => {
+    const trimmedName = form.name.trim();
+    if (!trimmedName) {
+      toast.error('College name is required');
+      return;
+    }
+
     try {
       setLoading(true);
+      const payload = {
+        name: trimmedName,
+        city: form.city.trim(),
+        state: form.state.trim(),
+      };
 
       if (college) {
         await apiClient.put(`/colleges/${college.id}`, {
-          ...form,
+          ...payload,
           is_verified: isVerified,
         });
         toast.success(
           isVerified ? 'College verified & updated' : 'College updated',
         );
       } else {
-        await apiClient.post('/colleges', form);
+        await apiClient.post('/colleges', payload);
         toast.success('College created');
       }
 
       onSuccess();
       onClose();
     } catch (err) {
+      // Displays "College already exists" or backend validation message directly
       toast.error(getErrorMessage(err, 'Failed to save college'));
     } finally {
       setLoading(false);
