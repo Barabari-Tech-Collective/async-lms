@@ -20,7 +20,7 @@ exports.getAdminStats = async (req, res) => {
         `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
         ['STUDENT'],
       ),
-      pool.query('SELECT COUNT(*) FROM colleges'),
+      pool.query('SELECT COUNT(*) FROM colleges WHERE is_deleted = false AND deleted_at IS NULL'),
       pool.query('SELECT COUNT(*) FROM subjects'),
       pool.query(
         `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
@@ -91,6 +91,7 @@ exports.getAdminAnalytics = async (req, res) => {
         FROM colleges c
         LEFT JOIN student_profiles sp ON sp.college_id = c.id
         LEFT JOIN users u ON sp.user_id = u.id AND u.deleted_at IS NULL
+        WHERE c.is_deleted = false AND c.deleted_at IS NULL
         GROUP BY c.id, c.name
         ORDER BY student_count DESC
         LIMIT 10

@@ -1,6 +1,7 @@
 import React, { useId, useMemo } from 'react';
 import { Check, ArrowRight, Zap, Sparkles } from 'lucide-react';
 import type { StudentJourney } from './PendingTasksReminderModal';
+import { GoldenHexMascot, IndigoHexMascot } from '@/components/common/Mascots';
 
 interface LearningPathwayDiagramProps {
   journey: StudentJourney;
@@ -121,57 +122,6 @@ function resolveTopicTheme(subjectName: string, unitTitle: string): TopicTheme {
   };
 }
 
-// Friendly Cosmic Hexagon Companion Mascot
-const HexCompanion: React.FC<{
-  color: string;
-  isCompleted?: boolean;
-  delayMs?: number;
-}> = ({ color, isCompleted, delayMs = 0 }) => (
-  <div
-    className="relative w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center shrink-0"
-    style={{
-      animation: 'cosmic-float 3s ease-in-out infinite',
-      animationDelay: `${delayMs}ms`,
-    }}
-  >
-    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
-      {/* Outer Hexagon Shell */}
-      <polygon
-        points="50 6, 88 26, 88 74, 50 94, 12 74, 12 26"
-        fill={color}
-        stroke="rgba(255,255,255,0.45)"
-        strokeWidth="3.5"
-      />
-      {/* Inner Screen Panel */}
-      <polygon
-        points="50 16, 78 32, 78 68, 50 84, 22 68, 22 32"
-        fill="rgba(15, 23, 42, 0.35)"
-      />
-      {/* Facial Expressions */}
-      {isCompleted ? (
-        <>
-          {/* Happy Arched Eyes */}
-          <path d="M 33 46 Q 38 40 43 46" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" fill="none" />
-          <path d="M 57 46 Q 62 40 67 46" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" fill="none" />
-          {/* Joyful Grin */}
-          <path d="M 40 62 Q 50 72 60 62" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" fill="none" />
-          {/* Little Cheek Blushes */}
-          <circle cx="32" cy="54" r="3" fill="rgba(255,255,255,0.4)" />
-          <circle cx="68" cy="54" r="3" fill="rgba(255,255,255,0.4)" />
-        </>
-      ) : (
-        <>
-          {/* Curious Inquisitive Eyes */}
-          <rect x="34" y="44" width="7" height="12" rx="3.5" fill="#ffffff" />
-          <rect x="59" y="44" width="7" height="12" rx="3.5" fill="#ffffff" />
-          {/* Confident Smirk */}
-          <path d="M 42 63 Q 50 70 58 63" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" fill="none" />
-        </>
-      )}
-    </svg>
-  </div>
-);
-
 export const LearningPathwayDiagram: React.FC<LearningPathwayDiagramProps> = ({
   journey,
   onContinue,
@@ -214,41 +164,32 @@ export const LearningPathwayDiagram: React.FC<LearningPathwayDiagramProps> = ({
       </div>
 
       {/* Main Cosmic Journey Trail */}
-      <div className="pt-3.5 pb-1 sm:pt-4 sm:pb-2 flex items-center justify-between gap-1.5 sm:gap-4 relative z-10">
+      <div className="pt-3 pb-1 sm:pt-4 sm:pb-2 flex items-center justify-between gap-1.5 sm:gap-4 relative z-10">
         
-        {/* Node A: Completed Unit */}
-        <div className="flex flex-col items-center text-center max-w-[125px] sm:max-w-[170px] shrink-0">
-          <div className="relative mb-2 flex flex-col items-center">
+        {/* Node A: Completed Unit (Figma Golden Mascot) */}
+        <div className="flex flex-col items-center text-center max-w-[130px] sm:max-w-[170px] shrink-0">
+          <div className="relative mb-1 flex flex-col items-center">
             {/* Floating Star / Check Badge */}
-            <div className="absolute -top-1.5 -right-1 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-amber-400 text-slate-900 flex items-center justify-center text-[9px] sm:text-[10px] font-black shadow-sm z-20">
+            <div className="absolute -top-1 -right-0.5 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-400 text-slate-950 flex items-center justify-center text-[9px] sm:text-[10px] font-black shadow-sm z-20 border border-white/40">
               ✓
             </div>
             
-            {/* Mascot */}
-            <HexCompanion color={theme.prevColor} isCompleted delayMs={0} />
-
-            {/* Glowing Portal Base */}
-            <div
-              className={`w-11 h-3 sm:w-14 sm:h-3.5 rounded-[100%] border ${theme.prevPortalGlow} bg-amber-500/20 -mt-1`}
-              style={{ animation: 'portal-breathe 3s ease-in-out infinite' }}
-            />
+            {/* Exact Figma Golden Mascot with Glowing Halo Base */}
+            <GoldenHexMascot size={52} />
           </div>
 
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1 mt-1">
-            <Check className="w-3 h-3 stroke-[3]" /> Completed
-          </span>
           <h4
-            className="text-xs sm:text-[13px] font-bold text-slate-100 leading-snug mt-0.5 line-clamp-2 min-h-[2rem]"
+            className="text-xs sm:text-[13px] font-bold text-slate-100 leading-snug mt-1 line-clamp-2 underline underline-offset-4 decoration-white/40 min-h-[1.8rem]"
             title={journey.completed_unit_title}
           >
             {journey.completed_unit_title || 'Orientation Completed'}
           </h4>
-          <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-full">
-            All lessons finished
-          </p>
+          <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 mt-0.5 drop-shadow-sm">
+            <Check className="w-2.5 h-2.5 stroke-[3]" /> Lessons Completed
+          </span>
         </div>
 
-        {/* Central Energy Stream Connector */}
+        {/* Central Energy Stream Connector (Dashed Cosmic Flight Path) */}
         <div className="flex-1 min-w-[45px] sm:min-w-[80px] flex flex-col items-center justify-center relative px-1">
           <svg
             className="w-full h-10 sm:h-12 overflow-visible"
@@ -257,29 +198,19 @@ export const LearningPathwayDiagram: React.FC<LearningPathwayDiagramProps> = ({
           >
             <defs>
               <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={theme.prevColor} stopOpacity="0.85" />
-                <stop offset="100%" stopColor={theme.nextColor} stopOpacity="0.9" />
+                <stop offset="0%" stopColor="#FBBF24" stopOpacity="0.8" />
+                <stop offset="100%" stopColor="#818CF8" stopOpacity="0.9" />
               </linearGradient>
             </defs>
 
-            {/* Background Faint Trail */}
+            {/* Dotted / Dashed Cosmic Trail */}
             <path
               d="M 5 15 C 45 2, 115 28, 155 15"
               fill="none"
-              stroke="rgba(255,255,255,0.12)"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-              vectorEffect="non-scaling-stroke"
-            />
-
-            {/* Animated Energy Flow */}
-            <path
-              d="M 5 15 C 45 2, 115 28, 155 15"
-              fill="none"
-              stroke={`url(#${gradId})`}
+              stroke="rgba(255,255,255,0.7)"
               strokeWidth="2.5"
-              strokeDasharray="6 6"
-              style={{ animation: 'stream-flow 1.8s linear infinite' }}
+              strokeDasharray="6 7"
+              strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
             />
           </svg>
@@ -290,34 +221,28 @@ export const LearningPathwayDiagram: React.FC<LearningPathwayDiagramProps> = ({
           </div>
         </div>
 
-        {/* Node B: Next Up Destination */}
-        <div className="flex flex-col items-center text-center max-w-[125px] sm:max-w-[170px] shrink-0">
-          <div className="relative mb-2 flex flex-col items-center">
-            {/* XP Bonus Badge */}
-            <div className="absolute -top-2 -right-1.5 px-1.5 py-0.5 rounded-full bg-linear-to-r from-purple-500 to-indigo-500 text-white flex items-center gap-0.5 text-[8.5px] sm:text-[9px] font-extrabold shadow-sm z-20 border border-white/20">
-              <Zap className="w-2.5 h-2.5 fill-white" />
-              <span>+10 XP</span>
-            </div>
+        {/* Node B: Next Up Destination (Figma Indigo Mascot) */}
+        <div className="flex flex-col items-center text-center max-w-[130px] sm:max-w-[170px] shrink-0">
+          <div className="relative mb-1 flex flex-col items-center">
+            {/* Top Red/Coral "Next Up" Tag */}
+            <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-rose-400 drop-shadow-sm mb-0.5">
+              Next Up
+            </span>
 
-            {/* Mascot */}
-            <HexCompanion color={theme.nextColor} isCompleted={false} delayMs={500} />
-
-            {/* Glowing Portal Base */}
-            <div
-              className={`w-11 h-3 sm:w-14 sm:h-3.5 rounded-[100%] border ${theme.nextPortalGlow} bg-purple-500/20 -mt-1`}
-              style={{ animation: 'portal-breathe 3s ease-in-out infinite 0.5s' }}
-            />
+            {/* Exact Figma Indigo Mascot with Dual Stepping-Stone Pedestals */}
+            <IndigoHexMascot size={56} />
           </div>
 
-          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1 mt-1">
-            <Sparkles className="w-3 h-3" /> Next Up
-          </span>
           <h4
-            className="text-xs sm:text-[13px] font-bold text-white leading-snug mt-0.5 line-clamp-2 min-h-[2rem]"
+            className="text-xs sm:text-[13px] font-bold text-white leading-snug mt-0.5 line-clamp-2 min-h-[1.8rem]"
             title={journey.current_unit_title}
           >
             {journey.current_unit_title || 'Next in Syllabus'}
           </h4>
+
+          <p className="text-[9.5px] sm:text-[10px] font-bold text-amber-300 mt-0.5 max-w-full leading-tight drop-shadow-sm">
+            Complete all lessons to gain 10XP Points
+          </p>
 
           {/* Action CTA Button */}
           <button

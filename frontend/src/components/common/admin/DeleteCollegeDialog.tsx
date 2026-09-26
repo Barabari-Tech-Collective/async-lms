@@ -3,6 +3,8 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
@@ -14,17 +16,19 @@ export default function DeleteCollegeDialog({
   open,
   onClose,
   collegeId,
+  collegeName,
   onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   collegeId: string;
+  collegeName?: string;
   onSuccess: () => void;
 }) {
   const handleDelete = async () => {
     try {
       await apiClient.delete(`/colleges/${collegeId}`);
-      toast.success('College deleted');
+      toast.success('College moved to recycle bin');
       onSuccess();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to delete college'));
@@ -35,17 +39,25 @@ export default function DeleteCollegeDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onClose}>
-      <AlertDialogContent>
+      <AlertDialogContent className="w-[94vw] sm:max-w-md rounded-2xl">
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            Are you sure you want to delete this college?
+          <AlertDialogTitle className="text-base sm:text-lg font-bold text-slate-900">
+            Move to Recycle Bin?
           </AlertDialogTitle>
+          <AlertDialogDescription className="text-xs sm:text-sm text-slate-500">
+            This will move {collegeName ? <strong className="text-slate-800">{collegeName}</strong> : 'this college'} to the Recycle Bin for 30 days. Its assignments and facilitator mappings will be hidden from all dashboards and filters. You can restore it anytime within 30 days.
+          </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <div className='flex justify-end gap-3 mt-4'>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-        </div>
+        <AlertDialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+          <AlertDialogCancel className="w-full sm:w-auto rounded-xl mt-0">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white rounded-xl"
+          >
+            Move to Bin
+          </AlertDialogAction>
+        </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );

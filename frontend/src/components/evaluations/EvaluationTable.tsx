@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
-import { Eye, FileText } from 'lucide-react';
+import { Eye, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import SubmissionsModal from './SubmissionsModal';
 import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
@@ -30,6 +30,25 @@ type Assignment = {
 };
 
 const PAGE_SIZE = 10;
+
+function getPageNumbers(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  if (currentPage <= 2) {
+    return [1, 2, 3, '...', totalPages];
+  }
+  if (currentPage >= totalPages - 1) {
+    return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+  }
+  return [1, '...', currentPage, '...', totalPages];
+}
+
+const formatCourseName = (course?: string) => {
+  if (!course) return 'General Domain';
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(course);
+  return isUuid ? 'College Assignment' : course;
+};
 
 const EvaluationTable = ({
   tab = 'assignments',
@@ -174,7 +193,7 @@ const EvaluationTable = ({
               <div className='text-[11px] bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 space-y-1'>
                 <div className='flex items-center justify-between gap-2'>
                   <span className='font-semibold text-slate-800 truncate'>
-                    {item.course || 'General Domain'}
+                    {formatCourseName(item.course)}
                   </span>
                   {item.college_name && (
                     <span className='text-slate-500 font-medium shrink-0 max-w-[140px] truncate' title={item.college_name}>
@@ -258,7 +277,7 @@ const EvaluationTable = ({
                   className='border-t border-slate-100 hover:bg-slate-50/60 transition'
                 >
                   <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
-                    {index + 1}
+                    {(page - 1) * PAGE_SIZE + index + 1}
                   </td>
                   <td className='px-3.5 sm:px-4 py-3 font-medium text-slate-800 text-xs sm:text-sm'>
                     {item.title}
@@ -284,7 +303,7 @@ const EvaluationTable = ({
                     </div>
                   </td>
                   <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
-                    {item.course}
+                    {formatCourseName(item.course)}
                   </td>
                   <td className='px-3.5 sm:px-4 py-3 text-slate-700 text-xs sm:text-sm'>
                     {item.college_name}
@@ -334,23 +353,40 @@ const EvaluationTable = ({
             Showing {(page - 1) * PAGE_SIZE + 1}–
             {Math.min(page * PAGE_SIZE, total)} of {total}
           </span>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-1 sm:gap-1.5'>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className='px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 min-h-[32px]'
+              className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1'
             >
-              Previous
+              <ChevronLeft size={14} />
+              <span>Previous</span>
             </button>
-            <span className='text-slate-500 px-1 font-medium'>
-              Page {page} of {totalPages}
-            </span>
+
+            {getPageNumbers(page, totalPages).map((p, i) => (
+              <button
+                key={i}
+                onClick={() => typeof p === 'number' && setPage(p)}
+                disabled={p === '...'}
+                className={`min-w-[32px] h-[32px] px-2 flex items-center justify-center rounded-lg border text-xs sm:text-sm transition font-medium ${
+                  p === page
+                    ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
+                    : p === '...'
+                    ? 'border-transparent text-slate-400 cursor-default'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className='px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 min-h-[32px]'
+              className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1'
             >
-              Next
+              <span>Next</span>
+              <ChevronRight size={14} />
             </button>
           </div>
         </div>

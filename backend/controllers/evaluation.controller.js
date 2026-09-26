@@ -227,6 +227,55 @@ exports.runEvaluation = async (req, res) => {
 
     const evaluation = evalRes.rows[0];
 
+    // Tier 1 Carry-Forward: If scope is 'pending', copy forward prior completed/failed results
+    if (scope === 'pending') {
+      const currentSubIds = submissions.map((s) => s.submission_id || s.id).filter(Boolean);
+      const currentStudentIds = submissions.map((s) => s.user_id || s.student_id).filter(Boolean);
+      const targetCol = isProject
+        ? 'e.project_id'
+        : isCollegeAssignment
+        ? 'e.college_assignment_id'
+        : 'e.assignment_id';
+      const carryForwardRes = await client.query(
+        `INSERT INTO evaluation_results (
+          evaluation_id, submission_id, student_id, student_name, job_id, status, marks, feedback, status_url, created_at
+        )
+        SELECT 
+          $1, 
+          prev.submission_id, 
+          prev.student_id, 
+          prev.student_name, 
+          prev.job_id, 
+          prev.status, 
+          prev.marks, 
+          prev.feedback, 
+          prev.status_url, 
+          prev.created_at
+        FROM (
+          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          FROM evaluation_results r
+          JOIN evaluations e ON r.evaluation_id = e.id
+          WHERE ${targetCol}::text = $2::text
+            AND r.status IN ('completed', 'failed')
+            AND r.submission_id != ALL($3::uuid[])
+            AND r.student_id != ALL($4::uuid[])
+          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+        ) prev
+        ON CONFLICT (evaluation_id, submission_id) DO NOTHING
+        RETURNING id`,
+        [evaluation.id, targetId, currentSubIds, currentStudentIds]
+      );
+      const carriedOverCount = carryForwardRes.rowCount || 0;
+      if (carriedOverCount > 0) {
+        const totalCohortCount = submissions.length + carriedOverCount;
+        await client.query(
+          `UPDATE evaluations SET total_submissions = $1 WHERE id = $2`,
+          [totalCohortCount, evaluation.id]
+        );
+        evaluation.total_submissions = totalCohortCount;
+      }
+    }
+
     //validation
     if (evaluatorType === 'JS' && !assignment.test_cases) {
       throw new Error('Test cases missing for JS evaluator');
@@ -760,7 +809,12 @@ exports.getResultsByAssignment = async (req, res) => {
     if (evalRes.rows.length > 0) {
       // Evaluation exists, fetch results just like getEvaluationResults
       const evaluation = evalRes.rows[0];
-      const values = [evaluation.id];
+      const resolvedAssignmentId =
+        evaluation.college_assignment_id ||
+        evaluation.project_id ||
+        evaluation.assignment_id ||
+        assignmentId;
+      const values = [resolvedAssignmentId];
       let collegeFilter = '';
       if (isFacilitator) {
         values.push(facilitatorCollegeIds);
@@ -768,7 +822,8 @@ exports.getResultsByAssignment = async (req, res) => {
       }
 
       const resultsRes = await pool.query(
-        `SELECT r.*,
+        `SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id))
+                r.*,
                 COALESCE(s.submission_link, cs.submission_link, ps.submission_link) as submission_link,
                 cs.submission_file_url as submission_file_url,
                 sp.expected_graduation_year,
@@ -781,7 +836,11 @@ exports.getResultsByAssignment = async (req, res) => {
          LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
          LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
          LEFT JOIN colleges col ON sp.college_id = col.id
-         WHERE r.evaluation_id = $1${collegeFilter}`,
+         WHERE (e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1 OR e.id::text = $1)
+           ${collegeFilter}
+         ORDER BY COALESCE(r.student_id, r.submission_id),
+                  e.created_at DESC,
+                  r.created_at DESC`,
         values,
       );
 
@@ -799,7 +858,6 @@ exports.getResultsByAssignment = async (req, res) => {
       const isProj = !!evaluation.project_id;
       const evaluatedSubmissionIds = resultsRes.rows.map((r) => r.submission_id).filter(Boolean);
 
-      const resolvedAssignmentId = evaluation.college_assignment_id || evaluation.project_id || evaluation.assignment_id || assignmentId;
       let newSubValues = [resolvedAssignmentId];
       let newSubCollegeFilter = '';
       if (isFacilitator) {
@@ -1360,6 +1418,51 @@ exports.reEvaluateSubmission = async (req, res) => {
            VALUES ($1, $2, $3, $4, 'pending', 0, '-')
            ON CONFLICT (evaluation_id, submission_id) DO NOTHING`,
           [evaluationId, s.submission_id, s.user_id, s.student_name]
+        );
+      }
+
+      // Carry forward sibling submissions from prior evaluations of this assignment
+      const targetCol = isProject
+        ? 'e.project_id'
+        : isCollegeAssignment
+        ? 'e.college_assignment_id'
+        : 'e.assignment_id';
+      const currentSubIds = submissionIds;
+      const currentStudentIds = initialSubmissionsRes.rows.map((s) => s.user_id).filter(Boolean);
+      const siblingCarryRes = await client.query(
+        `INSERT INTO evaluation_results (
+          evaluation_id, submission_id, student_id, student_name, job_id, status, marks, feedback, status_url, created_at
+        )
+        SELECT 
+          $1, 
+          prev.submission_id, 
+          prev.student_id, 
+          prev.student_name, 
+          prev.job_id, 
+          prev.status, 
+          prev.marks, 
+          prev.feedback, 
+          prev.status_url, 
+          prev.created_at
+        FROM (
+          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          FROM evaluation_results r
+          JOIN evaluations e ON r.evaluation_id = e.id
+          WHERE ${targetCol}::text = $2::text
+            AND r.status IN ('completed', 'failed')
+            AND r.submission_id != ALL($3::uuid[])
+            AND r.student_id != ALL($4::uuid[])
+          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+        ) prev
+        ON CONFLICT (evaluation_id, submission_id) DO NOTHING
+        RETURNING id`,
+        [evaluationId, assignmentId, currentSubIds, currentStudentIds]
+      );
+      const siblingCount = siblingCarryRes.rowCount || 0;
+      if (siblingCount > 0) {
+        await client.query(
+          `UPDATE evaluations SET total_submissions = total_submissions + $1 WHERE id = $2`,
+          [siblingCount, evaluationId]
         );
       }
     } else {

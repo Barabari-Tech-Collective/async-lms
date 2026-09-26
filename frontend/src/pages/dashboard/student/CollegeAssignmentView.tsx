@@ -401,8 +401,8 @@ export default function CollegeAssignmentView() {
           </div>
 
           {/* Right: Submit Assignment */}
-          <div className='lg:col-span-5 space-y-6'>
-            <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-6 sm:space-y-8'>
+          <div className='lg:col-span-5 space-y-6 min-w-0'>
+            <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-6 sm:space-y-8 overflow-hidden min-w-0'>
               <div className='space-y-1.5'>
                 <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
                   Submit Assignment
@@ -447,9 +447,9 @@ export default function CollegeAssignmentView() {
               </Button>
 
               {isSubmitted && (
-                <div className='p-4 bg-emerald-50/80 rounded-xl sm:rounded-2xl border border-emerald-100 space-y-2'>
+                <div className='p-4 bg-emerald-50/80 rounded-xl sm:rounded-2xl border border-emerald-100 space-y-2 overflow-hidden min-w-0 max-w-full'>
                   <div className='flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider'>
-                    <CheckCircle2 className='w-4 h-4 text-emerald-600' />
+                    <CheckCircle2 className='w-4 h-4 text-emerald-600 shrink-0' />
                     <span>Submission Received</span>
                   </div>
                   {assignment?.submission_link && (
@@ -457,10 +457,23 @@ export default function CollegeAssignmentView() {
                       href={assignment.submission_link}
                       target='_blank'
                       rel='noopener noreferrer'
-                      className='inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium break-all hover:underline'
+                      title={assignment.submission_link}
+                      className='flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline w-full max-w-full min-w-0'
                     >
-                      <ExternalLink className='w-3.5 h-3.5 shrink-0' />
-                      <span className='truncate'>{assignment.submission_link}</span>
+                      <ExternalLink className='w-3.5 h-3.5 shrink-0 text-blue-600' />
+                      <span className='truncate block min-w-0 flex-1'>{assignment.submission_link}</span>
+                    </a>
+                  )}
+                  {assignment?.submission_file_url && !assignment?.submission_link && (
+                    <a
+                      href={assignment.submission_file_url}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      title={assignment.submission_file_name || 'Uploaded File'}
+                      className='flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline w-full max-w-full min-w-0'
+                    >
+                      <FileText className='w-3.5 h-3.5 shrink-0 text-blue-600' />
+                      <span className='truncate block min-w-0 flex-1'>{assignment.submission_file_name || 'View Uploaded File'}</span>
                     </a>
                   )}
                 </div>

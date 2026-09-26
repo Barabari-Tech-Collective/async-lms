@@ -303,11 +303,43 @@ const purgeOldDeletedUsers = async () => {
   }
 };
 
+// Runs once a day to permanently purge colleges in the bin > 30 days with 7-step cascade
+const { cascadeHardDeleteCollege } = require('./controllers/college.controller');
+const purgeOldDeletedColleges = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name FROM colleges WHERE deleted_at < NOW() - INTERVAL '30 days'`,
+    );
+    if (rows.length > 0) {
+      for (const col of rows) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await cascadeHardDeleteCollege(client, col.id);
+          await client.query('COMMIT');
+        } catch (colErr) {
+          await client.query('ROLLBACK');
+          console.error(`[Cron Error] Failed to purge college ${col.id} (${col.name}):`, colErr);
+        } finally {
+          client.release();
+        }
+      }
+      console.log(
+        `[Cron] Purged ${rows.length} colleges from recycle bin older than 30 days.`,
+      );
+    }
+  } catch (error) {
+    console.error('[Cron Error] Failed to query expired colleges in recycle bin:', error);
+  }
+};
+
 // Run immediately on boot
 purgeOldDeletedUsers();
+purgeOldDeletedColleges();
 
 // Schedule to run every 24 hours
 setInterval(purgeOldDeletedUsers, 24 * 60 * 60 * 1000);
+setInterval(purgeOldDeletedColleges, 24 * 60 * 60 * 1000);
 
 
 const PORT = process.env.PORT || 3001;

@@ -187,8 +187,8 @@ export const PendingTasksReminderModal: React.FC<PendingTasksReminderModalProps>
         {/* Top Decorative Gradient Line */}
         <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 shrink-0" />
 
-        {/* Scrollable Modal Content */}
-        <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+        {/* Scrollable Modal Content (hidden scrollbar, fully scrollable) */}
+        <div className="p-4 sm:p-6 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-1 space-y-4">
           {/* Header Row: Badges & Close Button */}
           <div className="flex items-start justify-between gap-2">
             <div className="space-y-1.5">

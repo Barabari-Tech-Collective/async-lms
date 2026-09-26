@@ -1150,13 +1150,21 @@ exports.getFacilitatorColleges = async (req, res) => {
     const { id: facilitatorId, role } = req.user;
     let result;
     if (role === 'admin') {
-      result = await pool.query(`SELECT id, name, is_verified FROM colleges ORDER BY name`);
+      result = await pool.query(
+        `SELECT id, name, is_verified 
+         FROM colleges 
+         WHERE is_deleted = false AND deleted_at IS NULL 
+         ORDER BY name`
+      );
     } else {
       result = await pool.query(
         `SELECT c.id, c.name, c.is_verified
          FROM colleges c
          JOIN facilitator_colleges fc ON c.id = fc.college_id
-         WHERE fc.facilitator_id = $1 AND fc.is_deleted = false
+         WHERE fc.facilitator_id = $1 
+           AND fc.is_deleted = false 
+           AND c.is_deleted = false 
+           AND c.deleted_at IS NULL
          ORDER BY c.name`,
         [facilitatorId],
       );
@@ -1173,11 +1181,17 @@ async function getFacilitatorCollegeIds(facilitatorId, requestedCollegeId, role)
   const isSpecificCollege = requestedCollegeId && requestedCollegeId !== 'all' && requestedCollegeId.trim() !== '' && UUID_RE.test(requestedCollegeId.trim());
   if (role === 'admin') {
     if (isSpecificCollege) return [requestedCollegeId.trim()];
-    const allRes = await pool.query('SELECT id AS college_id FROM colleges');
+    const allRes = await pool.query('SELECT id AS college_id FROM colleges WHERE is_deleted = false AND deleted_at IS NULL');
     return allRes.rows.map((r) => r.college_id);
   }
   const colRes = await pool.query(
-    'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+    `SELECT fc.college_id 
+     FROM facilitator_colleges fc 
+     JOIN colleges c ON c.id = fc.college_id
+     WHERE fc.facilitator_id = $1 
+       AND fc.is_deleted = false 
+       AND c.is_deleted = false 
+       AND c.deleted_at IS NULL`,
     [facilitatorId],
   );
   const allowed = colRes.rows.map((r) => r.college_id);

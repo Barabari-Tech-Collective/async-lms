@@ -82,6 +82,30 @@ pool.on('error', (err, client) => {
       WHERE deleted_at IS NULL;
     `);
 
+    // 30-Day College Recycle Bin Migration
+    await client.query(`
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_colleges_deleted_at ON colleges(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_colleges_is_deleted ON colleges(is_deleted);
+
+      -- Drop unconditional unique constraints
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_short_code_key;
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_name_key;
+
+      -- Create partial unique indexes active only for non-deleted colleges
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_name_active_unique 
+      ON colleges(LOWER(TRIM(name))) 
+      WHERE deleted_at IS NULL AND is_deleted = false;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_short_code_active_unique 
+      ON colleges(LOWER(TRIM(short_code))) 
+      WHERE short_code IS NOT NULL AND deleted_at IS NULL AND is_deleted = false;
+
+      -- Backfill legacy soft-deleted rows
+      UPDATE colleges SET deleted_at = NOW() WHERE is_deleted = true AND deleted_at IS NULL;
+    `);
+
     // Add verification and token_version columns to users, and create otp_codes table
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN NOT NULL DEFAULT false;

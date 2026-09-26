@@ -295,7 +295,7 @@ exports.manageAssignments = async (req, res) => {
           ORDER BY created_at DESC 
           LIMIT 1
         ) e ON true
-        WHERE ca.is_deleted = false
+        WHERE ca.is_deleted = false AND (ca.college_id IS NULL OR (c.is_deleted = false AND c.deleted_at IS NULL))
         ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
       values = [];
     } else {
@@ -357,7 +357,9 @@ exports.manageAssignments = async (req, res) => {
           ORDER BY created_at DESC 
           LIMIT 1
         ) e ON true
-        WHERE (ca.created_by = $1 OR ca.college_id = ANY($2::uuid[])) AND ca.is_deleted = false
+        WHERE (ca.created_by = $1 OR ca.college_id = ANY($2::uuid[])) 
+          AND ca.is_deleted = false 
+          AND (ca.college_id IS NULL OR (c.is_deleted = false AND c.deleted_at IS NULL))
         ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
       values = [req.user.id, req.user.college_ids || []];
     }
@@ -726,13 +728,16 @@ exports.getCollegeAssignmentById = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
+      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at,
+              COALESCE(s.name, ca.course) AS course,
+              ca.course AS raw_course,
               ca.instruction_file_url, ca.instruction_file_name,
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
               ca.college_id, ca.created_by,
               u.full_name AS created_by_name,
               cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
        FROM college_assignments ca
+       LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
        LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $2
        WHERE ca.id = $1 AND ca.is_deleted = false`,
@@ -1261,7 +1266,8 @@ exports.getFilteredAssignments = async (req, res) => {
         SELECT 
           ca.id, 
           ca.title, 
-          ca.course, 
+          COALESCE(s.name, ca.course) AS course, 
+          ca.course AS raw_course,
           'college' as type,
           ca.college_id, 
           c.name AS college_name,
@@ -1277,6 +1283,7 @@ exports.getFilteredAssignments = async (req, res) => {
           CASE WHEN e.status = 'completed' THEN 'evaluated' ELSE 'pending' END as status,
           e.id as evaluation_id
         FROM public.college_assignments ca
+        LEFT JOIN public.subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
         JOIN public.colleges c ON c.id = ca.college_id
         LEFT JOIN LATERAL (
           SELECT * FROM public.evaluations
@@ -1293,6 +1300,7 @@ exports.getFilteredAssignments = async (req, res) => {
           a.id, 
           a.title, 
           s.name as course, 
+          s.slug as raw_course,
           'unit' as type,
           NULL as college_id, 
           'Curriculum' as college_name,
@@ -1331,7 +1339,11 @@ exports.getFilteredAssignments = async (req, res) => {
     // 🎯 Domain filter
     if (domain) {
       const domainIdx = getNextIndex(domain);
-      query += ` AND (LOWER(course) LIKE LOWER('%' || $${domainIdx} || '%') OR LOWER($${domainIdx}) LIKE '%' || LOWER(course) || '%')`;
+      query += ` AND (
+        LOWER(course) LIKE LOWER('%' || $${domainIdx} || '%') 
+        OR LOWER($${domainIdx}) LIKE '%' || LOWER(course) || '%'
+        OR LOWER(raw_course) LIKE LOWER('%' || $${domainIdx} || '%')
+      )`;
     }
 
     // 🔍 Search filter

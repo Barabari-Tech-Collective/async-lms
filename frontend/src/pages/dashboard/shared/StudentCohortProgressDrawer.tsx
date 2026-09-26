@@ -320,7 +320,7 @@ export const StudentCohortProgressDrawer: React.FC<StudentCohortProgressDrawerPr
               }}
               className="w-full sm:flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer order-1 sm:order-2"
             >
-              <span>View Course Modules & Submissions</span>
+              <span>View Detailed Progress</span>
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
             </button>
           </div>
