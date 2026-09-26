@@ -22,6 +22,8 @@ const authSlice = createSlice({
       state.token = null;
       state.isAuthenticated = false;
       localStorage.removeItem('token');
+      sessionStorage.removeItem('lms_milestone_shown_session');
+      localStorage.removeItem('lms_milestone_snoozed_until');
       try {
         queryClient.clear();
       } catch {}

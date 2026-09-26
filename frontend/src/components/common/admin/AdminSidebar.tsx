@@ -6,6 +6,7 @@ import {
   Lock,
   Users,
   ClipboardCheck,
+  CheckCircle2,
   BarChart3,
   Settings,
   Sparkles,
@@ -32,6 +33,11 @@ const menuItems = [
     name: 'Assignments',
     icon: ClipboardCheck,
     path: '/dashboard/admin/assignment-management',
+  },
+  {
+    name: 'Evaluations',
+    icon: CheckCircle2,
+    path: '/dashboard/admin/evaluations',
   },
   {
     name: 'AI Curriculum',

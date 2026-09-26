@@ -21,6 +21,7 @@ const {
   runExerciseTests,
   getStudentAssignments,
   getStudentAssignmentsOverview,
+  getStudentProjectsOverview,
   getAssignmentById,
   submitAssignment,
   getCapstone,
@@ -29,7 +30,22 @@ const {
   enrollInSubject,
   getStudentAnalytics,
   getStudentModuleAnalytics,
+  getActiveMilestoneDeadlines,
+  getStudentStreakDetails,
+  getStudentActivityCalendar,
 } = require('../controllers/student.controller');
+
+// ===== HABIT STREAK & ACTIVITY CALENDAR =====
+router.get('/streak-details', verifyToken, isStudent, getStudentStreakDetails);
+router.get('/activity-calendar', verifyToken, isStudent, getStudentActivityCalendar);
+
+// ===== PROGRESS-DRIVEN MILESTONE DEADLINES =====
+router.get(
+  '/deadlines/active-milestones',
+  verifyToken,
+  isStudent,
+  getActiveMilestoneDeadlines,
+);
 
 // ===== PROGRESS TRACKING =====
 router.get('/progress', verifyToken, isStudent, getMyProgress);
@@ -100,7 +116,13 @@ router.post(
   submitAssignment,
 );
 
-// ===== PERSONAL PROJECTS =====
+// ===== PERSONAL & CAPSTONE PROJECTS =====
+router.get(
+  '/projects/overview',
+  verifyToken,
+  isStudent,
+  getStudentProjectsOverview,
+);
 router.get('/projects', verifyToken, isStudent, getStudentProjects);
 router.post('/projects', verifyToken, isStudent, createStudentProject);
 router.delete('/projects/:id', verifyToken, isStudent, deleteStudentProject);

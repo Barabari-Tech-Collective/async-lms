@@ -42,6 +42,7 @@ interface LessonState {
   // Exercise State
   exerciseCode: Record<string, string>;
   submittingExercise: Record<string, boolean>;
+  passedExercises: Record<string, boolean>;
 
   // Progress
   lessonCompleted: boolean;
@@ -57,6 +58,7 @@ const initialState: LessonState = {
   submittingQuiz: false,
   exerciseCode: {},
   submittingExercise: {},
+  passedExercises: {},
   lessonCompleted: false,
 };
 
@@ -166,10 +168,11 @@ export const submitExercise = createAsyncThunk<
       { files: payload.files, taskId: payload.taskId }
     );
     dispatch(loadUser());
+    const isPassed = Boolean(res.data.data?.submission?.is_passed ?? res.data.data?.is_passed);
     return { 
       exerciseId: payload.exerciseId, 
       score: res.data.data?.submission?.score ?? res.data.data?.score ?? null,
-      isPassed: res.data.data?.submission?.is_passed ?? res.data.data?.is_passed ?? false,
+      isPassed,
       testResults: res.data.data?.test_results,
     };
   } catch (error: any) {
@@ -259,6 +262,14 @@ const lessonSlice = createSlice({
         state.status = 'succeeded';
         state.data = action.payload;
         state.lessonCompleted = action.payload.lesson_completed ?? false;
+        state.passedExercises = {};
+        if (action.payload.exercises && Array.isArray(action.payload.exercises)) {
+          action.payload.exercises.forEach((ex: any) => {
+            if (ex.is_completed) {
+              state.passedExercises[ex.id] = true;
+            }
+          });
+        }
       })
       .addCase(fetchLesson.rejected, (state, action) => {
         state.status = 'failed';
@@ -278,6 +289,14 @@ const lessonSlice = createSlice({
         state.status = 'succeeded';
         state.data = action.payload;
         state.lessonCompleted = false; // Exercises are not subtopic lessons
+        state.passedExercises = {};
+        if (action.payload.exercises && Array.isArray(action.payload.exercises)) {
+          action.payload.exercises.forEach((ex: any) => {
+            if (ex.is_completed) {
+              state.passedExercises[ex.id] = true;
+            }
+          });
+        }
       })
       .addCase(fetchExercise.rejected, (state, action) => {
         state.status = 'failed';
@@ -328,7 +347,7 @@ const lessonSlice = createSlice({
       .addCase(submitExercise.fulfilled, (state, action) => {
         state.submittingExercise[action.payload.exerciseId] = false;
         if (action.payload.isPassed) {
-          state.lessonCompleted = true;
+          state.passedExercises[action.payload.exerciseId] = true;
         }
       })
       .addCase(submitExercise.rejected, (state, action) => {

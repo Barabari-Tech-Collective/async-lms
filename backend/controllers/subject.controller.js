@@ -311,7 +311,10 @@ exports.getCourseStructure = async (req, res) => {
         p.id AS capstone_id,
         p.title AS capstone_title,
         p.instructions AS capstone_instructions,
-        p.max_score AS capstone_max_score
+        p.max_score AS capstone_max_score,
+        p.evaluator_type AS capstone_evaluator_type,
+        p.rubric AS capstone_rubric,
+        p.test_cases AS capstone_test_cases
 
       FROM topics t
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
@@ -347,7 +350,15 @@ exports.getCourseStructure = async (req, res) => {
           description: row.topic_description,
           order_index: row.topic_order,
           capstone: row.capstone_id
-            ? { id: row.capstone_id, title: row.capstone_title, instructions: row.capstone_instructions, max_score: row.capstone_max_score }
+            ? {
+                id: row.capstone_id,
+                title: row.capstone_title,
+                instructions: row.capstone_instructions,
+                max_score: row.capstone_max_score,
+                evaluator_type: row.capstone_evaluator_type,
+                rubric: row.capstone_rubric,
+                test_cases: row.capstone_test_cases,
+              }
             : null,
           units: new Map(),
         });
@@ -678,12 +689,20 @@ exports.getSubtopicContent = async (req, res) => {
 
       // Exercise
       if (row.exercise_id && !exercisesMap.has(row.exercise_id)) {
+        let lang = row.exercise_language;
+        const initialFiles = row.exercise_initial_files;
+        const hasHtml = Array.isArray(initialFiles) && initialFiles.some((f) => f.name && (f.name.endsWith('.html') || f.name.endsWith('.htm')));
+        if (hasHtml || /html|css|dom|web/i.test(row.exercise_title || '')) {
+          if (!lang || lang === 'javascript') {
+            lang = 'dom';
+          }
+        }
         exercisesMap.set(row.exercise_id, {
           id: row.exercise_id,
           title: row.exercise_title,
           instructions: row.instructions,
           max_score: row.exercise_max_score,
-          language: row.exercise_language,
+          language: lang,
           initial_files: row.exercise_initial_files,
           test_cases: publicTestCases(row.exercise_test_cases),
           tasks: publicTasks(row.exercise_tasks),
@@ -719,7 +738,23 @@ exports.getSubtopicContent = async (req, res) => {
           userId,
           userRole,
         ),
-        exercises: Array.from(exercisesMap.values()),
+        exercises: await (async () => {
+          const exercisesList = Array.from(exercisesMap.values());
+          if (userRole !== 'student' || exercisesList.length === 0 || !userId) {
+            return exercisesList.map((ex) => ({ ...ex, is_completed: false }));
+          }
+          const exerciseIds = exercisesList.map((e) => e.id);
+          const passedRes = await pool.query(
+            `SELECT DISTINCT exercise_id FROM exercise_submissions 
+             WHERE exercise_id = ANY($1::uuid[]) AND user_id = $2 AND is_passed = true`,
+            [exerciseIds, userId],
+          );
+          const passedSet = new Set(passedRes.rows.map((r) => r.exercise_id));
+          return exercisesList.map((ex) => ({
+            ...ex,
+            is_completed: passedSet.has(ex.id),
+          }));
+        })(),
       },
     });
   } catch (err) {
@@ -962,6 +997,18 @@ exports.getExerciseContent = async (req, res) => {
       }
     }
 
+    const userId = req.user?.id;
+    let isCompleted = false;
+    if (userId) {
+      const subCheck = await pool.query(
+        `SELECT 1 FROM exercise_submissions
+         WHERE exercise_id = $1 AND user_id = $2 AND is_passed = true
+         LIMIT 1`,
+        [exerciseId, userId],
+      );
+      isCompleted = subCheck.rows.length > 0;
+    }
+
     res.json({
       success: true,
       data: {
@@ -977,16 +1024,27 @@ exports.getExerciseContent = async (req, res) => {
         },
         quizzes: [],
         exercises: [
-          {
-            id: row.exercise_id,
-            title: row.exercise_title,
-            instructions: row.instructions,
-            max_score: row.exercise_max_score,
-            language: row.exercise_language,
-            initial_files: row.exercise_initial_files,
-            test_cases: publicTestCases(row.exercise_test_cases),
-            tasks: publicTasks(row.exercise_tasks),
-          },
+          (() => {
+            let lang = row.exercise_language;
+            const initFiles = row.exercise_initial_files;
+            const hasHtmlFile = Array.isArray(initFiles) && initFiles.some((f) => f.name && (f.name.endsWith('.html') || f.name.endsWith('.htm')));
+            if (hasHtmlFile || /html|css|dom|web/i.test(row.exercise_title || '')) {
+              if (!lang || lang === 'javascript') {
+                lang = 'dom';
+              }
+            }
+            return {
+              id: row.exercise_id,
+              title: row.exercise_title,
+              instructions: row.instructions,
+              max_score: row.exercise_max_score,
+              language: lang,
+              initial_files: row.exercise_initial_files,
+              test_cases: publicTestCases(row.exercise_test_cases),
+              tasks: publicTasks(row.exercise_tasks),
+              is_completed: isCompleted,
+            };
+          })(),
         ],
       },
     });

@@ -1,10 +1,86 @@
 const OpenAI = require('openai');
 const { recommendBestVideo } = require('./videoRecommendation.service');
 
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY,
-  baseURL: process.env.OPENAI_BASE_URL || 'https://api.deepseek.com' 
-});
+function getPrimaryClient() {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY;
+  const baseURL = process.env.OPENAI_BASE_URL || 'https://api.deepseek.com';
+  return new OpenAI({ apiKey, baseURL });
+}
+
+function getFallbackClient() {
+  const openAiKey = process.env.CHATGPT_API_KEY || (process.env.OPENAI_API_KEY?.startsWith('sk-proj') ? process.env.OPENAI_API_KEY : null);
+  if (openAiKey) {
+    return new OpenAI({ apiKey: openAiKey });
+  }
+  return null;
+}
+
+const openai = getPrimaryClient();
+
+function safeJsonParse(content) {
+  if (!content) throw new Error('AI returned an empty response');
+  if (typeof content !== 'string') return content;
+  let cleaned = content.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+  }
+  return JSON.parse(cleaned);
+}
+
+async function callLlmJson({ prompt, maxTokens = 3000, temperature = 0.7 }) {
+  const client = getPrimaryClient();
+  const primaryModel = process.env.OPENAI_MODEL || 'deepseek-v4-flash';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: primaryModel,
+      messages: [{ role: 'user', content: prompt }],
+      temperature,
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+    });
+    return safeJsonParse(response.choices[0].message.content);
+  } catch (err) {
+    console.warn(`Primary LLM (${primaryModel}) failed:`, err.message);
+
+    // If deepseek-v4-flash encountered an alias routing mismatch on the gateway, try canonical aliases
+    if (primaryModel === 'deepseek-v4-flash') {
+      for (const altModel of ['deepseek-flash', 'deepseek-chat']) {
+        try {
+          console.info(`Attempting alternative DeepSeek model identifier (${altModel})...`);
+          const altResponse = await client.chat.completions.create({
+            model: altModel,
+            messages: [{ role: 'user', content: prompt }],
+            temperature,
+            max_tokens: maxTokens,
+            response_format: { type: 'json_object' },
+          });
+          return safeJsonParse(altResponse.choices[0].message.content);
+        } catch (altErr) {
+          console.warn(`Alternative (${altModel}) failed:`, altErr.message);
+        }
+      }
+    }
+
+    const fallbackClient = getFallbackClient();
+    if (fallbackClient) {
+      console.info('Attempting fallback with OpenAI gpt-4o-mini...');
+      try {
+        const fbResponse = await fallbackClient.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature,
+          max_tokens: Math.min(maxTokens, 4000),
+          response_format: { type: 'json_object' },
+        });
+        return safeJsonParse(fbResponse.choices[0].message.content);
+      } catch (fbErr) {
+        console.error('Fallback LLM also failed:', fbErr.message);
+      }
+    }
+    throw err;
+  }
+}
 
 /**
  * Generate a full curriculum tree from course metadata + JD.
@@ -129,16 +205,7 @@ Rules:
 - Level appropriateness: ${level} — calibrate depth and complexity accordingly
 - Avoid generic filler — every subtopic must teach something directly employable for ${roleFocus}`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 32000,
-    response_format: { type: 'json_object' },
-  });
-
-  const content = response.choices[0].message.content;
-  const parsed = JSON.parse(content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 8192, temperature: 0.7 });
 
   if (!parsed.modules || !Array.isArray(parsed.modules)) {
     throw new Error('AI returned invalid curriculum structure');
@@ -173,15 +240,7 @@ Rewrite this lesson following the instruction. Return ONLY a valid JSON object:
   "interview_questions": ["...", "..."]
 }`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 1500,
-    response_format: { type: 'json_object' },
-  });
-
-  return JSON.parse(response.choices[0].message.content);
+  return await callLlmJson({ prompt, maxTokens: 1500, temperature: 0.7 });
 }
 
 /**
@@ -205,15 +264,7 @@ Return ONLY a valid JSON object:
 Categories must be exactly: "technical", "tools", or "soft".
 Extract 8–20 skills. Focus on what's directly required, not implied.`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.3,
-    max_tokens: 1000,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 1000, temperature: 0.3 });
   return parsed.skills || [];
 }
 
@@ -249,15 +300,7 @@ Rules:
 - Each topic must be directly essential to the target role
 - Order them from foundational to advanced`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.6,
-    max_tokens: 1500,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 1500, temperature: 0.6 });
   if (!parsed.topics || !Array.isArray(parsed.topics)) {
     throw new Error('AI returned invalid topics structure');
   }
@@ -286,15 +329,7 @@ Rules:
 - NOT generic ("Unit 1", "Basics")
 - Progress logically from foundational concepts to more complex ones within the topic`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.6,
-    max_tokens: 1000,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 1000, temperature: 0.6 });
   if (!parsed.units || !Array.isArray(parsed.units)) {
     throw new Error('AI returned invalid units structure');
   }
@@ -330,15 +365,7 @@ Rules:
 - duration_mins: estimated total study time including video + reading (15–40 mins)
 - Each must be granular enough to have its own 10–15 minute video`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.6,
-    max_tokens: 600,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 600, temperature: 0.6 });
   if (!parsed.subtopics || !Array.isArray(parsed.subtopics)) {
     throw new Error('AI returned invalid subtopics structure');
   }
@@ -434,14 +461,7 @@ Return ONLY a valid JSON object:
 { "search_query": "the best youtube search string" }`;
 
     try {
-      const response = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        response_format: { type: 'json_object' }
-      });
-      
-      const parsed = JSON.parse(response.choices[0].message.content);
+      const parsed = await callLlmJson({ prompt, maxTokens: 500, temperature: 0.3 });
       if (parsed.search_query) {
         searchQuery = parsed.search_query;
       }
@@ -507,15 +527,26 @@ Rules:
     throw new Error(`Unknown content type: ${type}`);
   }
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: maxTokens,
-    response_format: { type: 'json_object' },
-  });
-
-  return JSON.parse(response.choices[0].message.content);
+  const result = await callLlmJson({ prompt, maxTokens, temperature: 0.7 });
+  if (type === 'markdown') {
+    return {
+      explanation: result?.explanation || '',
+      example: result?.example || '',
+      activity: result?.activity || '',
+      interview_questions: Array.isArray(result?.interview_questions) ? result.interview_questions : [],
+      duration_mins: Number(result?.duration_mins) || 25,
+    };
+  } else if (type === 'exercise') {
+    return {
+      exercise: result?.exercise || {
+        title: lessonTitle,
+        description: '',
+        tasks: [],
+        starter_code: '',
+      },
+    };
+  }
+  return result;
 }
 
 /**
@@ -564,15 +595,7 @@ Rules:
 - Mix recall, understanding, and application questions
 - Focus on what a ${roleFocus} must know`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.5,
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 2000, temperature: 0.5 });
   if (!parsed.quiz_questions || !Array.isArray(parsed.quiz_questions)) {
     throw new Error('AI returned invalid quiz structure');
   }
@@ -612,15 +635,7 @@ Rules:
 - Instructions must be clear enough to submit without ambiguity
 - Covers the key skills from the entire unit`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.6,
-    max_tokens: 800,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 800, temperature: 0.6 });
   if (!parsed.assignment) {
     throw new Error('AI returned invalid assignment structure');
   }
@@ -654,15 +669,7 @@ Rules:
 - Must be a realistic, portfolio-worthy project for a ${roleFocus}
 - Instructions must be clear and self-contained`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 1000,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 1000, temperature: 0.7 });
   if (!parsed.capstone_project) {
     throw new Error('AI returned invalid capstone structure');
   }
@@ -780,15 +787,7 @@ Before returning JSON, confirm:
 7. Types match exactly.
 8. Return only raw JSON.`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.1,
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content);
+  const parsed = await callLlmJson({ prompt, maxTokens: 2000, temperature: 0.1 });
   return parsed.test_cases || [];
 }
 
@@ -815,15 +814,7 @@ Document Text (truncated if too long):
 ${fileText.substring(0, 15000)}
 `;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.5,
-    max_tokens: 1500,
-    response_format: { type: 'json_object' },
-  });
-
-  return JSON.parse(response.choices[0].message.content);
+  return await callLlmJson({ prompt, maxTokens: 1500, temperature: 0.5 });
 }
 
 async function generateContentFromFile(fileText, lessonTitle) {
@@ -846,15 +837,7 @@ Document Text (truncated if too long):
 ${fileText.substring(0, 15000)}
 `;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.5,
-    max_tokens: 2500,
-    response_format: { type: 'json_object' },
-  });
-
-  return JSON.parse(response.choices[0].message.content);
+  return await callLlmJson({ prompt, maxTokens: 2500, temperature: 0.5 });
 }
 
 module.exports = {

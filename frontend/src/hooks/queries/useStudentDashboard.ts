@@ -7,6 +7,7 @@ import type {
   Assignment,
   Subject,
   StudentAssignmentsOverviewResponse,
+  StudentProjectsOverviewResponse,
 } from '@/utils/types';
 
 export function useMySubjects() {
@@ -75,4 +76,17 @@ export function useStudentAssignmentsOverview() {
     enabled: !!user?.id,
   });
 }
+
+export function useStudentProjectsOverview() {
+  const user = useAppSelector(selectUser);
+  return useQuery<StudentProjectsOverviewResponse>({
+    queryKey: ['student', 'projects', 'overview', user?.id],
+    queryFn: () =>
+      apiClient
+        .get('/students/projects/overview')
+        .then((r) => r.data ?? { success: true, data: [], counts: { total: 0, pending: 0, pending_evaluation: 0, evaluated: 0 } }),
+    enabled: !!user?.id,
+  });
+}
+
 

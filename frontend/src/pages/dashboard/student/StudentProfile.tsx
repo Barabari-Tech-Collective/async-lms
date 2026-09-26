@@ -21,6 +21,7 @@ import {
   BarChart2,
 } from 'lucide-react';
 import apiClient from '@/services/api';
+import { ActivityCalendar } from '@/components/common/student/ActivityCalendar';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -238,6 +239,11 @@ export default function StudentProfile() {
           color='text-rose-600'
         />
       </div>
+
+      {/* ── Learning Activity Calendar ────────────────────────────────────────── */}
+      <section>
+        <ActivityCalendar />
+      </section>
 
       {/* ── Badges ──────────────────────────────────────────────────────────── */}
       {badges.length > 0 && (

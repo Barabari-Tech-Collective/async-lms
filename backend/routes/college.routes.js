@@ -3,6 +3,9 @@ const {
   createCollege,
   updateCollege,
   deleteCollege,
+  getRecycleBinColleges,
+  restoreCollege,
+  permanentDeleteCollege,
   assignFacilitator,
   getCollegesBySubject,
   toggleSubjectAccess,
@@ -13,10 +16,13 @@ const isAdmin = require('../middlewares/isAdmin');
 const verifyToken = require('../middlewares/verfiyToken');
 const router = require('express').Router();
 
-// General CRUD
+// General CRUD & Recycle Bin
 router.get('/', verifyToken, getAllColleges);
+router.get('/bin', verifyToken, isAdmin, getRecycleBinColleges);
 router.post('/', verifyToken, createCollege);
+router.post('/:id/restore', verifyToken, isAdmin, restoreCollege);
 router.put('/:id', verifyToken, isAdmin, updateCollege);
+router.delete('/:id/permanent', verifyToken, isAdmin, permanentDeleteCollege);
 router.delete('/:id', verifyToken, isAdmin, deleteCollege);
 
 // Assignment Logic
