@@ -13,12 +13,19 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+function getLocalDateString(ts, timeZone = 'Asia/Kolkata') {
+  if (!ts) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ts));
+}
+
 function isSameDay(t1, t2) {
-  const d1 = new Date(t1);
-  const d2 = new Date(t2);
-  return d1.getUTCFullYear() === d2.getUTCFullYear() &&
-         d1.getUTCMonth() === d2.getUTCMonth() &&
-         d1.getUTCDate() === d2.getUTCDate();
+  if (!t1 || !t2) return false;
+  return getLocalDateString(t1) === getLocalDateString(t2);
 }
 
 /**
@@ -27,7 +34,7 @@ function isSameDay(t1, t2) {
  * - current_streak: Consecutive calendar days with learning activity ending today or yesterday.
  *                   If a day was missed (gap > 1 day from today/yesterday), current_streak is 0.
  * - longest_streak: The maximum consecutive streak in the user's history, retaining previous records.
- * - practiced_today: Whether an action was recorded on CURRENT_DATE.
+ * - practiced_today: Whether an action was recorded on the local date (Asia/Kolkata).
  * Synchronizes the result directly into public.user_streaks.
  */
 async function reconcileUserStreak(userId) {
@@ -37,21 +44,21 @@ async function reconcileUserStreak(userId) {
       WITH user_activity_dates AS (
         SELECT DISTINCT act_date
         FROM (
-          SELECT completed_at::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1::uuid AND completed_at IS NOT NULL
+          SELECT (completed_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1::uuid AND completed_at IS NOT NULL
           UNION
-          SELECT COALESCE(attempted_at, created_at)::date AS act_date FROM public.quiz_attempts WHERE user_id = $1::uuid AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
+          SELECT (COALESCE(attempted_at, created_at) AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.quiz_attempts WHERE user_id = $1::uuid AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
           UNION
-          SELECT submitted_at::date AS act_date FROM public.exercise_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.exercise_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
           UNION
-          SELECT submitted_at::date AS act_date FROM public.assignment_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.assignment_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
           UNION
-          SELECT submitted_at::date AS act_date FROM public.project_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.project_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
           UNION
-          SELECT COALESCE(submitted_at, updated_at)::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1::uuid AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
+          SELECT (COALESCE(submitted_at, updated_at) AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1::uuid AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
           UNION
-          SELECT created_at::date AS act_date FROM public.points_log WHERE user_id = $1::uuid AND created_at IS NOT NULL
+          SELECT (created_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.points_log WHERE user_id = $1::uuid AND created_at IS NOT NULL
         ) a
-        WHERE act_date <= CURRENT_DATE
+        WHERE act_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
       ),
       streak_groups AS (
         SELECT 
@@ -71,14 +78,14 @@ async function reconcileUserStreak(userId) {
       computed AS (
         SELECT 
           COALESCE(
-            (SELECT length FROM streak_lengths WHERE end_date >= CURRENT_DATE - 1 ORDER BY end_date DESC LIMIT 1),
+            (SELECT length FROM streak_lengths WHERE end_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - 1) ORDER BY end_date DESC LIMIT 1),
             0
           )::int AS calc_current_streak,
           COALESCE(
             (SELECT MAX(length) FROM streak_lengths),
             0
           )::int AS calc_longest_streak,
-          EXISTS(SELECT 1 FROM user_activity_dates WHERE act_date = CURRENT_DATE) AS calc_practiced_today,
+          EXISTS(SELECT 1 FROM user_activity_dates WHERE act_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date) AS calc_practiced_today,
           (SELECT MAX(act_date) FROM user_activity_dates) AS calc_last_activity
       )
       INSERT INTO public.user_streaks (user_id, current_streak, longest_streak, last_activity, updated_at)
@@ -86,7 +93,7 @@ async function reconcileUserStreak(userId) {
         $1::uuid,
         c.calc_current_streak,
         c.calc_longest_streak,
-        COALESCE(c.calc_last_activity, CURRENT_DATE),
+        COALESCE(c.calc_last_activity, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date),
         CURRENT_TIMESTAMP
       FROM computed c
       ON CONFLICT (user_id) DO UPDATE SET
@@ -99,8 +106,8 @@ async function reconcileUserStreak(userId) {
         current_streak,
         longest_streak,
         last_activity,
-        (last_activity::date = CURRENT_DATE) AS practiced_today,
-        (last_activity::date = CURRENT_DATE - 1 AND COALESCE(current_streak, 0) > 0) AS streak_in_jeopardy;
+        (last_activity = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date) AS practiced_today,
+        (last_activity = ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - 1) AND COALESCE(current_streak, 0) > 0) AS streak_in_jeopardy;
     `;
 
     const res = await pool.query(query, [userId]);

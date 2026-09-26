@@ -19,12 +19,6 @@ const StudentDashboardLayout = () => {
   const [isMilestonesModalOpen, setIsMilestonesModalOpen] = useState(false);
   const [hasAutoOpened, setHasAutoOpened] = useState(false);
 
-  // Clean up any stale legacy lockout keys from previous sessions
-  useEffect(() => {
-    sessionStorage.removeItem('lms_milestone_shown_session');
-    localStorage.removeItem('lms_milestone_snoozed_until');
-  }, []);
-
   // Automatically close mobile sidebar on route change
   useEffect(() => {
     setMobileSidebarOpen(false);
@@ -50,8 +44,11 @@ const StudentDashboardLayout = () => {
             Boolean(data.total_pending && data.total_pending > 0) ||
             Boolean(data.milestones && data.milestones.length > 0);
 
-          // Pop up automatically on login / dashboard load whenever pending tasks exist
-          if (isHome && hasPendingTasks && !hasAutoOpened) {
+          const snoozedUntil = Number(localStorage.getItem('lms_milestone_snoozed_until') || 0);
+          const isSnoozed = Date.now() < snoozedUntil;
+
+          // Pop up automatically on login / dashboard load whenever pending tasks exist and not snoozed
+          if (isHome && hasPendingTasks && !hasAutoOpened && !isSnoozed) {
             setHasAutoOpened(true);
             setTimeout(() => {
               if (isMounted) {
@@ -71,18 +68,18 @@ const StudentDashboardLayout = () => {
       fetchMilestones();
     };
 
-    const handleAssignmentCreated = (e: Event) => {
+    const handleAssignmentCreated = async (e: Event) => {
       const customEvent = e as CustomEvent;
       const notification = customEvent.detail;
 
-      // 1. Instantly refetch active milestones in background
-      fetchMilestones();
-
-      // 2. Display friendly notification toast
+      // 1. Display friendly notification toast
       toast.success(notification?.title || 'New Assignment Assigned!', {
         icon: '📋',
         duration: 4000,
       });
+
+      // 2. Instantly refetch active milestones in background and wait for it
+      await fetchMilestones();
 
       // 3. Open pop-up modal if student is on dashboard home
       const isHome =
@@ -101,9 +98,14 @@ const StudentDashboardLayout = () => {
       window.removeEventListener('course-progress-updated', handleProgress);
       window.removeEventListener('assignment:created', handleAssignmentCreated);
     };
-  }, [location.pathname]);
+  }, [location.pathname, hasAutoOpened]);
 
   const handleSnooze = () => {
+    // Snooze for 24 hours
+    localStorage.setItem(
+      'lms_milestone_snoozed_until',
+      String(Date.now() + 24 * 60 * 60 * 1000)
+    );
     setIsMilestonesModalOpen(false);
   };
 

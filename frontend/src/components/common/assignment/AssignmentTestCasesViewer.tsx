@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Terminal, Check, Copy, Code2, Cpu } from 'lucide-react';
+import { Terminal, Check, Copy, Code2, Cpu, Lock } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ interface AssignmentTestCasesViewerProps {
   testCases: any;
   evaluatorType?: string | null;
   className?: string;
+  isStaff?: boolean;
 }
 
 const b64_to_utf8 = (str: string) => {
@@ -30,6 +31,7 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
   testCases,
   evaluatorType,
   className = '',
+  isStaff = false,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -123,21 +125,37 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
         {parsed.type === 'script' && (
           <div className='space-y-3'>
             <div className='flex items-center justify-between text-xs text-slate-500 font-medium'>
-              <span>Expected Output / Console Logs</span>
+              <span>Expected Output / Console Verification</span>
               <span className='text-slate-400'>Sequential Script Execution</span>
             </div>
-            <div className='rounded-xl bg-slate-900 p-4 text-emerald-400 font-mono text-xs sm:text-sm space-y-1.5 shadow-inner overflow-x-auto'>
-              {parsed.expectedLogs.length > 0 ? (
-                parsed.expectedLogs.map((log: string, idx: number) => (
-                  <div key={idx} className='flex items-start gap-2'>
-                    <span className='text-slate-500 select-none'>&gt;</span>
-                    <span className='text-slate-100'>{log}</span>
-                  </div>
-                ))
-              ) : (
-                <div className='text-slate-400 italic'>No specific console logs defined</div>
-              )}
-            </div>
+            {isStaff ? (
+              <div className='rounded-xl bg-slate-900 p-4 text-emerald-400 font-mono text-xs sm:text-sm space-y-1.5 shadow-inner overflow-x-auto'>
+                {parsed.expectedLogs.length > 0 ? (
+                  parsed.expectedLogs.map((log: string, idx: number) => (
+                    <div key={idx} className='flex items-start gap-2'>
+                      <span className='text-slate-500 select-none'>&gt;</span>
+                      <span className='text-slate-100'>{log}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className='text-slate-400 italic'>No specific console logs defined</div>
+                )}
+              </div>
+            ) : (
+              <div className='p-4 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3 text-xs sm:text-sm'>
+                <div className='flex items-center gap-2'>
+                  <Lock className='w-4 h-4 text-slate-400' />
+                  <span className='text-slate-700 font-medium'>
+                    {parsed.expectedLogs.length > 0
+                      ? `${parsed.expectedLogs.length} automated console check${parsed.expectedLogs.length > 1 ? 's' : ''} configured`
+                      : 'Automated console verification checks configured'}
+                  </span>
+                </div>
+                <span className='text-xs text-slate-500 bg-white px-2.5 py-1 rounded-md border border-slate-200 font-medium'>
+                  Verified upon submission
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -171,9 +189,16 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
                   </div>
                   <div className='sm:text-right space-y-0.5'>
                     <span className='text-slate-500 text-xs block'>Expected Return:</span>
-                    <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded font-mono text-xs font-semibold inline-block max-w-full truncate'>
-                      {typeof tc.expected === 'object' ? JSON.stringify(tc.expected) : String(tc.expected ?? tc.output ?? '')}
-                    </code>
+                    {isStaff ? (
+                      <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded font-mono text-xs font-semibold inline-block max-w-full truncate'>
+                        {typeof tc.expected === 'object' ? JSON.stringify(tc.expected) : String(tc.expected ?? tc.output ?? '')}
+                      </code>
+                    ) : (
+                      <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                        <Lock className='w-3 h-3 text-slate-400' />
+                        Locked (Evaluated upon submission)
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -189,20 +214,36 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
                 <Code2 className='h-3.5 w-3.5 text-slate-500' />
                 <span>Automated Test Spec File</span>
               </div>
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                onClick={() => handleCopy(parsed.content)}
-                className='h-7 text-xs text-slate-500 hover:text-slate-800'
-              >
-                {copied ? <Check className='h-3 w-3 mr-1 text-emerald-600' /> : <Copy className='h-3 w-3 mr-1' />}
-                {copied ? 'Copied' : 'Copy Spec'}
-              </Button>
+              {isStaff && (
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => handleCopy(parsed.content)}
+                  className='h-7 text-xs text-slate-500 hover:text-slate-800'
+                >
+                  {copied ? <Check className='h-3 w-3 mr-1 text-emerald-600' /> : <Copy className='h-3 w-3 mr-1' />}
+                  {copied ? 'Copied' : 'Copy Spec'}
+                </Button>
+              )}
             </div>
-            <div className='rounded-xl bg-slate-900 p-4 text-slate-200 font-mono text-xs max-h-64 overflow-y-auto shadow-inner leading-relaxed whitespace-pre'>
-              {parsed.content}
-            </div>
+            {isStaff ? (
+              <div className='rounded-xl bg-slate-900 p-4 text-slate-200 font-mono text-xs max-h-64 overflow-y-auto shadow-inner leading-relaxed whitespace-pre'>
+                {parsed.content}
+              </div>
+            ) : (
+              <div className='p-4 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3 text-xs sm:text-sm'>
+                <div className='flex items-center gap-2'>
+                  <Lock className='w-4 h-4 text-slate-400' />
+                  <span className='text-slate-700 font-medium'>
+                    Automated verification suite loaded
+                  </span>
+                </div>
+                <span className='text-xs text-slate-500 bg-white px-2.5 py-1 rounded-md border border-slate-200 font-medium'>
+                  Evaluated upon submission
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -229,9 +270,16 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
                 </div>
                 {item.output && (
                   <div>
-                    <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
-                      Expected: {typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output)}
-                    </code>
+                    {isStaff ? (
+                      <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
+                        Expected: {typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output)}
+                      </code>
+                    ) : (
+                      <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                        <Lock className='w-3 h-3 text-slate-400' />
+                        Locked
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -241,9 +289,16 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
 
         {/* JSON FALLBACK */}
         {parsed.type === 'json' && (
-          <div className='rounded-xl bg-slate-900 p-4 text-slate-200 font-mono text-xs max-h-60 overflow-y-auto whitespace-pre'>
-            {parsed.content}
-          </div>
+          isStaff ? (
+            <div className='rounded-xl bg-slate-900 p-4 text-slate-200 font-mono text-xs max-h-60 overflow-y-auto whitespace-pre'>
+              {parsed.content}
+            </div>
+          ) : (
+            <div className='p-4 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-2 text-xs sm:text-sm text-slate-600'>
+              <Lock className='w-4 h-4 text-slate-400' />
+              <span>Automated test configuration (Evaluated upon submission)</span>
+            </div>
+          )
         )}
       </div>
     </Card>

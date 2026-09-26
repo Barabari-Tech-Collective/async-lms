@@ -208,6 +208,7 @@ app.use((req, res) => {
 app.use(require('./middlewares/errorHandler'));
 
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const notificationService = require('./services/notificationService');
 const { initPools } = require('./services/runnerService');
 
@@ -218,17 +219,44 @@ const io = new Server(server, {
   },
 });
 
+// Authenticate socket handshake to prevent notification subscription IDOR
+io.use((socket, next) => {
+  const token =
+    socket.handshake.auth?.token ||
+    (socket.handshake.headers?.authorization &&
+    socket.handshake.headers.authorization.startsWith('Bearer ')
+      ? socket.handshake.headers.authorization.split(' ')[1]
+      : null);
+
+  if (!token) {
+    return next(new Error('Authentication error: Token required'));
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id;
+    socket.user = decoded;
+    next();
+  } catch (err) {
+    return next(new Error('Authentication error: Invalid or expired token'));
+  }
+});
+
 notificationService.setIo(io);
 
 io.on('connection', (socket) => {
-  socket.on('notification:subscribe', (payload) => {
-    // Normalizes both { userId: '...' } and raw string '...'
-    const userId = typeof payload === 'object' && payload?.userId ? payload.userId : payload;
-    if (userId) {
-      socket.join(`user:${userId}`);
-      console.log(`[Socket] User joined room: user:${userId}`);
+  if (socket.userId) {
+    socket.join(`user:${socket.userId}`);
+    console.log(`[Socket] Authenticated user joined room: user:${socket.userId}`);
+  }
+
+  // Strictly enforce user room subscription: ignore any external spoofed payload ID
+  socket.on('notification:subscribe', () => {
+    if (socket.userId) {
+      socket.join(`user:${socket.userId}`);
     }
   });
+
   socket.on('disconnect', () => {});
 });
 

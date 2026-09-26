@@ -61,6 +61,8 @@ interface Assignment {
   batch: string;
   submissionsCount: number;
   submissionsTotal: number;
+  pendingCount: number;
+  evaluatedCount: number;
   dueDate: string;
   rawDueDate?: string;
   status: 'Active' | 'Submitted' | 'Completed' | 'Pending' | 'Overdue';
@@ -195,6 +197,7 @@ export default function AssignmentManagement() {
           const subsCount = parseInt(item.submissions_count) || 0;
           const subsTotal = parseInt(item.submissions_total) || 0;
           const pendingCount = parseInt(item.pending_submissions_count) || 0;
+          const evaluatedCount = Math.max(0, subsCount - pendingCount);
 
           let isOverdue = false;
           if (item.due_date) {
@@ -204,17 +207,16 @@ export default function AssignmentManagement() {
           }
 
           let status: Assignment['status'] = 'Active';
-          if (pendingCount > 0) {
-            // Any submissions waiting for evaluation
+          if (subsCount > 0 && pendingCount > 0) {
+            // Un-evaluated submissions exist
             status = 'Submitted';
           } else if (subsCount > 0 && pendingCount === 0) {
-            // All submissions received have completed evaluation
+            // All received submissions evaluated
             status = 'Completed';
-          } else if (isOverdue) {
-            // Due date has passed and no unevaluated submissions waiting
+          } else if (isOverdue && subsCount === 0) {
+            // Overdue with no submissions
             status = 'Overdue';
           } else {
-            // Active assignment, due date in future, 0 submissions
             status = 'Active';
           }
 
@@ -228,6 +230,8 @@ export default function AssignmentManagement() {
             batch: item.batch || 'N/A',
             submissionsCount: subsCount,
             submissionsTotal: subsTotal,
+            pendingCount,
+            evaluatedCount,
             dueDate: item.due_date
               ? new Date(item.due_date).toLocaleDateString()
               : 'No Due Date',
@@ -298,8 +302,8 @@ export default function AssignmentManagement() {
     filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
   const someFilteredSelected = filtered.some((a) => selectedIds.has(a.id));
 
-  const getStatusBadge = (status: Assignment['status']) => {
-    switch (status) {
+  const getStatusBadge = (assignment: Assignment) => {
+    switch (assignment.status) {
       case 'Active':
         return (
           <Badge className='bg-emerald-50 text-emerald-600 hover:bg-emerald-50 font-medium text-xs rounded-full px-3'>
@@ -309,18 +313,18 @@ export default function AssignmentManagement() {
       case 'Submitted':
         return (
           <Badge className='bg-amber-50 text-amber-600 hover:bg-amber-50 font-medium text-xs rounded-full px-3'>
-            Submitted
+            Pending Eval ({assignment.pendingCount})
           </Badge>
         );
       case 'Completed':
         return (
           <Badge className='bg-blue-50 text-blue-600 hover:bg-blue-50 font-medium text-xs rounded-full px-3'>
-            Completed
+            Evaluated ({assignment.submissionsCount})
           </Badge>
         );
       case 'Pending':
         return (
-          <Badge className='bg-blue-50 text-blue-600 hover:bg-blue-50 font-medium text-xs'>
+          <Badge className='bg-amber-50 text-amber-600 hover:bg-amber-50 font-medium text-xs rounded-full px-3'>
             Pending
           </Badge>
         );
@@ -473,7 +477,7 @@ export default function AssignmentManagement() {
                         </p>
                       </div>
                     </div>
-                    <div className='shrink-0'>{getStatusBadge(assignment.status)}</div>
+                    <div className='shrink-0'>{getStatusBadge(assignment)}</div>
                   </div>
 
                   {/* Academic details box */}
@@ -656,7 +660,7 @@ export default function AssignmentManagement() {
                     <TableCell className='text-slate-500 text-sm'>
                       {assignment.dueDate}
                     </TableCell>
-                    <TableCell>{getStatusBadge(assignment.status)}</TableCell>
+                    <TableCell>{getStatusBadge(assignment)}</TableCell>
                     <TableCell className='text-right pr-6'>
                       <div className='flex items-center justify-end gap-3'>
                         {(activeTab === 'Active' || activeTab === 'Overdue') && (

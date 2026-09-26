@@ -20,6 +20,8 @@ const poolConfig = connectionString
       max: 20,
       connectionTimeoutMillis: 60000,
       idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
       keepAlive: true,
     }
   : {
@@ -32,6 +34,8 @@ const poolConfig = connectionString
       max: 20,
       connectionTimeoutMillis: 60000, // Allow 60s for Neon cold starts / wake-ups
       idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
       keepAlive: true,
     };
 

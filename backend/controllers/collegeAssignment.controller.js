@@ -719,7 +719,7 @@ exports.deleteAssignment = async (req, res) => {
 };
 
 // GET /api/v1/college-assignments/:id
-// Returns a single assignment with student's specific submission
+// Returns a single assignment with student's specific submission, with strict college isolation
 exports.getCollegeAssignmentById = async (req, res) => {
   const { id } = req.params;
   const student_id = req.user?.role === 'student' ? req.user.id : null;
@@ -729,6 +729,7 @@ exports.getCollegeAssignmentById = async (req, res) => {
       `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
               ca.instruction_file_url, ca.instruction_file_name,
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
+              ca.college_id, ca.created_by,
               u.full_name AS created_by_name,
               cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
        FROM college_assignments ca
@@ -744,7 +745,79 @@ exports.getCollegeAssignmentById = async (req, res) => {
         .json({ success: false, message: 'Assignment not found' });
     }
 
-    res.json({ success: true, data: await presignRow(rows[0]) });
+    const assignment = rows[0];
+    const userRole = req.user?.role;
+
+    // Multi-tenant college isolation check
+    if (userRole === 'student') {
+      let studentCollegeId = req.user?.college_id;
+      if (!studentCollegeId) {
+        const profRes = await pool.query(
+          'SELECT college_id FROM student_profiles WHERE user_id = $1',
+          [req.user.id],
+        );
+        if (profRes.rowCount > 0) {
+          studentCollegeId = profRes.rows[0].college_id;
+        }
+      }
+
+      if (!studentCollegeId || assignment.college_id !== studentCollegeId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: This assignment belongs to another college',
+        });
+      }
+
+      // Redact answer keys and raw test assertion files for students to prevent network sniffing
+      if (assignment.test_cases) {
+        let tcData = assignment.test_cases;
+        let isJsonString = false;
+        if (typeof tcData === 'string') {
+          try {
+            tcData = JSON.parse(tcData);
+            isJsonString = true;
+          } catch {
+            tcData = null;
+          }
+        }
+
+        if (tcData) {
+          if (Array.isArray(tcData)) {
+            tcData = tcData.map((tc) => {
+              const { output, expected, ...rest } = tc;
+              return rest;
+            });
+          } else if (typeof tcData === 'object') {
+            if (Array.isArray(tcData.testCases)) {
+              tcData.testCases = tcData.testCases.map((tc) => {
+                const { output, expected, ...rest } = tc;
+                return rest;
+              });
+            }
+            if (tcData.expectedLogs) {
+              tcData.expectedLogsCount = tcData.expectedLogs.length;
+              delete tcData.expectedLogs;
+            }
+            if (tcData.specFile) {
+              delete tcData.specFile;
+            }
+          }
+          assignment.test_cases = isJsonString ? JSON.stringify(tcData) : tcData;
+        }
+      }
+    } else if (userRole === 'facilitator') {
+      const allowedCollegeIds = req.user?.college_ids || [];
+      const isCreatedBy = assignment.created_by === req.user.id;
+      const isAssignedCollege = allowedCollegeIds.includes(assignment.college_id);
+      if (!isCreatedBy && !isAssignedCollege) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: Assignment belongs to a college not assigned to you',
+        });
+      }
+    }
+
+    res.json({ success: true, data: await presignRow(assignment) });
   } catch (error) {
     console.error('getCollegeAssignmentById:', error);
     serverError(res, error);
@@ -822,39 +895,6 @@ exports.submitCollegeAssignment = async (req, res) => {
     });
   } catch (error) {
     console.error('submitCollegeAssignment ERROR:', error);
-    serverError(res, error);
-  }
-};
-
-// GET /api/v1/college-assignments/:id
-// Returns a single assignment with student's specific submission
-exports.getCollegeAssignmentById = async (req, res) => {
-  const { id } = req.params;
-  const student_id = req.user?.role === 'student' ? req.user.id : null;
-
-  try {
-    const { rows } = await pool.query(
-      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
-              ca.instruction_file_url, ca.instruction_file_name,
-              ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
-              u.full_name AS created_by_name,
-              cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
-       FROM college_assignments ca
-       LEFT JOIN users u ON u.id = ca.created_by
-       LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $2
-       WHERE ca.id = $1 AND ca.is_deleted = false`,
-      [id, student_id],
-    );
-
-    if (!rows.length) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Assignment not found' });
-    }
-
-    res.json({ success: true, data: await presignRow(rows[0]) });
-  } catch (error) {
-    console.error('getCollegeAssignmentById:', error);
     serverError(res, error);
   }
 };

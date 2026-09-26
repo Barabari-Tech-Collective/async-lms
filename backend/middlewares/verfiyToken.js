@@ -4,7 +4,7 @@ const pool = require('../config/pg');
 // In-memory cache to prevent flooding the database with duplicate queries
 // when multiple dashboard widgets make concurrent requests on page load.
 const userAuthCache = new Map(); // userId -> { data, cachedAt }
-const CACHE_TTL_MS = 60000; // 60 seconds
+const CACHE_TTL_MS = 5000; // 5 seconds burst cache to reject revoked/banned users promptly
 
 // Self-cleaning timer to ensure zero memory leaks in long-running production environments
 setInterval(() => {
@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
   }
 
   try {
-    // 3. Check user status (cached for 60s to prevent connection pool exhaustion on dashboard load)
+    // 3. Check user status (cached for 5s to prevent connection pool exhaustion on dashboard load)
     let userDb = null;
     const now = Date.now();
     const cached = userAuthCache.get(verified.id);
@@ -53,11 +53,19 @@ const verifyToken = async (req, res, next) => {
         if (dbCheck.rowCount > 0) {
           userDb = dbCheck.rows[0];
           userAuthCache.set(verified.id, { data: userDb, cachedAt: now });
+        } else {
+          // User was deleted or purged from the database
+          userAuthCache.delete(verified.id);
+          return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
         }
       } catch (dbErr) {
-        // If DB has a momentary connection timeout/sleep, do not kick user out if JWT is valid
-        console.warn(`[verifyToken] DB verification transient issue: ${dbErr.message}. Falling back to JWT claims.`);
-        if (cached) userDb = cached.data;
+        // If DB has a momentary connection timeout, only allow fallback if cached data is very fresh (<10s)
+        console.warn(`[verifyToken] DB verification transient issue: ${dbErr.message}`);
+        if (cached && (now - cached.cachedAt < 10000)) {
+          userDb = cached.data;
+        } else {
+          return res.status(503).json({ message: 'Service Temporarily Unavailable: Authentication service offline' });
+        }
       }
     }
 

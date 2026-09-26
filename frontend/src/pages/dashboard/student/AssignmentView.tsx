@@ -295,6 +295,7 @@ export default function AssignmentView() {
         <AssignmentTestCasesViewer
           testCases={assignment.test_cases}
           evaluatorType={assignment.evaluator_type}
+          isStaff={false}
         />
       )}
 

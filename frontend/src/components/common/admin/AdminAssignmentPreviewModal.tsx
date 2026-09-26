@@ -239,6 +239,7 @@ export const AdminAssignmentPreviewModal: React.FC<AdminAssignmentPreviewModalPr
                 <AssignmentTestCasesViewer
                   testCases={data.test_cases}
                   evaluatorType={data.evaluator_type}
+                  isStaff={true}
                 />
               ) : (
                 <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0 bg-white'>

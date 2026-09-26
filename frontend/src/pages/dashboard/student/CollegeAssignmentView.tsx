@@ -11,6 +11,7 @@ import {
   Code2,
   ExternalLink,
   CheckCircle2,
+  Lock,
 } from 'lucide-react';
 import apiClient from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -279,7 +280,10 @@ export default function CollegeAssignmentView() {
                                     {tc.input}
                                   </td>
                                   <td className='px-3 sm:px-4 py-3 font-mono text-slate-700'>
-                                    {tc.output}
+                                    <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                                      <Lock className='w-3 h-3 text-slate-400' />
+                                      Locked (Evaluated on submission)
+                                    </span>
                                   </td>
                                   <td className='px-3 sm:px-4 py-3 text-center font-semibold text-[#333D7C]'>
                                     {tc.score}

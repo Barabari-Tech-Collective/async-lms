@@ -246,8 +246,9 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
           const sub = res.data.data.submission;
           const testRes = sub.testResults;
           if (testRes) {
+            const subPassed = Boolean(sub?.isPassed ?? sub?.is_passed ?? sub?.passed ?? false);
             let outputText = `=== SUBMISSION ===\n`;
-            outputText += `Status: ${sub.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+            outputText += `Status: ${subPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
 
             if (testRes.feedback) {
               outputText += `\n--- Detailed Feedback ---\n${testRes.feedback}\n`;
@@ -785,6 +786,15 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       
       const testRes = result?.testResults || result?.data?.test_results;
       const pointsAwarded = result?.data?.points_awarded || 0;
+      const isPassed = Boolean(
+        result?.isPassed ??
+        result?.is_passed ??
+        result?.passed ??
+        result?.data?.is_passed ??
+        result?.data?.submission?.is_passed ??
+        result?.submission?.is_passed ??
+        false
+      );
 
       const hasRubric = Array.isArray(testRes?.rubric_breakdown) && testRes.rubric_breakdown.length > 0;
       const hasUnitTests = Boolean(
@@ -795,7 +805,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
       let outputText = '';
       if (hasRubric) {
         outputText = `=== SUBMISSION ===\n`;
-        outputText += `Status: ${result?.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+        outputText += `Status: ${isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
@@ -811,7 +821,7 @@ export default function EmbeddedIDE({ exercise, submitting, onSubmit }: Embedded
         });
       } else if (hasUnitTests) {
         outputText = `=== SUBMISSION ===\n`;
-        outputText += `Status: ${result?.isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
+        outputText += `Status: ${isPassed ? 'PASSED ✅' : 'FAILED ❌'}\n`;
         if (pointsAwarded > 0) {
           outputText += `XP Earned: +${pointsAwarded} XP ⚡\n`;
         }
