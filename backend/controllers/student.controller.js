@@ -3969,8 +3969,10 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
     if (collegeId) {
       try {
         const collegeAsgRes = await pool.query(
-          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course
+          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
+                  s.name AS resolved_subject_name, s.slug AS resolved_subject_slug
            FROM college_assignments ca
+           LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
            WHERE ca.college_id = $1
              AND ca.is_deleted = false
              AND NOT EXISTS (
@@ -4003,15 +4005,19 @@ exports.getActiveMilestoneDeadlines = async (req, res) => {
             ? 'approaching'
             : 'relaxed';
 
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ca.course || '');
+          const courseDisplayName = ca.resolved_subject_name || (!isUuid ? ca.course : 'College Assignment');
+          const subjectDisplayName = ca.resolved_subject_name || (!isUuid ? ca.course : '');
+
           milestones.push({
             item_id: ca.id,
             item_type: 'college_assignment',
             title: ca.title,
             description: ca.description || '',
             unit_id: '',
-            unit_title: ca.course || 'College Assignment',
-            subject_name: ca.course || 'College Course',
-            subject_slug: '',
+            unit_title: courseDisplayName,
+            subject_name: subjectDisplayName,
+            subject_slug: ca.resolved_subject_slug || '',
             completed_lessons_at: null,
             due_date: dueDate.toISOString(),
             duration_days: Math.max(1, daysLeft),

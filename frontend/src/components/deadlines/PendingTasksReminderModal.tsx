@@ -14,6 +14,7 @@ import {
   Star,
 } from 'lucide-react';
 import Logo from '@/components/common/Logo';
+import { LearningPathwayDiagram } from './LearningPathwayDiagram';
 
 export interface StudentJourney {
   subject_name: string;
@@ -257,72 +258,12 @@ export const PendingTasksReminderModal: React.FC<PendingTasksReminderModalProps>
           </div>
 
 
-          {/* Learning Pathway Card */}
+          {/* Gamified Cosmic Learning Pathway Diagram */}
           {journey && (
-            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5">
-              <div className="flex items-center justify-between pb-1 text-xs">
-                <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-800">
-                  <Clock className="w-4 h-4 text-blue-600" />
-                  <span>YOUR LEARNING PATHWAY</span>
-                </div>
-                <span className="text-slate-500 font-medium truncate max-w-[180px] sm:max-w-[220px]">
-                  {journey.subject_name}
-                </span>
-              </div>
-
-              {/* Previously Completed Subcard */}
-              <div className="p-3 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-5 h-5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-3 h-3 stroke-[2.5]" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                      PREVIOUSLY COMPLETED
-                    </span>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug mt-0.5 line-clamp-2">
-                      {journey.completed_unit_title}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      ✓ All reading lessons completed
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Next Up Subcard */}
-              <div className="p-3 rounded-xl bg-blue-50/30 border border-blue-200/80 shadow-2xs flex items-center justify-between gap-3">
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
-                    <Zap className="w-3 h-3 fill-blue-600 text-blue-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700">
-                        NEXT UP
-                      </span>
-                      <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 text-[9px] font-bold uppercase tracking-wider">
-                        ACTIVE
-                      </span>
-                    </div>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug truncate mt-0.5">
-                      {journey.current_unit_title}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                      {journey.current_unit_topic || 'Next in syllabus'}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => handleActionClick(journey.current_unit_url)}
-                  className="shrink-0 text-xs sm:text-sm font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 hover:translate-x-0.5 transition-all cursor-pointer"
-                >
-                  <span>Continue</span>
-                  <span>→</span>
-                </button>
-              </div>
-            </div>
+            <LearningPathwayDiagram
+              journey={journey}
+              onContinue={(url) => handleActionClick(url)}
+            />
           )}
 
           {/* Pending Milestone Tasks Header */}
@@ -390,7 +331,7 @@ export const PendingTasksReminderModal: React.FC<PendingTasksReminderModalProps>
                           <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
                             {milestoneLabel}
                           </span>
-                          {item.subject_name && (
+                          {item.subject_name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.subject_name) && (
                             <span className="text-xs font-medium text-slate-500 truncate max-w-[150px] sm:max-w-[200px]">
                               {item.subject_name}
                             </span>
