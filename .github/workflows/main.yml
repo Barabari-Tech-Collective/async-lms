@@ -20,11 +20,11 @@ on:
         required: true
         type: boolean
         default: true
-      deploy_frontend:
-        description: 'Deploy Frontend'
-        required: true
-        type: boolean
-        default: true
+      # deploy_frontend:
+      #   description: 'Deploy Frontend'
+      #   required: true
+      #   type: boolean
+      #   default: true
 
 jobs:
   # ── Orchestrator → EC2 (t3.small) ─────────────────────────────────────────────
@@ -85,12 +85,52 @@ jobs:
             echo "MAX_WORKSPACES=${{ secrets.MAX_WORKSPACES }}" >> .env
             echo "CHATGPT_API_KEY=${{ secrets.CHATGPT_API_KEY }}" >> .env
             echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
+            echo "SMTP_HOST=${{ secrets.SMTP_HOST }}" >> .env
+            echo "SMTP_PORT=${{ secrets.SMTP_PORT }}" >> .env
+            echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> .env
+            echo "SMTP_PASS=${{ secrets.SMTP_PASS }}" >> .env
+            echo "SMTP_FROM=${{ secrets.SMTP_FROM }}" >> .env
+            echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+            echo "OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }}" >> .env
+            echo "OPENAI_MODEL=${{ secrets.OPENAI_MODEL }}" >> .env
+            echo "CENTRAL_EVALUATOR_URL=${{ secrets.CENTRAL_EVALUATOR_URL }}" >> .env
+            echo "CENTRAL_EVALUATOR_API_KEY=${{ secrets.CENTRAL_EVALUATOR_API_KEY }}" >> .env
             echo "PORT=3001" >> .env
 
+            # Runner pool sizing. This box is memory-constrained and also serves
+            # every API request — the library defaults (20/20/5/5 = 50 containers)
+            # exhaust it and take the API down with it. Keep these small.
+            echo "RUNNER_POOL_SIZE=${{ vars.RUNNER_POOL_SIZE || 2 }}" >> .env
+            echo "RUNNER_POOL_SIZE_JAVA=${{ vars.RUNNER_POOL_SIZE_JAVA || 1 }}" >> .env
+            echo "RUNNER_POOL_SIZE_SQL=${{ vars.RUNNER_POOL_SIZE_SQL || 0 }}" >> .env
+
+            # The runner pool needs these images present on THIS box. Build only
+            # what is missing: rebuilding all four on every deploy saturates the
+            # instance. Remove an image by hand to force a rebuild.
+            for img in workspace-node workspace-python workspace-java; do
+              if ! docker image inspect "$img" > /dev/null 2>&1; then
+                echo "Building missing runner image: $img"
+                docker build -t "$img" "./docker/$img"
+              fi
+            done
+
             npm install
-            
+
+            # Rotate PM2 logs. Without this they grow until the disk fills, and
+            # a multi-GB file is not greppable during an incident anyway.
+            pm2 install pm2-logrotate || true
+            pm2 set pm2-logrotate:max_size 20M
+            pm2 set pm2-logrotate:retain 14
+            pm2 set pm2-logrotate:compress true
+
             # Restart ONLY the orchestrator process via ecosystem.config.js
             pm2 start ecosystem.config.js --only codeguru-lms-prod || pm2 restart codeguru-lms-prod --update-env
+            pm2 save
+
+            # Fail the deploy loudly if no language can execute code.
+            sleep 15
+            curl -fsS http://localhost:3001/api/v1/internal/runner/health \
+              || echo "::warning::Runner pool has no capacity — exercise run/test will return 503"
 
   # ── Workers → staging: 1x EC2 (t3.medium/4GB) | production: 5x EC2 (t3.large/8GB) ──
   deploy-workers:
@@ -213,42 +253,42 @@ jobs:
             # Restart ONLY the worker process via ecosystem.config.js
             pm2 start ecosystem.config.js --only worker || pm2 restart worker --update-env
 
-  # ── Frontend → S3 + CloudFront ───────────────────────────────────────────────
-  deploy-frontend:
-    if: github.event.inputs.deploy_frontend == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+  # # ── Frontend → S3 + CloudFront ───────────────────────────────────────────────
+  # deploy-frontend:
+  #   if: github.event.inputs.deploy_frontend == 'true'
+  #   runs-on: ubuntu-latest
+  #   environment: ${{ github.event.inputs.environment }}
 
-    steps:
-      - uses: actions/checkout@v4
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         cache: npm
+  #         cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
+  #     - name: Install dependencies
+  #       working-directory: frontend
+  #       run: npm ci
 
-      - name: Build
-        working-directory: frontend
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-        run: npm run build
+  #     - name: Build
+  #       working-directory: frontend
+  #       env:
+  #         VITE_API_URL: ${{ secrets.VITE_API_URL }}
+  #       run: npm run build
 
-      - name: Upload to S3
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+  #     - name: Upload to S3
+  #       uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ap-south-1
 
-      - run: aws s3 sync frontend/dist s3://${{ secrets.S3_FRONTEND_BUCKET }} --delete
+  #     - run: aws s3 sync frontend/dist s3://${{ secrets.S3_FRONTEND_BUCKET }} --delete
 
-      - name: Invalidate CloudFront cache
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CF_DISTRIBUTION_ID }} \
-            --paths "/*"
+  #     - name: Invalidate CloudFront cache
+  #       run: |
+  #         aws cloudfront create-invalidation \
+  #           --distribution-id ${{ secrets.CF_DISTRIBUTION_ID }} \
+  #           --paths "/*"

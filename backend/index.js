@@ -41,9 +41,11 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(cors());
-app.use(morgan('combined'));
+// app.use(morgan('combined'));
 
 // ── Secure Worker Proxy (Orchestrator -> Workers) ───────────────────────────
+// IMPORTANT: This must be defined BEFORE express.json(), otherwise body-parser
+// consumes the stream and causes 504 Gateway Timeouts for POST requests!
 const workerProxies = new Map(); // workerIp -> proxyInstance
 
 function getWorkerProxy(workerIp) {
@@ -57,8 +59,8 @@ function getWorkerProxy(workerIp) {
     pathRewrite: (path) => path.replace(new RegExp(`^/worker/${workerIp}`), ''),
     logger: console,
     onProxyReqWs: (proxyReq, req, socket) => {
-       // Optional: Add custom headers here if needed
-    }
+      // Optional: Add custom headers here if needed
+    },
   });
 
   workerProxies.set(workerIp, proxy);
@@ -70,19 +72,44 @@ app.use('/worker/:ip', (req, res, next) => {
   return proxy(req, res, next);
 });
 
-// custom logger
+app.use(express.json());
+// app.use(morgan('combined'));
+
+// Request id + client IP, before anything that logs. Also sets X-Request-Id on
+// the response so a user reporting a problem can quote a traceable reference.
+app.use(require('./middlewares/requestContext'));
+
+// Catch-all request audit. Runs after the response so the real status code is
+// known, and skips requests a controller already audited in more detail — the
+// specific CREATE/UPDATE/DELETE record carries method, path and status anyway.
+//
+// Successful GETs are deliberately not recorded: they are the bulk of traffic
+// and carry no state change. Denied ones are, because "who tried to reach what
+// they should not" is exactly the question an audit trail gets asked.
+// Machine-to-machine traffic has no actor and never will. Worker heartbeats
+// alone are ~2900 requests per worker per day; left in, they bury every line
+// an audit trail exists to surface. Failures on these paths still get logged.
+const AUDIT_SKIP_PATHS = /^\/api\/v1\/internal\//;
+
 app.use((req, res, next) => {
-  if (req.method !== 'GET') {
-    res.on('finish', () => {
-      logAction({
-        req,
-        action: req.method,
-        entityType: 'http_request',
-        entityId: null,
-        details: { statusCode: res.statusCode },
-      });
+  res.on('finish', () => {
+    if (req._audited) return;
+
+    const failed = res.statusCode >= 400;
+    const denied = res.statusCode === 401 || res.statusCode === 403;
+
+    // Successful GETs change nothing and are the bulk of traffic.
+    if (req.method === 'GET' && !failed) return;
+    // Internal plumbing is only interesting when it breaks.
+    if (AUDIT_SKIP_PATHS.test(req.path) && !failed) return;
+
+    logAction({
+      req,
+      action: denied ? 'ACCESS_DENIED' : failed ? 'REQUEST_FAILED' : 'REQUEST',
+      entityType: 'http_request',
+      entityId: null,
     });
-  }
+  });
   next();
 });
 
@@ -128,7 +155,6 @@ app.use(
   express.static(path.join(__dirname, 'public', 'uploads')),
 );
 
-
 // ── Internal worker registry endpoints (no auth — internal network only) ────
 app.post('/api/v1/internal/workers/register', (req, res) => {
   const { id, url, capacity, totalMemory } = req.body;
@@ -164,6 +190,13 @@ app.post('/api/v1/internal/workers/release', (req, res) => {
 
 app.get('/api/v1/internal/workers/status', (req, res) => {
   res.json(getStatus());
+});
+
+// Runner pool state. A silently-empty pool used to present as a 60s hang and
+// then a 504 with nothing in the logs; this makes it a single curl.
+app.get('/api/v1/internal/runner/health', (req, res) => {
+  const health = require('./services/runnerService').getPoolHealth();
+  res.status(health.healthy ? 200 : 503).json(health);
 });
 
 //  404 Catch-all
@@ -218,6 +251,32 @@ server.on('upgrade', (req, socket, head) => {
   // The built-in socket.io listeners will handle the upgrade automatically.
 });
 
+// ── Automated Background Jobs ───────────────────────────────────────────────
+const pool = require('./config/pg');
+
+// Runs once a day to permanently delete users in the bin > 30 days
+const purgeOldDeletedUsers = async () => {
+  try {
+    const res = await pool.query(
+      `DELETE FROM users WHERE deleted_at < NOW() - INTERVAL '30 days'`,
+    );
+    if (res.rowCount > 0) {
+      console.log(
+        `[Cron] Purged ${res.rowCount} users from recycle bin older than 30 days.`,
+      );
+    }
+  } catch (error) {
+    console.error('[Cron Error] Failed to purge recycle bin:', error);
+  }
+};
+
+// Run immediately on boot
+purgeOldDeletedUsers();
+
+// Schedule to run every 24 hours
+setInterval(purgeOldDeletedUsers, 24 * 60 * 60 * 1000);
+
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   const ct = new Date().toLocaleTimeString();
@@ -226,7 +285,7 @@ server.listen(PORT, () => {
 
 initPools().catch((err) => {
   console.error(
-    '[WARN] Runner pool init failed (exercise run/test unavailable):',
+    '[ERROR] Runner pool init threw (exercise run/test unavailable):',
     err.message,
   );
 });

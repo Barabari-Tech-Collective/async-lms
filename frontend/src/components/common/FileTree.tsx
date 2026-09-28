@@ -31,6 +31,7 @@ type Props = {
   onDelete: (path: string) => void;
   onRename: (oldPath: string, newPath: string) => void;
   onRefresh: () => void;
+  isDark?: boolean;
 };
 
 /* =============================
@@ -55,6 +56,7 @@ export default function FileTreeExplorer({
   onDelete,
   onRename,
   onRefresh,
+  isDark = true,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -94,27 +96,34 @@ export default function FileTreeExplorer({
   };
 
   return (
-    <div className='text-sm text-slate-300 h-full flex flex-col'>
+    <div className={`text-sm h-full flex flex-col ${isDark ? 'text-slate-350' : 'text-slate-700'}`}>
       {/* Header */}
-      <div className='flex items-center justify-between px-2 py-1 border-b border-slate-800'>
-        <span className='text-xs tracking-widest'>EXPLORER</span>
+      <div className={`flex items-center justify-between px-2 py-1 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+        <span className={`text-xs tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>EXPLORER</span>
         <div className='flex gap-1'>
           <Button
             size='icon'
             variant='ghost'
             onClick={() => startCreate('', 'file')}
+            className={`h-7 w-7 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
           >
-            <Plus size={16} />
+            <Plus size={15} />
           </Button>
           <Button
             size='icon'
             variant='ghost'
             onClick={() => startCreate('', 'folder')}
+            className={`h-7 w-7 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
           >
-            <FolderPlus size={16} />
+            <FolderPlus size={15} />
           </Button>
-          <Button size='icon' variant='ghost' onClick={onRefresh}>
-            <RefreshCw size={16} />
+          <Button 
+            size='icon' 
+            variant='ghost' 
+            onClick={onRefresh}
+            className={`h-7 w-7 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'}`}
+          >
+            <RefreshCw size={14} />
           </Button>
         </div>
       </div>
@@ -138,6 +147,7 @@ export default function FileTreeExplorer({
             onCreateStart={startCreate}
             onCreateConfirm={confirmCreate}
             onCreateCancel={() => setCreating(null)}
+            isDark={isDark}
           />
         ))}
 
@@ -147,6 +157,7 @@ export default function FileTreeExplorer({
             placeholder={creating.type === 'file' ? 'newFile.js' : 'newFolder'}
             onConfirm={confirmCreate}
             onCancel={() => setCreating(null)}
+            isDark={isDark}
           />
         )}
       </div>
@@ -171,6 +182,7 @@ function TreeNode({
   onCreateStart,
   onCreateConfirm,
   onCreateCancel,
+  isDark,
 }: any) {
   const isOpen = expanded.has(node.path);
   const isRenaming = renaming === node.path;
@@ -188,10 +200,10 @@ function TreeNode({
       <ContextMenu>
         <ContextMenuTrigger>
           <div
-            className={`flex items-center gap-1 px-1 py-0.5 rounded select-none cursor-pointer ${
+            className={`flex items-center gap-1 px-1 py-0.5 rounded select-none cursor-pointer transition-colors duration-100 ${
               activePath === node.path
-                ? 'bg-slate-800 text-blue-400'
-                : 'hover:bg-slate-800'
+                ? (isDark ? 'bg-slate-800 text-blue-400 font-medium' : 'bg-slate-200 text-indigo-650 font-semibold')
+                : (isDark ? 'hover:bg-slate-800 text-slate-300 hover:text-slate-100' : 'hover:bg-slate-200/80 text-slate-700 hover:text-slate-900')
             }`}
             style={{ paddingLeft: level * 14 + 6 }}
             onClick={handleRowClick}
@@ -230,6 +242,7 @@ function TreeNode({
                 onConfirm={(v) => onRenameConfirm(node.path, v)}
                 onCancel={() => onRenameStart(null)}
                 level={level}
+                isDark={isDark}
               />
             ) : (
               <span className='truncate'>{node.name}</span>
@@ -284,6 +297,7 @@ function TreeNode({
               onCreateStart={onCreateStart}
               onCreateConfirm={onCreateConfirm}
               onCreateCancel={onCreateCancel}
+              isDark={isDark}
             />
           ))}
 
@@ -295,6 +309,7 @@ function TreeNode({
               }
               onConfirm={onCreateConfirm}
               onCancel={onCreateCancel}
+              isDark={isDark}
             />
           )}
         </div>
@@ -311,19 +326,23 @@ function InlineInput({
   onConfirm,
   onCancel,
   level,
+  isDark = true,
 }: {
   defaultValue?: string;
   placeholder?: string;
   onConfirm: (value: string) => void;
   onCancel: () => void;
   level: number;
+  isDark?: boolean;
 }) {
   return (
     <input
       autoFocus
       defaultValue={defaultValue}
       placeholder={placeholder}
-      className='bg-slate-800 block w-full border border-slate-700 text-sm px-1 py-0.5 rounded outline-none'
+      className={`block w-full border text-sm px-1 py-0.5 rounded outline-none ${
+        isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-350 text-slate-800'
+      }`}
       style={{ marginLeft: level * 14 + 28 }}
       onClick={(e) => e.stopPropagation()}
       onBlur={onCancel}

@@ -14,6 +14,7 @@ interface AssignmentModalProps {
     max_score: number;
     evaluator_type?: string | null;
     test_cases?: string | null;
+    rubric?: string | null;
   }) => void;
   editData?: {
     title: string;
@@ -21,10 +22,39 @@ interface AssignmentModalProps {
     max_score: number;
     evaluator_type?: string | null;
     test_cases?: any;
+    rubric?: any;
   };
   unitTitle: string;
   loading?: boolean;
 }
+
+const utf8_to_b64 = (str: string) => {
+  return window.btoa(unescape(encodeURIComponent(str)));
+};
+
+const b64_to_utf8 = (str: string) => {
+  return decodeURIComponent(escape(window.atob(str)));
+};
+
+const getInitialTestCases = (testCasesData: any) => {
+  if (!testCasesData) return '';
+  let obj = testCasesData;
+  if (typeof obj === 'string') {
+    try {
+      obj = JSON.parse(obj);
+    } catch {
+      return obj;
+    }
+  }
+  if (obj && obj.specFile) {
+    try {
+      return b64_to_utf8(obj.specFile);
+    } catch {
+      return JSON.stringify(obj, null, 2);
+    }
+  }
+  return typeof obj === 'object' ? JSON.stringify(obj, null, 2) : obj;
+};
 
 const AssignmentModal: React.FC<AssignmentModalProps> = ({
   isOpen,
@@ -39,10 +69,14 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
   const [maxScore, setMaxScore] = useState(editData?.max_score ?? 100);
   const [evaluatorType, setEvaluatorType] = useState<string>(editData?.evaluator_type || '');
   const [testCases, setTestCases] = useState<string>(
-    editData?.test_cases ? (typeof editData.test_cases === 'string' ? editData.test_cases : JSON.stringify(editData.test_cases, null, 2)) : ''
+    editData?.test_cases ? getInitialTestCases(editData.test_cases) : ''
+  );
+  const [rubric, setRubric] = useState<string>(
+    editData?.rubric ? (typeof editData.rubric === 'string' ? editData.rubric : JSON.stringify(editData.rubric, null, 2)) : ''
   );
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>('rich');
   const [generating, setGenerating] = useState(false);
+  const [generatingRubric, setGeneratingRubric] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -50,7 +84,8 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       setInstructions(editData?.instructions ?? '');
       setMaxScore(editData?.max_score ?? 100);
       setEvaluatorType(editData?.evaluator_type || '');
-      setTestCases(editData?.test_cases ? (typeof editData.test_cases === 'string' ? editData.test_cases : JSON.stringify(editData.test_cases, null, 2)) : '');
+      setTestCases(editData?.test_cases ? getInitialTestCases(editData.test_cases) : '');
+      setRubric(editData?.rubric ? (typeof editData.rubric === 'string' ? editData.rubric : JSON.stringify(editData.rubric, null, 2)) : '');
     }
   }, [isOpen, editData]);
 
@@ -79,6 +114,31 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
     }
   };
 
+  const handleGenerateRubric = async () => {
+    if (!title.trim() || !instructions.trim()) {
+      toast.error('Title and Instructions are required to generate a rubric.');
+      return;
+    }
+    setGeneratingRubric(true);
+    try {
+      // @ts-ignore
+      const { default: apiClient } = await import('@/services/api');
+      const res = await apiClient.post('/evaluations/generate-rubric', {
+        title,
+        instructions,
+        evaluatorType
+      });
+      if (res.data.success && res.data.rubric) {
+        setRubric(res.data.rubric);
+        toast.success('Rubric generated successfully!');
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to generate rubric');
+    } finally {
+      setGeneratingRubric(false);
+    }
+  };
+
   const handleSave = () => {
     if (!title.trim()) {
       toast.error('Assignment title is required');
@@ -88,11 +148,35 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       toast.error('Max score must be greater than 0');
       return;
     }
-    if (testCases.trim()) {
+
+    let finalTestCases = testCases.trim();
+    const upperType = (evaluatorType || '').toUpperCase();
+    if (upperType === 'REACT' || upperType === 'AI' || upperType === 'FULLSTACK' || upperType === 'BACKEND') {
+      const isJs = !finalTestCases.startsWith('{') && !finalTestCases.startsWith('[');
+      if (isJs && finalTestCases) {
+        try {
+          const specFileB64 = utf8_to_b64(finalTestCases);
+          finalTestCases = JSON.stringify({ specFile: specFileB64, testCases: [] }, null, 2);
+        } catch (e) {
+          toast.error('Failed to encode test spec file');
+          return;
+        }
+      }
+    }
+
+    if (finalTestCases) {
       try {
-        JSON.parse(testCases);
+        JSON.parse(finalTestCases);
       } catch (e) {
-        toast.error('Test Cases must be valid JSON');
+        toast.error('Test Cases must be valid JSON or JavaScript Spec');
+        return;
+      }
+    }
+    if (rubric.trim()) {
+      try {
+        JSON.parse(rubric);
+      } catch (e) {
+        toast.error('Rubric must be valid JSON');
         return;
       }
     }
@@ -101,21 +185,23 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       instructions: instructions.trim(),
       max_score: maxScore,
       evaluator_type: evaluatorType || null,
-      test_cases: testCases.trim() || null
+      test_cases: finalTestCases || null,
+      rubric: rubric.trim() || null
     });
     setTitle('');
     setInstructions('');
     setMaxScore(100);
     setEvaluatorType('');
     setTestCases('');
+    setRubric('');
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl'>
-        <div className='flex items-center justify-between p-6 pb-4'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs'>
+      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-2xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden'>
+        <div className='flex items-center justify-between p-4 sm:p-6 pb-3 sm:pb-4 border-b border-slate-100'>
           <div>
             <h3 className='text-lg font-bold text-slate-900'>
               {editData ? 'Edit Assignment' : 'Create Assignment'}
@@ -238,6 +324,33 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
               value={testCases}
               onChange={(e) => setTestCases(e.target.value)}
               placeholder='{\n  "evaluationMode": "script",\n  "expectedLogs": []\n}'
+              className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
+            />
+          </div>
+
+          <div>
+            <div className='mb-2 flex items-center justify-between'>
+              <label className='text-sm font-medium text-slate-700'>Rubric (JSON)</label>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={handleGenerateRubric}
+                disabled={generatingRubric || !evaluatorType}
+                className='h-7 text-xs bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-700'
+              >
+                {generatingRubric ? (
+                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
+                ) : (
+                  <Wand2 className='mr-1.5 h-3.5 w-3.5' />
+                )}
+                ✨ Auto-Generate Rubric
+              </Button>
+            </div>
+            <textarea
+              value={rubric}
+              onChange={(e) => setRubric(e.target.value)}
+              placeholder='[\n  { "name": "Critera 1", "weight": 20, "description": "..." }\n]'
               className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
             />
           </div>

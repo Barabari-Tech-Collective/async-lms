@@ -214,15 +214,15 @@ const EditorProfile = () => {
                   <div
                     key={project.id}
                     onClick={() => openProject(project)}
-                    className='group relative flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-slate-300 dark:bg-slate-900 dark:border-slate-700'
+                    className='group relative flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-slate-300 dark:bg-slate-900 dark:border-slate-700 min-h-[130px]'
                   >
                     <div className='flex items-start justify-between gap-2'>
-                      <div className='flex items-center gap-3'>
-                        <div className='p-2 bg-slate-50 rounded-lg dark:bg-slate-800'>
+                      <div className='flex items-center gap-3 min-w-0 flex-1'>
+                        <div className='p-2 bg-slate-50 rounded-lg dark:bg-slate-800 shrink-0'>
                           {env?.icon ?? <Code2 className='w-6 h-6 text-slate-400' />}
                         </div>
-                        <div>
-                          <p className='font-semibold text-sm leading-tight line-clamp-2'>
+                        <div className='min-w-0 flex-1'>
+                          <p className='font-semibold text-sm leading-tight line-clamp-2 text-slate-900 dark:text-slate-100'>
                             {project.name}
                           </p>
                           <Badge variant='secondary' className='text-[10px] mt-1 uppercase font-medium'>
@@ -234,8 +234,9 @@ const EditorProfile = () => {
                       <button
                         onClick={(e) => deleteProject(e, project.id)}
                         disabled={deletingId === project.id}
-                        className='opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950'
+                        className='opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity p-2 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950 shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center'
                         title='Delete project'
+                        aria-label='Delete project'
                       >
                         {deletingId === project.id
                           ? <Loader2 className='w-4 h-4 animate-spin' />

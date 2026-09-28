@@ -6,29 +6,31 @@ const fs = require('fs').promises;
 const https = require('https');
 const http = require('http');
 const slugify = require('../utils/slugify');
-const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { presignS3Url } = require('../utils/s3');
 
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+/**
+ * Strip executable test code before sending an exercise to a student.
+ * `test_code` contains the expected answers, and hidden tests must not be
+ * readable at all. Tests run server-side, so the client never needs the code.
+ */
+const publicTestCases = (testCases) =>
+  Array.isArray(testCases)
+    ? testCases.map((tc) => ({
+        id: tc.id,
+        description: tc.is_hidden ? 'Hidden test' : tc.description,
+        is_hidden: !!tc.is_hidden,
+      }))
+    : testCases;
 
-async function presignIfS3(url) {
-  if (!url || !url.includes('.amazonaws.com/')) return url;
-  try {
-    const { hostname, pathname } = new URL(url);
-    const bucket = hostname.split('.')[0];
-    const key = decodeURIComponent(pathname.slice(1));
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    return await getSignedUrl(s3, cmd, { expiresIn: 3600 });
-  } catch {
-    return url;
-  }
-}
+const publicTasks = (tasks) =>
+  Array.isArray(tasks)
+    ? tasks.map(({ reference_solution, ...t }) => ({
+        // reference_solution is the author's worked answer, kept only for
+        // authoring-time test verification — never send it to a student.
+        ...t,
+        test_cases: publicTestCases(t.test_cases),
+      }))
+    : tasks;
 
 const fetchTextFromUrl = (url) =>
   new Promise((resolve, reject) => {
@@ -105,10 +107,26 @@ async function attachLastAttempts(quizzes, userId, userRole) {
 }
 
 // Get subjects for the dropdown switcher — drafts included only for admin/facilitator,
-// students only ever see published subjects.
+// Get subjects for the dropdown switcher — drafts included only for admin/facilitator,
+// students only ever see published subjects. Facilitators only see assigned subjects.
 exports.getSubjectsDropdown = async (req, res) => {
   try {
-    const canSeeDrafts = req.user?.role === 'admin' || req.user?.role === 'facilitator';
+    const isFacilitator = req.user?.role === 'facilitator';
+    const isAdmin = req.user?.role === 'admin';
+    const canSeeDrafts = isAdmin || isFacilitator;
+    const facilitatorSubjectIds = req.user?.subject_ids || [];
+
+    if (isFacilitator && facilitatorSubjectIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const params = [];
+    let facilitatorClause = '';
+    if (isFacilitator) {
+      params.push(facilitatorSubjectIds);
+      facilitatorClause = `AND s.id = ANY($${params.length}::uuid[])`;
+    }
+
     const { rows } = await pool.query(`
       SELECT s.*,
              COUNT(DISTINCT t.id)::int as topics_count,
@@ -117,10 +135,10 @@ exports.getSubjectsDropdown = async (req, res) => {
       LEFT JOIN topics t ON s.id = t.subject_id
       LEFT JOIN units u ON t.id = u.topic_id
       LEFT JOIN subtopics st ON u.id = st.unit_id
-      WHERE s.is_deleted = false ${canSeeDrafts ? '' : 'AND s.is_published = true'}
+      WHERE s.is_deleted = false ${facilitatorClause} ${canSeeDrafts ? '' : 'AND s.is_published = true'}
       GROUP BY s.id
       ORDER BY s.order_index ASC
-    `);
+    `, params);
     res.json({ success: true, data: rows });
   } catch (err) {
     console.error('Error | getSubjectsDropdown:', err);
@@ -195,6 +213,14 @@ exports.getCourseStructure = async (req, res) => {
 
     const subject = subjectResult.rows[0];
 
+    // Facilitator isolation: Facilitator can only access subjects assigned to them
+    if (req.user?.role === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      if (!subjectIds.includes(subject.id)) {
+        return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
+
     // 2. Fetch full structure
     const query = `
       SELECT 
@@ -217,6 +243,31 @@ exports.getCourseStructure = async (req, res) => {
         st.slug AS subtopic_slug,
         st.description AS subtopic_description,
         st.order_index AS subtopic_order,
+        CASE WHEN
+          -- Fast path: user_subtopic_progress explicitly marks it done
+          COALESCE(usp.is_completed, false) = true
+          OR (
+            -- Fallback: all published lessons in this subtopic are completed by the user
+            EXISTS (
+              SELECT 1 FROM lesson_content lc2
+              WHERE lc2.subtopic_id = st.id
+                AND lc2.is_published = true
+                AND lc2.is_deleted = false
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM lesson_content lc2
+              WHERE lc2.subtopic_id = st.id
+                AND lc2.is_published = true
+                AND lc2.is_deleted = false
+                AND NOT EXISTS (
+                  SELECT 1 FROM user_lesson_progress ulp2
+                  WHERE ulp2.lesson_content_id = lc2.id
+                    AND ulp2.user_id = $2
+                    AND ulp2.is_completed = true
+                )
+            )
+          )
+        THEN true ELSE false END AS subtopic_is_completed,
 
         -- Lesson Content (published only)
         lc.id AS lesson_id,
@@ -266,6 +317,7 @@ exports.getCourseStructure = async (req, res) => {
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
       LEFT JOIN units u ON t.id = u.topic_id AND u.is_deleted = false
       LEFT JOIN subtopics st ON u.id = st.unit_id AND st.is_deleted = false
+      LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $2
       LEFT JOIN lesson_content lc
         ON st.id = lc.subtopic_id AND lc.is_published = true AND lc.is_deleted = false
       LEFT JOIN user_lesson_progress ulp
@@ -327,7 +379,7 @@ exports.getCourseStructure = async (req, res) => {
           slug: row.subtopic_slug,
           description: row.subtopic_description,
           order_index: row.subtopic_order,
-          is_completed: false,
+          is_completed: !!row.subtopic_is_completed,
           lesson_content: [],
           exercises: [],
         });
@@ -346,9 +398,6 @@ exports.getCourseStructure = async (req, res) => {
             version: row.lesson_version,
             video_url: row.lesson_video_url,
           });
-        }
-        if (row.lesson_is_completed) {
-          subtopic.is_completed = true;
         }
       }
 
@@ -442,6 +491,20 @@ exports.getSubtopicContent = async (req, res) => {
     }
 
     const subtopicId = subtopicResult.rows[0].id;
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      const subCheck = await pool.query(
+        `SELECT t.subject_id FROM subtopics st
+         JOIN units u ON st.unit_id = u.id
+         JOIN topics t ON u.topic_id = t.id
+         WHERE st.id = $1`,
+        [subtopicId],
+      );
+      if (subCheck.rows.length === 0 || !subjectIds.includes(subCheck.rows[0].subject_id)) {
+        return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
 
     if (userRole === 'student') {
       const lockCheck = await pool.query(
@@ -553,7 +616,7 @@ exports.getSubtopicContent = async (req, res) => {
         if (markdownRow.markdown_path.startsWith('ai-generated:')) {
           markdownContent = markdownRow.markdown_path.slice('ai-generated:'.length);
         } else if (markdownRow.markdown_path.startsWith('http')) {
-          const fetchUrl = await presignIfS3(markdownRow.markdown_path);
+          const fetchUrl = await presignS3Url(markdownRow.markdown_path);
           markdownContent = await fetchTextFromUrl(fetchUrl);
         } else {
           const relativePath = markdownRow.markdown_path.replace(/^\/+/, '');
@@ -622,8 +685,8 @@ exports.getSubtopicContent = async (req, res) => {
           max_score: row.exercise_max_score,
           language: row.exercise_language,
           initial_files: row.exercise_initial_files,
-          test_cases: row.exercise_test_cases,
-          tasks: row.exercise_tasks,
+          test_cases: publicTestCases(row.exercise_test_cases),
+          tasks: publicTasks(row.exercise_tasks),
         });
       }
     });
@@ -884,6 +947,21 @@ exports.getExerciseContent = async (req, res) => {
 
     const row = rows[0];
 
+    if (req.user?.role === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      const exCheck = await pool.query(
+        `SELECT t.subject_id FROM exercises e
+         LEFT JOIN subtopics st ON e.subtopic_id = st.id
+         LEFT JOIN units u ON (e.unit_id = u.id OR st.unit_id = u.id)
+         LEFT JOIN topics t ON u.topic_id = t.id
+         WHERE e.id = $1`,
+        [exerciseId],
+      );
+      if (exCheck.rows.length === 0 || !subjectIds.includes(exCheck.rows[0].subject_id)) {
+        return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -906,8 +984,8 @@ exports.getExerciseContent = async (req, res) => {
             max_score: row.exercise_max_score,
             language: row.exercise_language,
             initial_files: row.exercise_initial_files,
-            test_cases: row.exercise_test_cases,
-            tasks: row.exercise_tasks,
+            test_cases: publicTestCases(row.exercise_test_cases),
+            tasks: publicTasks(row.exercise_tasks),
           },
         ],
       },
@@ -951,6 +1029,20 @@ exports.getQuizContent = async (req, res) => {
 
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Quiz not found' });
+    }
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user?.subject_ids || [];
+      const quizCheck = await pool.query(
+        `SELECT t.subject_id FROM quizzes q
+         JOIN units u ON q.unit_id = u.id
+         JOIN topics t ON u.topic_id = t.id
+         WHERE q.id = $1`,
+        [quizId],
+      );
+      if (quizCheck.rows.length === 0 || !subjectIds.includes(quizCheck.rows[0].subject_id)) {
+        return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
+      }
     }
 
     const base = rows[0];
@@ -1015,8 +1107,50 @@ exports.getQuizContent = async (req, res) => {
 exports.getMarkdownContent = async (req, res) => {
   try {
     const { markdownPathURL } = req.body;
-    const fetchUrl = await presignIfS3(markdownPathURL);
-    const content = await fetchTextFromUrl(fetchUrl);
+    if (!markdownPathURL) {
+      return res.status(400).json({ success: false, message: 'No markdown path provided' });
+    }
+
+    let content = '';
+    if (markdownPathURL.startsWith('ai-generated:')) {
+      content = markdownPathURL.slice('ai-generated:'.length);
+    } else if (markdownPathURL.startsWith('http://') || markdownPathURL.startsWith('https://')) {
+      try {
+        const fetchUrl = await presignS3Url(markdownPathURL);
+        content = await fetchTextFromUrl(fetchUrl);
+      } catch (fetchErr) {
+        console.warn('Could not fetch remote markdown from URL:', markdownPathURL, fetchErr.message);
+        content = `# Lesson Content\n\n> **Note:** The remote content file at \`${markdownPathURL.split('/').pop()}\` could not be fetched from remote storage (${fetchErr.message}).\n\nPlease check that AWS S3 credentials or internet connectivity are properly configured.`;
+      }
+    } else {
+      const relativePath = markdownPathURL.replace(/^\/+/, '');
+      const allowedBaseDirs = [
+        path.resolve(__dirname, '..', 'data'),
+        path.resolve(__dirname, '..', 'uploads'),
+      ];
+      let found = false;
+      for (const baseDir of allowedBaseDirs) {
+        const resolvedPath = path.resolve(baseDir, relativePath);
+        // Ensure the path is strictly within the allowed base directory
+        if (resolvedPath === baseDir || resolvedPath.startsWith(baseDir + path.sep)) {
+          try {
+            content = await fs.readFile(resolvedPath, 'utf8');
+            found = true;
+            break;
+          } catch {
+            // continue searching other allowed dirs
+          }
+        }
+      }
+      if (!found) {
+        if (markdownPathURL.includes('\n') || !markdownPathURL.endsWith('.md')) {
+          content = markdownPathURL;
+        } else {
+          content = `# Lesson Content\n\n> Local file \`${markdownPathURL}\` was not found on the server.`;
+        }
+      }
+    }
+
     res.json({ success: true, data: content });
   } catch (err) {
     console.error('Error | getMarkdownContent:', err);

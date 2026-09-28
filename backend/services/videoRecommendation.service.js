@@ -1,6 +1,9 @@
 const pool = require('../config/pg');
 const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.CHATGPT_API_KEY });
+const openai = new OpenAI({ 
+  apiKey: process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL || 'https://api.deepseek.com' 
+});
 const { searchVideos, getVideoDetails } = require('./youtube.service');
 const { applyNoiseFilter, applyQualityFilter, applyFreshnessFilter, applyViewCountFilter, rankVideos } = require('../utils/videoFilters');
 
@@ -119,7 +122,7 @@ Analyze the titles and select the single best videoId that perfectly matches the
 Return ONLY a valid JSON object: { "best_videoId": "the_id_here" }`;
 
           const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.1,
             response_format: { type: 'json_object' }

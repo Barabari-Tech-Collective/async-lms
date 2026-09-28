@@ -60,21 +60,21 @@ const StatsCard = ({ results }: Props) => {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4 mt-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 mt-3 sm:mt-6">
       {data.map((item, i) => (
         <div
           key={i}
-          className="bg-white border rounded-xl px-4 py-3 flex items-center gap-3"
+          className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-2 sm:gap-3 shadow-2xs hover:border-slate-300 transition-all min-w-0"
         >
           <div
-            className={`w-9 h-9 flex items-center justify-center rounded-lg ${item.bg}`}
+            className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl shrink-0 ${item.bg}`}
           >
-            <item.icon className={item.color} size={18} />
+            <item.icon className={item.color} size={16} />
           </div>
 
-          <div>
-            <p className="text-[12px] text-gray-500">{item.label}</p>
-            <p className="text-[20px] font-semibold text-gray-800">
+          <div className="min-w-0 flex-1 w-full">
+            <p className="text-[10px] sm:text-xs text-slate-500 font-semibold truncate">{item.label}</p>
+            <p className="text-base sm:text-xl font-bold text-slate-900 mt-0.5">
               {item.value}
             </p>
           </div>

@@ -41,6 +41,17 @@ export default defineConfig({
     exclude: ['@webcontainer/api'],
   },
   server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3001',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
     // Pre-transform the critical-path files before the first browser request
     // so the initial page load doesn't stall while Vite compiles them.
     warmup: {

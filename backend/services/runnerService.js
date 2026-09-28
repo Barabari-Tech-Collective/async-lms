@@ -12,6 +12,24 @@ const POOL_SIZE     = parseInt(process.env.RUNNER_POOL_SIZE      || '20', 10);
 const POOL_SIZE_JVM = parseInt(process.env.RUNNER_POOL_SIZE_JAVA || '5',  10);
 const POOL_SIZE_SQL = parseInt(process.env.RUNNER_POOL_SIZE_SQL  || '5',  10);
 
+// How long a caller waits for a free container before giving up. Without this
+// a caller queues forever: a pool that failed to warm (missing image, docker
+// socket unreachable) held every request open until the proxy 504'd at 60s,
+// which is exactly how a missing `workspace-node` image presented in prod.
+const ACQUIRE_TIMEOUT_MS = parseInt(process.env.RUNNER_ACQUIRE_TIMEOUT_MS || '10000', 10);
+// Ceiling for any single docker CLI call (`run`, `cp`, `exec`). The daemon can
+// wedge under load and leave these hanging indefinitely.
+const SPAWN_TIMEOUT_MS   = parseInt(process.env.RUNNER_SPAWN_TIMEOUT_MS   || '30000', 10);
+
+/** Runner cannot serve this request — a 503, not a 500. The caller is fine; we are not. */
+class RunnerUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RunnerUnavailableError';
+    this.statusCode = 503;
+  }
+}
+
 const LANGUAGE_PROFILES = {
   javascript: { image: 'workspace-node',   cmd: ['node',    'index.js'],   poolSize: POOL_SIZE     },
   python:     { image: 'workspace-python', cmd: ['python3', 'main.py'],    poolSize: POOL_SIZE     },
@@ -28,13 +46,30 @@ const TEST_CMDS = {
 
 // ── Low-level helpers ─────────────────────────────────────────────────────────
 
-function spawnAsync(cmd, args) {
+function spawnAsync(cmd, args, timeoutMs = SPAWN_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let errOut = '';
+    let done = false;
     const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+
+    const settle = (fn, arg) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
+
+    // A wedged docker daemon leaves the CLI hanging with no output and no exit.
+    const timer = setTimeout(() => {
+      p.kill('SIGKILL');
+      settle(reject, new Error(`${cmd} ${args[0]} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
     if (p.stderr) p.stderr.on('data', d => { errOut += d.toString(); });
-    p.on('close', code => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args[0]} exited ${code}. Error: ${errOut.trim()}`))));
-    p.on('error', reject);
+    p.on('close', code => (code === 0
+      ? settle(resolve)
+      : settle(reject, new Error(`${cmd} ${args[0]} exited ${code}. Error: ${errOut.trim()}`))));
+    p.on('error', err => settle(reject, err));
   });
 }
 
@@ -73,16 +108,43 @@ class ContainerPool {
     this.size  = size;
     this.available = [];
     this.queue     = [];
+    // Containers that actually started. 0 means this language cannot run at all.
+    this.ready     = 0;
+    this.lastError = null;
   }
 
-  // Pre-warm all containers in parallel at startup.
+  // Pre-warm all containers in parallel at startup. One container failing must
+  // not take down the rest of the pool, and one pool failing must not take down
+  // the other languages — so failures are collected, not thrown.
   async init() {
-    await Promise.all(
+    if (this.size <= 0) {
+      this.lastError = 'pool disabled (size 0)';
+      console.warn(`[pool] ${this.image}: disabled (size 0) — exercises in this language will fail fast`);
+      return;
+    }
+
+    const results = await Promise.allSettled(
       Array.from({ length: this.size }, (_, i) =>
         this._startContainer(`runner-${this.image}-${i}`)
       )
     );
-    console.log(`[pool] ${this.image}: ${this.size} warm containers ready`);
+
+    const failures = results.filter(r => r.status === 'rejected');
+    this.ready = this.available.length;
+    if (failures.length > 0) {
+      this.lastError = String(failures[0].reason?.message || failures[0].reason).slice(0, 300);
+    }
+
+    if (this.ready === 0) {
+      console.error(
+        `[pool] ${this.image}: FAILED — 0/${this.size} containers started. ` +
+        `Exercises in this language will return 503. Cause: ${this.lastError}`
+      );
+    } else if (failures.length > 0) {
+      console.warn(`[pool] ${this.image}: ${this.ready}/${this.size} ready (${failures.length} failed: ${this.lastError})`);
+    } else {
+      console.log(`[pool] ${this.image}: ${this.ready} warm containers ready`);
+    }
   }
 
   async _startContainer(name) {
@@ -107,15 +169,34 @@ class ContainerPool {
     this.available.push(name);
   }
 
-  _acquire() {
+  _acquire(timeoutMs = ACQUIRE_TIMEOUT_MS) {
     if (this.available.length > 0) return Promise.resolve(this.available.pop());
-    // No free container — queue the caller until one is released.
-    return new Promise(resolve => this.queue.push(resolve));
+
+    // Nothing warm and nothing ever will be: fail immediately with the real
+    // reason rather than queueing behind containers that do not exist.
+    if (this.ready === 0) {
+      return Promise.reject(new RunnerUnavailableError(
+        `The ${this.image} runner is unavailable (${this.lastError || 'pool not initialised'}).`
+      ));
+    }
+
+    // Genuinely busy — wait, but bounded, so a stuck container cannot pin the
+    // caller open until the proxy times out.
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve: null };
+      const timer = setTimeout(() => {
+        const i = this.queue.indexOf(waiter);
+        if (i !== -1) this.queue.splice(i, 1);
+        reject(new RunnerUnavailableError('The code runner is busy. Please try again in a moment.'));
+      }, timeoutMs);
+      waiter.resolve = (name) => { clearTimeout(timer); resolve(name); };
+      this.queue.push(waiter);
+    });
   }
 
   _release(name) {
     const next = this.queue.shift();
-    if (next) next(name); else this.available.push(name);
+    if (next) next.resolve(name); else this.available.push(name);
   }
 
   // Copy workspaceDir files into the container, exec the command, then reset.
@@ -145,29 +226,73 @@ class ContainerPool {
 const pools = {};
 
 async function initPools() {
-  await Promise.all(
+  // allSettled: a language whose image is missing must not abort the others.
+  await Promise.allSettled(
     Object.entries(LANGUAGE_PROFILES).map(([lang, { image, poolSize }]) => {
       pools[lang] = new ContainerPool(image, poolSize);
       return pools[lang].init();
     })
   );
+
+  const dead = Object.entries(pools).filter(([, p]) => p.ready === 0).map(([lang]) => lang);
+  if (dead.length > 0) {
+    console.error(`[pool] NO RUNNER CAPACITY for: ${dead.join(', ')} — see /api/v1/internal/runner/health`);
+  }
+}
+
+/** Per-language pool state, for the health endpoint and for ops triage. */
+function getPoolHealth() {
+  const languages = {};
+  for (const [lang, pool] of Object.entries(pools)) {
+    languages[lang] = {
+      image: pool.image,
+      configured: pool.size,
+      ready: pool.ready,
+      available: pool.available.length,
+      queued: pool.queue.length,
+      error: pool.lastError,
+    };
+  }
+  const healthy = Object.values(languages).some(l => l.ready > 0);
+  return { healthy, initialised: Object.keys(pools).length > 0, languages };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-function execute(workspaceDir, language) {
+function execute(workspaceDir, language, activeFile) {
   const pool = pools[language] ?? pools.javascript;
-  if (!pool) return Promise.resolve({ output: 'Code execution is unavailable (runner not initialised).', exitCode: -1 });
+  if (!pool) return Promise.reject(new RunnerUnavailableError('The code runner has not been initialised.'));
   const profile = LANGUAGE_PROFILES[language] ?? LANGUAGE_PROFILES.javascript;
-  return pool.run(workspaceDir, profile.cmd, 15000);
+  
+  let cmd = [...profile.cmd];
+  if (activeFile) {
+      if (language === 'javascript' && activeFile.endsWith('.js')) {
+          cmd = ['node', activeFile];
+      } else if (language === 'python' && activeFile.endsWith('.py')) {
+          cmd = ['python3', activeFile];
+      } else if (language === 'java' && activeFile.endsWith('.java')) {
+          const className = activeFile.replace('.java', '').replace(/\//g, '.');
+          cmd = ['sh', '-c', `cd /workspace && javac ${activeFile} 2>&1 && java -cp /workspace ${className}`];
+      } else if (language === 'sql' && activeFile.endsWith('.sql')) {
+          cmd = ['sh', '-c', `sqlite3 -column -header :memory: < /workspace/${activeFile}`];
+      }
+  }
+
+  return pool.run(workspaceDir, cmd, 15000);
 }
 
 function executeTests(workspaceDir, language) {
   const cmd = TEST_CMDS[language];
   if (!cmd) return null;
   const pool = pools[language] ?? pools.javascript;
-  if (!pool) return Promise.resolve({ output: 'Test execution is unavailable (runner not initialised).', exitCode: -1 });
+  if (!pool) return Promise.reject(new RunnerUnavailableError('The code runner has not been initialised.'));
   return pool.run(workspaceDir, cmd, 20000);
 }
 
-module.exports = { initPools, execute, executeTests };
+module.exports = {
+  initPools,
+  execute,
+  executeTests,
+  getPoolHealth,
+  RunnerUnavailableError,
+};

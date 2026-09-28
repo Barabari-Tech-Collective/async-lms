@@ -21,6 +21,9 @@ router.get('/content/:subtopicSlug', verifyToken, getSubtopicContent);
 // GET specific quiz content
 router.get('/quiz/:quizId', verifyToken, getQuizContent);
 
+// GET specific exercise content (standalone exercise view)
+router.get('/exercise/:exerciseId', verifyToken, getExerciseContent);
+
 // Fetch all published subjects
 router.get('/published', verifyToken, getAllPublishedSubjects);
 

@@ -9,6 +9,7 @@ import {
   BarChart3,
   Settings,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NavLink } from 'react-router';
@@ -32,7 +33,6 @@ const menuItems = [
     icon: ClipboardCheck,
     path: '/dashboard/admin/assignment-management',
   },
-
   {
     name: 'AI Curriculum',
     icon: Sparkles,
@@ -44,47 +44,68 @@ const menuItems = [
 
 export default function AdminSidebar({
   isOpen,
+  isMobile = false,
+  onCloseMobile,
 }: {
   isOpen: boolean;
-  toggle: () => void;
+  toggle?: () => void;
+  isMobile?: boolean;
+  onCloseMobile?: () => void;
 }) {
   const currentUser = useAppSelector(selectUser);
 
-  const initials = currentUser?.full_name
-    ?.split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2) || 'A';
+  const initials =
+    currentUser?.full_name
+      ?.split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2) || 'A';
 
   return (
     <aside
       className={cn(
         'h-full flex flex-col transition-all duration-300 bg-[#191C34] text-slate-300',
-        isOpen ? 'w-64' : 'w-20',
+        isMobile ? 'w-full' : isOpen ? 'w-64' : 'w-20',
       )}
     >
       {/* Brand Header */}
-      <div className='h-16 flex items-center gap-3 px-6 shrink-0 mt-4'>
-        <Logo className='h-12 w-12' iconOnly={!isOpen} />
-        {isOpen && (
-          <span className='font-bold text-xl text-white tracking-tight'>
-            CodeGuru
-          </span>
+      <div className='h-16 flex items-center justify-between px-5 sm:px-6 shrink-0 mt-2 sm:mt-4'>
+        <div className='flex items-center gap-3 min-w-0'>
+          <Logo className='h-10 w-10 sm:h-12 sm:w-12 shrink-0' iconOnly={!isOpen && !isMobile} />
+          {(isOpen || isMobile) && (
+            <span className='font-bold text-lg sm:text-xl text-white tracking-tight truncate'>
+              CodeGuru
+            </span>
+          )}
+        </div>
+        {isMobile && onCloseMobile && (
+          <button
+            onClick={onCloseMobile}
+            className='p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center'
+            aria-label='Close sidebar'
+          >
+            <X size={20} />
+          </button>
         )}
       </div>
 
       {/* Nav Items */}
-      <nav className='flex-1 py-4 px-3 space-y-1 overflow-y-auto'>
+      <nav className='flex-1 py-4 px-3 space-y-1 overflow-y-auto custom-scrollbar'>
         {menuItems.map((item) => (
           <NavLink
             key={item.name}
             to={item.path}
-            // Use 'end' for the Dashboard to prevent it from being active on sub-routes
             end={item.path === '/dashboard/admin'}
+            onClick={() => {
+              if (isMobile && onCloseMobile) {
+                onCloseMobile();
+              }
+            }}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-3 px-3 py-3 rounded-lg transition-all group',
+                'flex w-full items-center gap-3 px-3 py-2.5 sm:py-3 rounded-xl transition-all group min-h-[44px]',
+                !isOpen && !isMobile && 'justify-center px-0',
                 isActive
                   ? 'bg-[#333d7c] text-white shadow-sm'
                   : 'hover:bg-[#2a3469] hover:text-white',
@@ -96,16 +117,17 @@ export default function AdminSidebar({
                 <item.icon
                   size={20}
                   className={cn(
+                    'shrink-0',
                     isActive
                       ? 'text-white'
                       : 'text-slate-400 group-hover:text-slate-300',
                   )}
                 />
-                {isOpen && (
-                  <span className='font-medium text-[14px]'>{item.name}</span>
+                {(isOpen || isMobile) && (
+                  <span className='font-medium text-[13px] sm:text-[14px] truncate'>{item.name}</span>
                 )}
-                {isActive && isOpen && (
-                  <div className='ml-auto w-1.5 h-1.5 rounded-full bg-yellow-400' />
+                {isActive && (isOpen || isMobile) && (
+                  <div className='ml-auto w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0' />
                 )}
               </>
             )}
@@ -114,16 +136,16 @@ export default function AdminSidebar({
       </nav>
 
       {/* User Profile Section - Bottom */}
-      <div className='p-4 border-t border-[#222644] bg-[#191C34]'>
+      <div className='p-3.5 sm:p-4 border-t border-[#222644] bg-[#191C34] shrink-0'>
         <div
-          className={cn('flex items-center gap-3', !isOpen && 'justify-center')}
+          className={cn('flex items-center gap-3', !isOpen && !isMobile && 'justify-center')}
         >
-          <div className='w-10 h-10 rounded-full bg-[#3b82f6] flex items-center justify-center text-white font-bold shrink-0'>
+          <div className='w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#3b82f6] flex items-center justify-center text-white font-bold shrink-0 text-xs sm:text-sm'>
             {initials}
           </div>
-          {isOpen && (
-            <div className='min-w-0'>
-              <p className='text-sm font-bold text-white truncate'>
+          {(isOpen || isMobile) && (
+            <div className='min-w-0 flex-1'>
+              <p className='text-xs sm:text-sm font-bold text-white truncate'>
                 {currentUser?.full_name || 'Admin'}
               </p>
               <p className='text-[11px] text-yellow-400 font-medium truncate leading-tight capitalize'>

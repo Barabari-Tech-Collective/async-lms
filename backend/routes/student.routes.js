@@ -15,9 +15,12 @@ const {
   createStudentProject,
   deleteStudentProject,
   initExerciseWorkspace,
+  saveExerciseWorkspace,
   runExercise,
+
   runExerciseTests,
   getStudentAssignments,
+  getStudentAssignmentsOverview,
   getAssignmentById,
   submitAssignment,
   getCapstone,
@@ -59,7 +62,21 @@ router.post(
   isStudent,
   initExerciseWorkspace,
 );
-router.post('/exercise/:exerciseId/run', verifyToken, isStudent, runExercise);
+
+router.post(
+  '/exercise/:exerciseId/workspace/save',
+  verifyToken,
+  isStudent,
+  saveExerciseWorkspace,
+);
+
+router.post(
+  '/exercise/:exerciseId/run',
+  verifyToken,
+  isStudent,
+  runExercise,
+);
+
 router.post(
   '/exercise/:exerciseId/run-tests',
   verifyToken,
@@ -68,6 +85,12 @@ router.post(
 );
 
 // ===== ASSIGNMENTS =====
+router.get(
+  '/assignments/overview',
+  verifyToken,
+  isStudent,
+  getStudentAssignmentsOverview,
+);
 router.get('/assignments', verifyToken, isStudent, getStudentAssignments);
 router.get('/assignments/:id', verifyToken, isStudent, getAssignmentById);
 router.post(

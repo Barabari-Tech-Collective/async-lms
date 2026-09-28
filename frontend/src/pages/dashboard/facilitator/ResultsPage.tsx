@@ -9,8 +9,10 @@ import apiClient from '@/services/api';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type Evaluation = {
+  id: string;
   assignment_id: string;
   assignment_name?: string;
+  evaluator_type?: string;
 };
 const ResultsPage = () => {
   const navigate = useNavigate();
@@ -27,21 +29,21 @@ const ResultsPage = () => {
 
   const assignmentName =
     evaluation?.assignment_name || evaluation?.assignment_id;
+  const fetchResults = async () => {
+    try {
+      setLoading(true);
+      const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`);
+
+      setEvaluation(data.evaluation);
+      setResults(data.results);
+    } catch (err) {
+      console.error('Failed to fetch results', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchResults = async () => {
-      try {
-        setLoading(true);
-        const { data } = await apiClient.get(`/evaluations/${id}`);
-
-        setEvaluation(data.evaluation);
-        setResults(data.results);
-      } catch (err) {
-        console.error('Failed to fetch results', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     if (id) fetchResults();
   }, [id]);
 
@@ -60,39 +62,39 @@ const ResultsPage = () => {
   });
 
   return (
-    <div>
-      <div className='px-6'>
+    <div className='min-w-0'>
+      <div className='px-1 sm:px-6 space-y-4 pb-12 min-w-0'>
         {/* Back + Title */}
-        <div className='flex items-center gap-3 mt-4'>
+        <div className='flex items-center gap-3 mt-2 sm:mt-4'>
           <button
             onClick={() => navigate(-1)}
-            className='text-sm text-blue-600'
+            className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold'
           >
-            ←
+            ← Back
           </button>
 
-          <h1 className='text-xl font-semibold'>Evaluation Results</h1>
+          <h1 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Evaluation Results</h1>
         </div>
 
-        <div className='flex flex-wrap justify-between items-center'>
+        <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
           {/* Assignment */}
-          <p className='text-sm text-gray-500 mt-1'>{assignmentName}</p>
+          <p className='text-xs sm:text-sm text-slate-500 font-medium truncate max-w-md'>{assignmentName}</p>
           <TopHeader onFilterChange={setFilters} />
         </div>
 
         {loading ? (
-          <div className='mt-6 space-y-6'>
+          <div className='mt-4 sm:mt-6 space-y-4 sm:space-y-6'>
             {/* Stat cards skeleton */}
-            <div className='grid grid-cols-4 gap-4'>
+            <div className='grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4'>
               {[...Array(4)].map((_, i) => (
                 <div
                   key={i}
-                  className='bg-white border rounded-xl px-4 py-3 flex items-center gap-3'
+                  className='bg-white border rounded-xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row items-center gap-2 sm:gap-3'
                 >
-                  <Skeleton className='w-9 h-9 rounded-lg' />
-                  <div className='flex-1 space-y-2'>
-                    <Skeleton className='h-3 w-20' />
-                    <Skeleton className='h-5 w-12' />
+                  <Skeleton className='w-8 h-8 sm:w-9 sm:h-9 rounded-xl' />
+                  <div className='flex-1 space-y-1.5 w-full flex flex-col items-center sm:items-start'>
+                    <Skeleton className='h-3 w-16 sm:w-20' />
+                    <Skeleton className='h-4 sm:h-5 w-10 sm:w-12' />
                   </div>
                 </div>
               ))}
@@ -121,7 +123,7 @@ const ResultsPage = () => {
             </div>
           </div>
         ) : (
-          <>
+          <div className='space-y-4 sm:space-y-6 min-w-0'>
             {/* Cards */}
             <StatsCard results={filteredResults} />
 
@@ -132,8 +134,13 @@ const ResultsPage = () => {
             <BatchTable results={filteredResults} />
 
             {/* Student Table */}
-            <StudentTable results={filteredResults} />
-          </>
+            <StudentTable 
+              results={filteredResults} 
+              evaluation={evaluation} 
+              assignmentId={id}
+              onRefresh={fetchResults}
+            />
+          </div>
         )}
       </div>
     </div>

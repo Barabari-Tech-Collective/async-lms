@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { AuthState } from './authTypes';
-import { loginUser, signupUser, loadUser } from './authThunks';
+import { loginUser, signupUser, loadUser, completeGoogleSignup } from './authThunks';
+import { queryClient } from '@/lib/queryClient';
 
 const token = localStorage.getItem('token');
 
@@ -21,6 +22,9 @@ const authSlice = createSlice({
       state.token = null;
       state.isAuthenticated = false;
       localStorage.removeItem('token');
+      try {
+        queryClient.clear();
+      } catch {}
     },
     clearAuthError(state) {
       state.error = null;
@@ -30,6 +34,22 @@ const authSlice = createSlice({
       state.isAuthenticated = true;
       state.status = 'loading';
       localStorage.setItem('token', action.payload);
+      try {
+        queryClient.clear();
+      } catch {}
+    },
+    setCredentials(state, action: PayloadAction<{ token: string; user: any }>) {
+      if (state.user?.id && state.user.id !== action.payload.user?.id) {
+        try {
+          queryClient.clear();
+        } catch {}
+      }
+      state.token = action.payload.token;
+      state.user = action.payload.user;
+      state.isAuthenticated = true;
+      state.status = 'succeeded';
+      state.error = null;
+      localStorage.setItem('token', action.payload.token);
     },
   },
   extraReducers: (builder) => {
@@ -48,22 +68,33 @@ const authSlice = createSlice({
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.status = 'failed';
-        state.error = action.payload ?? null;
+        state.error = typeof action.payload === 'object' && action.payload ? (action.payload as any).message : (action.payload ?? null);
       })
 
       // SIGNUP
       .addCase(signupUser.pending, (state) => {
         state.status = 'loading';
       })
-      .addCase(signupUser.fulfilled, (state, action) => {
+      .addCase(signupUser.fulfilled, (state) => {
         state.status = 'succeeded';
-        state.user = action.payload.user;
-        state.token = action.payload.token;
-        state.isAuthenticated = true;
         state.error = null;
-        localStorage.setItem('token', action.payload.token);
       })
       .addCase(signupUser.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = typeof action.payload === 'object' && action.payload ? (action.payload as any).message : (action.payload ?? null);
+      })
+
+      // COMPLETE GOOGLE SIGNUP
+      .addCase(completeGoogleSignup.pending, (state) => {
+        state.status = 'loading';
+      })
+      // Returns only a single-use code now; the session is established when
+      // AuthCallback exchanges it, so there is nothing to store here.
+      .addCase(completeGoogleSignup.fulfilled, (state) => {
+        state.status = 'idle';
+        state.error = null;
+      })
+      .addCase(completeGoogleSignup.rejected, (state, action) => {
         state.status = 'failed';
         state.error = action.payload ?? null;
       })
@@ -87,5 +118,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { logout, clearAuthError, loginWithToken } = authSlice.actions;
+export const { logout, clearAuthError, loginWithToken, setCredentials } = authSlice.actions;
 export default authSlice.reducer;

@@ -83,6 +83,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
 
   // ── Single-task (legacy) state ───────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [activeFile, setActiveFile] = useState<string>('');
   const [language, setLanguage] = useState('javascript');
@@ -92,6 +93,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
   const [activeTaskId, setActiveTaskId] = useState<string>(tasks[0]?.id ?? '');
   const [taskWorkspaces, setTaskWorkspaces] = useState<Record<string, TaskWorkspace>>({});
   const [taskLoading, setTaskLoading] = useState<Record<string, boolean>>({});
+  const [taskInitError, setTaskInitError] = useState<Record<string, string | null>>({});
 
   // ── Shared run/test state ────────────────────────────────────────────────────
   const [running, setRunning] = useState(false);
@@ -104,6 +106,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
   const [testPanelOpen, setTestPanelOpen] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   // ── Init workspace for single-task (legacy) ──────────────────────────────────
 
@@ -112,6 +115,8 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
 
     let cancelled = false;
     const init = async () => {
+      setLoading(true);
+      setInitError(null);
       try {
         const res = await apiClient.post<{
           success: boolean;
@@ -124,8 +129,8 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
         setFiles(initialFiles);
         setProjectId(pid);
         setActiveFile(initialFiles[0]?.name ?? '');
-      } catch {
-        // loading will be set to false below
+      } catch (err) {
+        if (!cancelled) setInitError(getErrorMessage(err, 'Could not set up your workspace'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -133,7 +138,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
 
     init();
     return () => { cancelled = true; };
-  }, [exercise.id, isMultiTask]);
+  }, [exercise.id, isMultiTask, retryToken]);
 
   // ── Init workspace for a specific task (lazy) ────────────────────────────────
 
@@ -141,6 +146,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
     if (taskWorkspaces[taskId]?.initialized) return;
 
     setTaskLoading(prev => ({ ...prev, [taskId]: true }));
+    setTaskInitError(prev => ({ ...prev, [taskId]: null }));
     try {
       const res = await apiClient.post<{
         success: boolean;
@@ -158,8 +164,8 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
           initialized: true,
         },
       }));
-    } catch {
-      // task workspace init failed — taskLoading will be cleared below
+    } catch (err) {
+      setTaskInitError(prev => ({ ...prev, [taskId]: getErrorMessage(err, 'Could not set up your workspace') }));
     } finally {
       setTaskLoading(prev => ({ ...prev, [taskId]: false }));
     }
@@ -195,6 +201,15 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
   const currentActiveFile = isMultiTask ? (taskWorkspaces[activeTaskId]?.activeFile ?? '') : activeFile;
   const currentProjectId = isMultiTask ? (taskWorkspaces[activeTaskId]?.projectId ?? '') : projectId;
   const isCurrentTaskLoading = isMultiTask ? (taskLoading[activeTaskId] ?? !taskWorkspaces[activeTaskId]?.initialized) : loading;
+  const currentInitError = isMultiTask ? (taskInitError[activeTaskId] ?? null) : initError;
+  const isWorkspaceReady = isMultiTask
+    ? !!taskWorkspaces[activeTaskId]?.initialized
+    : (!loading && !initError && !!projectId);
+
+  const retryInit = () => {
+    if (isMultiTask) initTaskWorkspace(activeTaskId);
+    else setRetryToken((t) => t + 1);
+  };
 
   const setCurrentActiveFile = (name: string) => {
     if (isMultiTask) {
@@ -378,6 +393,20 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
       {/* ── Code panel ── */}
       {activeTab === 'code' && (
         <>
+          {currentInitError && (
+            <div className='flex items-center justify-between gap-3 px-4 py-3 bg-red-950/40 border-b border-red-900 text-xs text-red-300'>
+              <span>{currentInitError}</span>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={retryInit}
+                className='border-red-700 bg-transparent text-red-200 hover:bg-red-900 hover:text-white shrink-0'
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+
           {/* File tabs */}
           <div className='flex items-center gap-0 border-b border-slate-700 bg-[#252526] overflow-x-auto'>
             {isCurrentTaskLoading ? (
@@ -502,7 +531,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
               size='sm'
               variant='outline'
               onClick={handleRun}
-              disabled={running || testRunning || isCurrentTaskLoading}
+              disabled={running || testRunning || isCurrentTaskLoading || !isWorkspaceReady}
               className='border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white'
             >
               {running
@@ -516,7 +545,7 @@ const ExerciseEditor = ({ exercise, submitting, onSubmit }: ExerciseEditorProps)
                 size='sm'
                 variant='outline'
                 onClick={handleRunTests}
-                disabled={running || testRunning || isCurrentTaskLoading}
+                disabled={running || testRunning || isCurrentTaskLoading || !isWorkspaceReady}
                 className='border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white'
               >
                 {testRunning

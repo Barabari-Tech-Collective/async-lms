@@ -24,8 +24,17 @@ const PrivateRoute = ({ allowedRoles }: PrivateRouteProps) => {
   }
 
   const isOnOnboarding = location.pathname.startsWith('/onboarding');
+  const isForceChangePassword = location.pathname === '/force-change-password';
 
-  if (user && !isOnOnboarding) {
+  if (user && user.must_change_password && !isForceChangePassword) {
+    return <Navigate to='/force-change-password' replace />;
+  }
+
+  if (user && !user.must_change_password && isForceChangePassword) {
+    return <Navigate to='/' replace />;
+  }
+
+  if (user && !isOnOnboarding && !isForceChangePassword) {
     if (user.role === 'student' && user.onboarding_step !== 'done') {
       return <Navigate to={`/onboarding/${user.onboarding_step}`} replace />;
     }

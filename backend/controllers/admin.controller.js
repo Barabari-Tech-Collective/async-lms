@@ -1,10 +1,13 @@
 const serverError = require('../utils/serverError');
 const pool = require('../config/pg');
 const path = require('path');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { withS3Prefix } = require('../utils/s3');
+const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { withS3Prefix, s3 } = require('../utils/s3');
 const slugify = require('../utils/slugify');
 const { logAction } = require('../utils/auditLogger');
+const moment = require('moment-timezone');
+const { calculateSubjectProgress } = require('../utils/progress');
+const bcrypt = require('bcrypt');
 
 // ============================================
 // EXISTING ADMIN FEATURES (Keep these!)
@@ -14,17 +17,17 @@ exports.getAdminStats = async (req, res) => {
   try {
     const queries = [
       pool.query(
-        `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1`,
+        `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
         ['STUDENT'],
       ),
       pool.query('SELECT COUNT(*) FROM colleges'),
       pool.query('SELECT COUNT(*) FROM subjects'),
       pool.query(
-        `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1`,
+        `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
         ['FACILITATOR'],
       ),
       pool.query(
-        'SELECT full_name, email, created_at FROM users ORDER BY created_at DESC LIMIT 5',
+        'SELECT full_name, email, created_at FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 5',
       ),
     ];
 
@@ -41,9 +44,7 @@ exports.getAdminStats = async (req, res) => {
       recentActivity: recentUsers.rows,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Error fetching dashboard data' });
+    res.status(500).json({ message: 'Error fetching dashboard data' });
   }
 };
 
@@ -86,9 +87,10 @@ exports.getAdminAnalytics = async (req, res) => {
       `),
       // 4. Students per college (top 10)
       pool.query(`
-        SELECT c.name AS college_name, COUNT(sp.user_id) AS student_count
+        SELECT c.name AS college_name, COUNT(u.id) AS student_count
         FROM colleges c
         LEFT JOIN student_profiles sp ON sp.college_id = c.id
+        LEFT JOIN users u ON sp.user_id = u.id AND u.deleted_at IS NULL
         GROUP BY c.id, c.name
         ORDER BY student_count DESC
         LIMIT 10
@@ -99,6 +101,7 @@ exports.getAdminAnalytics = async (req, res) => {
         FROM users u
         JOIN roles r ON r.id = u.role_id
         WHERE r.role_key = 'STUDENT'
+          AND u.deleted_at IS NULL
           AND u.created_at >= NOW() - INTERVAL '7 days'
         GROUP BY DATE(u.created_at), label
         ORDER BY DATE(u.created_at)
@@ -170,13 +173,161 @@ exports.getAdminAnalytics = async (req, res) => {
       },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Error fetching analytics' });
+    res.status(500).json({ message: 'Error fetching analytics' });
   }
 };
 
-// Get all students with their college details
+// ── Student Registrations Chart (dynamic date range) ───────────────────────
+// GET /admin/analytics/registrations?days=30
+// GET /admin/analytics/registrations?from=2026-08-01&to=2026-08-18
+
+exports.getStudentRegistrations = async (req, res) => {
+  try {
+    let { days, from, to } = req.query;
+
+    let startDate, endDate, groupBy;
+
+    if (from && to) {
+      // Custom date range
+      const startStr = /^\d{4}-\d{2}-\d{2}$/.test(from) ? `${from}T00:00:00.000Z` : from;
+      const endStr = /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to;
+
+      startDate = new Date(startStr);
+      endDate = new Date(endStr);
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || startDate > endDate) {
+        return res.status(400).json({ success: false, message: 'Invalid date range. "from" must be before "to".' });
+      }
+      // Clamp to max 365 days
+      const diffDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      if (diffDays > 365) {
+        return res.status(400).json({ success: false, message: 'Date range cannot exceed 365 days.' });
+      }
+      groupBy = diffDays > 90 ? 'month' : 'day';
+    } else {
+      // Preset days
+      const numDays = Math.max(1, Math.min(parseInt(days) || 7, 365));
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - numDays);
+      groupBy = numDays > 90 ? 'month' : 'day';
+    }
+
+    const labelFormat = groupBy === 'month' ? 'Mon YYYY' : 'Mon DD';
+    const truncUnit = groupBy === 'month' ? 'month' : 'day';
+
+    const result = await pool.query(
+      `SELECT
+         TO_CHAR(DATE_TRUNC($1, u.created_at), $2) AS label,
+         COUNT(*) AS count
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       WHERE r.role_key = 'STUDENT'
+         AND u.created_at >= $3
+         AND u.created_at <= $4
+       GROUP BY DATE_TRUNC($1, u.created_at)
+       ORDER BY DATE_TRUNC($1, u.created_at)`,
+      [truncUnit, labelFormat, startDate.toISOString(), endDate.toISOString()]
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        registrations: result.rows.map((r) => ({
+          label: r.label,
+          count: parseInt(r.count),
+        })),
+        meta: {
+          from: startDate.toISOString().split('T')[0],
+          to: endDate.toISOString().split('T')[0],
+          groupBy,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching student registrations:', error);
+    res.status(500).json({ success: false, message: 'Error fetching student registrations' });
+  }
+};
+
+exports.getActiveUsersTimeline = async (req, res) => {
+  try {
+    let { days, from, to } = req.query;
+
+    let startDate, endDate, groupBy;
+
+    if (from && to) {
+      // Custom date range
+      const startStr = /^\d{4}-\d{2}-\d{2}$/.test(from) ? `${from}T00:00:00.000Z` : from;
+      const endStr = /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999Z` : to;
+
+      startDate = new Date(startStr);
+      endDate = new Date(endStr);
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || startDate > endDate) {
+        return res.status(400).json({ success: false, message: 'Invalid date range. "from" must be before "to".' });
+      }
+      // Clamp to max 365 days
+      const diffDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      if (diffDays > 365) {
+        return res.status(400).json({ success: false, message: 'Date range cannot exceed 365 days.' });
+      }
+      groupBy = diffDays > 90 ? 'month' : 'day';
+    } else {
+      // Preset days
+      const numDays = Math.max(1, Math.min(parseInt(days) || 7, 365));
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - numDays);
+      groupBy = numDays > 90 ? 'month' : 'day';
+    }
+
+    const labelFormat = groupBy === 'month' ? 'Mon YYYY' : 'Mon DD';
+    const truncUnit = groupBy === 'month' ? 'month' : 'day';
+
+    const result = await pool.query(
+      `SELECT
+         TO_CHAR(DATE_TRUNC($1, active_actions.activity_date), $2) AS label,
+         COUNT(DISTINCT active_actions.user_id) AS count
+       FROM (
+         SELECT user_id, completed_at AS activity_date FROM public.user_subtopic_progress WHERE completed_at >= $3 AND completed_at <= $4
+         UNION ALL
+         SELECT user_id, attempted_at AS activity_date FROM public.quiz_attempts WHERE attempted_at >= $3 AND attempted_at <= $4
+         UNION ALL
+         SELECT user_id, submitted_at AS activity_date FROM public.exercise_submissions WHERE submitted_at >= $3 AND submitted_at <= $4
+         UNION ALL
+         SELECT user_id, submitted_at AS activity_date FROM public.assignment_submissions WHERE submitted_at >= $3 AND submitted_at <= $4
+         UNION ALL
+         SELECT user_id, submitted_at AS activity_date FROM public.project_submissions WHERE submitted_at >= $3 AND submitted_at <= $4
+         UNION ALL
+         SELECT student_id AS user_id, submitted_at AS activity_date FROM public.college_assignment_submissions WHERE submitted_at >= $3 AND submitted_at <= $4
+       ) active_actions
+       JOIN public.users u ON active_actions.user_id = u.id
+       JOIN public.roles r ON u.role_id = r.id
+       WHERE r.role_key = 'STUDENT'
+       GROUP BY DATE_TRUNC($1, active_actions.activity_date)
+       ORDER BY DATE_TRUNC($1, active_actions.activity_date)`,
+      [truncUnit, labelFormat, startDate.toISOString(), endDate.toISOString()]
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        activeUsers: result.rows.map((r) => ({
+          label: r.label,
+          count: parseInt(r.count),
+        })),
+        meta: {
+          from: startDate.toISOString().split('T')[0],
+          to: endDate.toISOString().split('T')[0],
+          groupBy,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching active users timeline:', error);
+    res.status(500).json({ success: false, message: 'Error fetching active users timeline' });
+  }
+};
+
 exports.getAllStudents = async (req, res) => {
   try {
     const query = `
@@ -340,7 +491,12 @@ exports.getAdminSubjectStructure = async (req, res) => {
           description: row.topic_description,
           order_index: row.topic_order,
           capstone: row.capstone_id
-            ? { id: row.capstone_id, title: row.capstone_title, instructions: row.capstone_instructions, max_score: row.capstone_max_score }
+            ? {
+                id: row.capstone_id,
+                title: row.capstone_title,
+                instructions: row.capstone_instructions,
+                max_score: row.capstone_max_score,
+              }
             : null,
           units: new Map(),
         });
@@ -491,7 +647,13 @@ exports.createTopic = async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    logAction({ req, action: 'CREATE', entityType: 'topic', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'topic',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -557,7 +719,13 @@ exports.updateTopic = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'topic', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'topic',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -660,7 +828,13 @@ exports.deleteTopic = async (req, res) => {
 
     await client.query('COMMIT');
 
-    logAction({ req, action: 'DELETE', entityType: 'topic', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'topic',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -719,7 +893,13 @@ exports.createUnit = async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    logAction({ req, action: 'CREATE', entityType: 'unit', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'unit',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -798,7 +978,13 @@ exports.updateUnit = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'unit', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'unit',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -884,7 +1070,13 @@ exports.deleteUnit = async (req, res) => {
 
     await client.query('COMMIT');
 
-    logAction({ req, action: 'DELETE', entityType: 'unit', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'unit',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -942,7 +1134,13 @@ exports.createSubtopic = async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    logAction({ req, action: 'CREATE', entityType: 'subtopic', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'subtopic',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -1021,7 +1219,13 @@ exports.updateSubtopic = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'subtopic', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'subtopic',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -1078,7 +1282,13 @@ exports.deleteSubtopic = async (req, res) => {
 
     await client.query('COMMIT');
 
-    logAction({ req, action: 'DELETE', entityType: 'subtopic', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'subtopic',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -1181,7 +1391,16 @@ exports.createLessonContent = async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    logAction({ req, action: 'CREATE', entityType: 'lesson_content', entityId: result.rows[0].id, details: { content_type: result.rows[0].content_type, subtopic_id: result.rows[0].subtopic_id } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'lesson_content',
+      entityId: result.rows[0].id,
+      details: {
+        content_type: result.rows[0].content_type,
+        subtopic_id: result.rows[0].subtopic_id,
+      },
+    });
 
     res.status(201).json({
       success: true,
@@ -1265,7 +1484,13 @@ exports.updateLessonContent = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'lesson_content', entityId: result.rows[0].id, details: { content_type: result.rows[0].content_type } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'lesson_content',
+      entityId: result.rows[0].id,
+      details: { content_type: result.rows[0].content_type },
+    });
 
     res.json({
       success: true,
@@ -1286,7 +1511,8 @@ exports.deleteLessonContent = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const query = 'UPDATE lesson_content SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
+    const query =
+      'UPDATE lesson_content SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
     const result = await pool.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -1296,7 +1522,16 @@ exports.deleteLessonContent = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'DELETE', entityType: 'lesson_content', entityId: id, details: { content_type: result.rows[0].content_type, subtopic_id: result.rows[0].subtopic_id } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'lesson_content',
+      entityId: id,
+      details: {
+        content_type: result.rows[0].content_type,
+        subtopic_id: result.rows[0].subtopic_id,
+      },
+    });
 
     res.json({
       success: true,
@@ -1340,7 +1575,13 @@ exports.publishLessonContent = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'PUBLISH', entityType: 'lesson_content', entityId: id, details: { is_published } });
+    logAction({
+      req,
+      action: 'PUBLISH',
+      entityType: 'lesson_content',
+      entityId: id,
+      details: { is_published },
+    });
     res.json({
       success: true,
       message: `Lesson content ${
@@ -1396,7 +1637,13 @@ exports.createQuiz = async (req, res) => {
       QUIZ_MAX_SCORE,
     ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'quiz', entityId: result.rows[0].id, details: { unit_id: result.rows[0].unit_id } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'quiz',
+      entityId: result.rows[0].id,
+      details: { unit_id: result.rows[0].unit_id },
+    });
 
     res.status(201).json({
       success: true,
@@ -1452,7 +1699,13 @@ exports.updateQuiz = async (req, res) => {
     const result = await pool.query(query, values);
 
     if (result.rows.length > 0) {
-      logAction({ req, action: 'UPDATE', entityType: 'quiz', entityId: result.rows[0].id, details: { unit_id: result.rows[0].unit_id } });
+      logAction({
+        req,
+        action: 'UPDATE',
+        entityType: 'quiz',
+        entityId: result.rows[0].id,
+        details: { unit_id: result.rows[0].unit_id },
+      });
     }
 
     res.json({
@@ -1502,7 +1755,13 @@ exports.deleteQuiz = async (req, res) => {
 
     await client.query('COMMIT');
 
-    logAction({ req, action: 'DELETE', entityType: 'quiz', entityId: id, details: { unit_id: result.rows[0].unit_id } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'quiz',
+      entityId: id,
+      details: { unit_id: result.rows[0].unit_id },
+    });
 
     res.json({
       success: true,
@@ -1528,10 +1787,11 @@ exports.getExercise = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, title, instructions, max_score, subtopic_id, language, initial_files, test_cases, tasks FROM exercises WHERE id = $1 AND is_deleted = false',
+      'SELECT id, title, instructions, max_score, subtopic_id, language, initial_files, test_cases, tasks, rubric FROM exercises WHERE id = $1 AND is_deleted = false',
       [id],
     );
-    if (!result.rowCount) return res.status(404).json({ message: 'Exercise not found' });
+    if (!result.rowCount)
+      return res.status(404).json({ message: 'Exercise not found' });
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     res.status(500).json({ message: 'Internal server error' });
@@ -1540,7 +1800,17 @@ exports.getExercise = async (req, res) => {
 
 exports.createExercise = async (req, res) => {
   try {
-    const { subtopic_id, title, instructions, max_score, language, initial_files, test_cases, tasks } = req.body;
+    const {
+      subtopic_id,
+      title,
+      instructions,
+      max_score,
+      language,
+      initial_files,
+      test_cases,
+      tasks,
+      rubric,
+    } = req.body;
 
     if (!subtopic_id || !title || !max_score) {
       return res.status(400).json({
@@ -1550,8 +1820,8 @@ exports.createExercise = async (req, res) => {
     }
 
     const query = `
-      INSERT INTO exercises (subtopic_id, title, instructions, max_score, language, initial_files, test_cases, tasks)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO exercises (subtopic_id, title, instructions, max_score, language, initial_files, test_cases, tasks, rubric)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *;
     `;
 
@@ -1564,9 +1834,16 @@ exports.createExercise = async (req, res) => {
       JSON.stringify(initial_files || []),
       JSON.stringify(test_cases || []),
       JSON.stringify(tasks || []),
+      rubric ? JSON.stringify(rubric) : null,
     ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'exercise', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'exercise',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -1585,7 +1862,16 @@ exports.createExercise = async (req, res) => {
 exports.updateExercise = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, instructions, max_score, language, initial_files, test_cases, tasks } = req.body;
+    const {
+      title,
+      instructions,
+      max_score,
+      language,
+      initial_files,
+      test_cases,
+      tasks,
+      rubric,
+    } = req.body;
 
     const updates = [];
     const values = [];
@@ -1619,6 +1905,10 @@ exports.updateExercise = async (req, res) => {
       updates.push(`tasks = $${paramCount++}`);
       values.push(JSON.stringify(tasks));
     }
+    if (rubric !== undefined) {
+      updates.push(`rubric = $${paramCount++}`);
+      values.push(rubric ? JSON.stringify(rubric) : null);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({
@@ -1640,7 +1930,13 @@ exports.updateExercise = async (req, res) => {
     const result = await pool.query(query, values);
 
     if (result.rows.length > 0) {
-      logAction({ req, action: 'UPDATE', entityType: 'exercise', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+      logAction({
+        req,
+        action: 'UPDATE',
+        entityType: 'exercise',
+        entityId: result.rows[0].id,
+        details: { title: result.rows[0].title },
+      });
     }
 
     res.json({
@@ -1661,7 +1957,8 @@ exports.deleteExercise = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const query = 'UPDATE exercises SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
+    const query =
+      'UPDATE exercises SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
     const result = await pool.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -1671,7 +1968,13 @@ exports.deleteExercise = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'DELETE', entityType: 'exercise', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'exercise',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -1697,7 +2000,8 @@ exports.getAssignment = async (req, res) => {
       'SELECT id, title, instructions, max_score, unit_id FROM assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
-    if (!result.rowCount) return res.status(404).json({ message: 'Assignment not found' });
+    if (!result.rowCount)
+      return res.status(404).json({ message: 'Assignment not found' });
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     res.status(500).json({ message: 'Internal server error' });
@@ -1709,7 +2013,15 @@ const ASSIGNMENT_MAX_SCORE = 100;
 
 exports.createAssignment = async (req, res) => {
   try {
-    const { unit_id, title, instructions, max_score, evaluator_type, test_cases } = req.body;
+    const {
+      unit_id,
+      title,
+      instructions,
+      max_score,
+      evaluator_type,
+      test_cases,
+      rubric,
+    } = req.body;
 
     if (!unit_id || !title) {
       return res.status(400).json({
@@ -1719,18 +2031,25 @@ exports.createAssignment = async (req, res) => {
     }
 
     const query = `
-      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *;
     `;
 
     let testCasesObj = test_cases;
     if (typeof test_cases === 'string') {
-        try {
-            testCasesObj = JSON.parse(test_cases);
-        } catch (e) {
-            // keep as string or handle error
-        }
+      try {
+        testCasesObj = JSON.parse(test_cases);
+      } catch (e) {
+        // keep as string or handle error
+      }
+    }
+
+    let rubricObj = rubric;
+    if (typeof rubric === 'string') {
+      try {
+        rubricObj = JSON.parse(rubric);
+      } catch (e) {}
     }
 
     const result = await pool.query(query, [
@@ -1739,10 +2058,17 @@ exports.createAssignment = async (req, res) => {
       instructions,
       max_score || ASSIGNMENT_MAX_SCORE,
       evaluator_type || null,
-      testCasesObj || null
+      testCasesObj ? JSON.stringify(testCasesObj) : null,
+      rubricObj ? JSON.stringify(rubricObj) : null,
     ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'assignment', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'assignment',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -1761,7 +2087,14 @@ exports.createAssignment = async (req, res) => {
 exports.updateAssignment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, instructions, max_score, test_cases, evaluator_type } = req.body;
+    const {
+      title,
+      instructions,
+      max_score,
+      test_cases,
+      evaluator_type,
+      rubric,
+    } = req.body;
 
     const updates = [];
     const values = [];
@@ -1786,10 +2119,22 @@ exports.updateAssignment = async (req, res) => {
     if (test_cases !== undefined) {
       let testCasesObj = test_cases;
       if (typeof test_cases === 'string') {
-        try { testCasesObj = JSON.parse(test_cases); } catch (e) {}
+        try {
+          testCasesObj = JSON.parse(test_cases);
+        } catch (e) {}
       }
       updates.push(`test_cases = $${paramCount++}`);
-      values.push(testCasesObj);
+      values.push(testCasesObj ? JSON.stringify(testCasesObj) : null);
+    }
+    if (rubric !== undefined) {
+      let rubricObj = rubric;
+      if (typeof rubric === 'string') {
+        try {
+          rubricObj = JSON.parse(rubric);
+        } catch (e) {}
+      }
+      updates.push(`rubric = $${paramCount++}`);
+      values.push(rubricObj ? JSON.stringify(rubricObj) : null);
     }
 
     if (updates.length === 0) {
@@ -1812,7 +2157,13 @@ exports.updateAssignment = async (req, res) => {
     const result = await pool.query(query, values);
 
     if (result.rows.length > 0) {
-      logAction({ req, action: 'UPDATE', entityType: 'assignment', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+      logAction({
+        req,
+        action: 'UPDATE',
+        entityType: 'assignment',
+        entityId: result.rows[0].id,
+        details: { title: result.rows[0].title },
+      });
     }
 
     res.json({
@@ -1833,7 +2184,8 @@ exports.deleteAssignment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const query = 'UPDATE assignments SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
+    const query =
+      'UPDATE assignments SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
     const result = await pool.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -1843,7 +2195,13 @@ exports.deleteAssignment = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'DELETE', entityType: 'assignment', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'assignment',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -1879,9 +2237,19 @@ exports.createProject = async (req, res) => {
       RETURNING *;
     `;
 
-    const result = await pool.query(query, [topic_id, title, instructions || null]);
+    const result = await pool.query(query, [
+      topic_id,
+      title,
+      instructions || null,
+    ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'project', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'project',
+      entityId: result.rows[0].id,
+      details: { title: result.rows[0].title },
+    });
 
     res.status(201).json({
       success: true,
@@ -1935,7 +2303,13 @@ exports.updateProject = async (req, res) => {
     const result = await pool.query(query, values);
 
     if (result.rows.length > 0) {
-      logAction({ req, action: 'UPDATE', entityType: 'project', entityId: result.rows[0].id, details: { title: result.rows[0].title } });
+      logAction({
+        req,
+        action: 'UPDATE',
+        entityType: 'project',
+        entityId: result.rows[0].id,
+        details: { title: result.rows[0].title },
+      });
     }
 
     res.json({
@@ -1956,7 +2330,8 @@ exports.deleteProject = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const query = 'UPDATE projects SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
+    const query =
+      'UPDATE projects SET is_deleted = true WHERE id = $1 AND is_deleted = false RETURNING *;';
     const result = await pool.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -1966,7 +2341,13 @@ exports.deleteProject = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'DELETE', entityType: 'project', entityId: id, details: { title: result.rows[0].title } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'project',
+      entityId: id,
+      details: { title: result.rows[0].title },
+    });
 
     res.json({
       success: true,
@@ -2027,7 +2408,13 @@ exports.createQuizQuestion = async (req, res) => {
       order_index || null,
     ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'quiz_question', entityId: result.rows[0].id, details: { quiz_id: result.rows[0].quiz_id } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'quiz_question',
+      entityId: result.rows[0].id,
+      details: { quiz_id: result.rows[0].quiz_id },
+    });
 
     res.status(201).json({
       success: true,
@@ -2103,7 +2490,13 @@ exports.updateQuizQuestion = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'quiz_question', entityId: result.rows[0].id, details: { quiz_id: result.rows[0].quiz_id } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'quiz_question',
+      entityId: result.rows[0].id,
+      details: { quiz_id: result.rows[0].quiz_id },
+    });
 
     res.json({
       success: true,
@@ -2151,7 +2544,13 @@ exports.deleteQuizQuestion = async (req, res) => {
 
     await client.query('COMMIT');
 
-    logAction({ req, action: 'DELETE', entityType: 'quiz_question', entityId: id, details: { quiz_id: result.rows[0].quiz_id } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'quiz_question',
+      entityId: id,
+      details: { quiz_id: result.rows[0].quiz_id },
+    });
 
     res.json({
       success: true,
@@ -2246,7 +2645,13 @@ exports.createQuizQuestionOption = async (req, res) => {
       order_index || null,
     ]);
 
-    logAction({ req, action: 'CREATE', entityType: 'quiz_question_option', entityId: result.rows[0].id, details: { question_id: result.rows[0].question_id } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'quiz_question_option',
+      entityId: result.rows[0].id,
+      details: { question_id: result.rows[0].question_id },
+    });
 
     res.status(201).json({
       success: true,
@@ -2313,7 +2718,13 @@ exports.updateQuizQuestionOption = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'quiz_question_option', entityId: result.rows[0].id, details: { question_id: result.rows[0].question_id } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'quiz_question_option',
+      entityId: result.rows[0].id,
+      details: { question_id: result.rows[0].question_id },
+    });
 
     res.json({
       success: true,
@@ -2348,7 +2759,13 @@ exports.deleteQuizQuestionOption = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'DELETE', entityType: 'quiz_question_option', entityId: id, details: { question_id: result.rows[0].question_id } });
+    logAction({
+      req,
+      action: 'DELETE',
+      entityType: 'quiz_question_option',
+      entityId: id,
+      details: { question_id: result.rows[0].question_id },
+    });
 
     res.json({
       success: true,
@@ -2387,13 +2804,15 @@ exports.uploadLessonMarkdown = async (req, res) => {
       });
     }
 
-    const originalExt = path.extname(req.file.originalname) || '.md';
-    const safeExt = originalExt.toLowerCase() === '.md' ? '.md' : '.md';
-    const key = withS3Prefix(`${prefix}${Date.now()}-${req.file.originalname
+    // Every lesson upload is stored as markdown regardless of the source
+    // filename's extension — strip whatever extension it had before adding
+    // ours, so a "notes.md" upload doesn't end up keyed as "notes.md.md".
+    const baseName = path
+      .basename(req.file.originalname, path.extname(req.file.originalname))
       .replace(/\s+/g, '-')
-      .replace(/[^a-zA-Z0-9._-]/g, '')}${safeExt}`);
+      .replace(/[^a-zA-Z0-9._-]/g, '');
+    const key = withS3Prefix(`${prefix}${Date.now()}-${baseName}.md`);
 
-    const s3 = new S3Client({ region });
     await s3.send(
       new PutObjectCommand({
         Bucket: bucket,
@@ -2405,7 +2824,13 @@ exports.uploadLessonMarkdown = async (req, res) => {
 
     const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
-    logAction({ req, action: 'CREATE', entityType: 'lesson_markdown_upload', entityId: null, details: { url } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'lesson_markdown_upload',
+      entityId: null,
+      details: { url },
+    });
     res.json({
       success: true,
       url,
@@ -2444,18 +2869,20 @@ exports.uploadFile = async (req, res) => {
     }
 
     const isImage = req.file.mimetype.startsWith('image/');
-    const bucket = (isImage && publicBucket) ? publicBucket : privateBucket;
+    const bucket = isImage && publicBucket ? publicBucket : privateBucket;
     const prefix = isImage
-      ? (process.env.AWS_S3_PREFIX_PUBLIC_IMAGES || 'uploads/')
-      : (process.env.AWS_S3_PREFIX_FILES || 'uploads/');
+      ? process.env.AWS_S3_PREFIX_PUBLIC_IMAGES || 'uploads/'
+      : process.env.AWS_S3_PREFIX_FILES || 'uploads/';
 
     const originalExt = path.extname(req.file.originalname) || '';
-    const baseName = path.basename(req.file.originalname, originalExt)
+    const baseName = path
+      .basename(req.file.originalname, originalExt)
       .replace(/\s+/g, '-')
       .replace(/[^a-zA-Z0-9_-]/g, '');
-    const key = withS3Prefix(`${prefix}${Date.now()}-${baseName}${originalExt}`);
+    const key = withS3Prefix(
+      `${prefix}${Date.now()}-${baseName}${originalExt}`,
+    );
 
-    const s3 = new S3Client({ region });
     await s3.send(
       new PutObjectCommand({
         Bucket: bucket,
@@ -2467,7 +2894,13 @@ exports.uploadFile = async (req, res) => {
 
     const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
-    logAction({ req, action: 'CREATE', entityType: 'file_upload', entityId: null, details: { url } });
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'file_upload',
+      entityId: null,
+      details: { url },
+    });
     res.json({
       success: true,
       url,
@@ -2588,21 +3021,10 @@ exports.getStudentProgress = async (req, res) => {
 
     const result = await pool.query(query, [userId, subjectId]);
 
-    // Calculate overall progress
-    let totalSubtopics = 0;
-    let completedSubtopics = 0;
-
-    result.rows.forEach((topic) => {
-      topic.subtopics.forEach((subtopic) => {
-        totalSubtopics++;
-        if (subtopic.is_completed) completedSubtopics++;
-      });
-    });
-
-    const overallProgress =
-      totalSubtopics > 0
-        ? Math.round((completedSubtopics / totalSubtopics) * 100)
-        : 0;
+    const progressData = await calculateSubjectProgress(userId, subjectId);
+    const overallProgress = progressData.percent;
+    const totalSubtopics = progressData.total;
+    const completedSubtopics = progressData.completed;
 
     res.json({
       success: true,
@@ -2630,7 +3052,10 @@ exports.getAllStudentsProgressSummary = async (req, res) => {
   try {
     const { subjectId } = req.query;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+    const pageSize = Math.min(
+      200,
+      Math.max(1, parseInt(req.query.pageSize, 10) || 50),
+    );
     const offset = (page - 1) * pageSize;
 
     let query = `
@@ -2651,6 +3076,7 @@ exports.getAllStudentsProgressSummary = async (req, res) => {
       LEFT JOIN points_log pl ON u.id = pl.user_id
       LEFT JOIN user_streaks us ON u.id = us.user_id
       WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+        AND u.deleted_at IS NULL
     `;
 
     const params = [];
@@ -2760,6 +3186,7 @@ exports.getLockControlOverview = async (req, res) => {
         FROM users u
         INNER JOIN student_profiles sp ON u.id = sp.user_id
         WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+          AND u.deleted_at IS NULL
           AND ($1::uuid IS NULL OR sp.college_id = $1)
           AND ($2::int IS NULL OR sp.year = $2)
       ),
@@ -2902,9 +3329,17 @@ exports.getLockControlOverview = async (req, res) => {
 exports.setLockControlTopic = async (req, res) => {
   try {
     const { topicId, action } = req.params;
-    const { collegeId, batch } = req.query;
+    const collegeId = req.query.collegeId || req.body.collegeId;
+    const batch = req.query.batch || req.body.batch;
 
-    if (!['lock', 'unlock'].includes(action)) {
+    let isUnlocked;
+    if (action === 'unlock') {
+      isUnlocked = true;
+    } else if (action === 'lock') {
+      isUnlocked = false;
+    } else if (action === 'toggle' || action === 'set') {
+      isUnlocked = req.body.unlock !== undefined ? !!req.body.unlock : !!req.body.is_unlocked;
+    } else {
       return res.status(400).json({
         success: false,
         message: 'Invalid action',
@@ -2913,7 +3348,6 @@ exports.setLockControlTopic = async (req, res) => {
 
     const collegeParam = collegeId || null;
     const batchParam = batch ? parseInt(batch, 10) : null;
-    const isUnlocked = action === 'unlock';
     const isLocked = !isUnlocked;
 
     // 1. Update existing students' progress rows
@@ -2923,6 +3357,7 @@ exports.setLockControlTopic = async (req, res) => {
         FROM users u
         INNER JOIN student_profiles sp ON u.id = sp.user_id
         WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+          AND u.deleted_at IS NULL
           AND ($1::uuid IS NULL OR sp.college_id = $1)
           AND ($2::int IS NULL OR sp.year = $2)
       ),
@@ -2963,10 +3398,16 @@ exports.setLockControlTopic = async (req, res) => {
       console.warn('cohort_admin_locks upsert skipped:', intentErr.message);
     }
 
-    logAction({ req, action: isUnlocked ? 'UNLOCK' : 'LOCK', entityType: 'topic', entityId: topicId, details: { collegeId, batch } });
+    logAction({
+      req,
+      action: isUnlocked ? 'UNLOCK' : 'LOCK',
+      entityType: 'topic',
+      entityId: topicId,
+      details: { collegeId, batch },
+    });
     res.json({
       success: true,
-      message: `Topic ${action}ed successfully`,
+      message: `Topic ${isUnlocked ? 'unlocked' : 'locked'} successfully`,
     });
   } catch (error) {
     console.error('Error updating topic lock:', error.message, error.stack);
@@ -2984,9 +3425,17 @@ exports.setLockControlTopic = async (req, res) => {
 exports.setLockControlSubtopic = async (req, res) => {
   try {
     const { subtopicId, action } = req.params;
-    const { collegeId, batch } = req.query;
+    const collegeId = req.query.collegeId || req.body.collegeId;
+    const batch = req.query.batch || req.body.batch;
 
-    if (!['lock', 'unlock'].includes(action)) {
+    let isUnlocked;
+    if (action === 'unlock') {
+      isUnlocked = true;
+    } else if (action === 'lock') {
+      isUnlocked = false;
+    } else if (action === 'toggle' || action === 'set') {
+      isUnlocked = req.body.unlock !== undefined ? !!req.body.unlock : !!req.body.is_unlocked;
+    } else {
       return res.status(400).json({
         success: false,
         message: 'Invalid action',
@@ -2995,7 +3444,6 @@ exports.setLockControlSubtopic = async (req, res) => {
 
     const collegeParam = collegeId || null;
     const batchParam = batch ? parseInt(batch, 10) : null;
-    const isUnlocked = action === 'unlock';
     const isLocked = !isUnlocked;
 
     // 1. Update existing students' progress rows
@@ -3005,6 +3453,7 @@ exports.setLockControlSubtopic = async (req, res) => {
         FROM users u
         INNER JOIN student_profiles sp ON u.id = sp.user_id
         WHERE u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')
+          AND u.deleted_at IS NULL
           AND ($1::uuid IS NULL OR sp.college_id = $1)
           AND ($2::int IS NULL OR sp.year = $2)
       )
@@ -3035,7 +3484,13 @@ exports.setLockControlSubtopic = async (req, res) => {
       console.warn('cohort_admin_locks upsert skipped:', intentErr.message);
     }
 
-    logAction({ req, action: isUnlocked ? 'UNLOCK' : 'LOCK', entityType: 'subtopic', entityId: subtopicId, details: { collegeId, batch } });
+    logAction({
+      req,
+      action: isUnlocked ? 'UNLOCK' : 'LOCK',
+      entityType: 'subtopic',
+      entityId: subtopicId,
+      details: { collegeId, batch },
+    });
     res.json({
       success: true,
       message: `Subtopic ${action}ed successfully`,
@@ -3225,7 +3680,9 @@ exports.updateLeaderboards = async (req, res) => {
 
     if (type === 'all') {
       // Update all topic leaderboards
-      const topics = await pool.query('SELECT id FROM topics WHERE is_deleted = false');
+      const topics = await pool.query(
+        'SELECT id FROM topics WHERE is_deleted = false',
+      );
       for (const topic of topics.rows) {
         await pool.query('SELECT update_topic_leaderboard($1)', [topic.id]);
       }
@@ -3237,7 +3694,13 @@ exports.updateLeaderboards = async (req, res) => {
       }
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'leaderboard', entityId: null, details: { type, id } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'leaderboard',
+      entityId: null,
+      details: { type, id },
+    });
     res.json({
       success: true,
       message: 'Leaderboards updated successfully',
@@ -3285,7 +3748,13 @@ exports.verifyUser = async (req, res) => {
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'user', entityId: id, details: { is_verified } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'user',
+      entityId: id,
+      details: { is_verified },
+    });
     res.json({
       success: true,
       message: `User ${is_verified ? 'verified' : 'unverified'} successfully`,
@@ -3317,37 +3786,113 @@ exports.getStudentProfile = async (req, res) => {
          JOIN roles r ON r.id = u.role_id
          LEFT JOIN student_profiles sp ON u.id = sp.user_id
          LEFT JOIN colleges c ON sp.college_id = c.id
-         WHERE u.id = $1 AND r.role_key = 'STUDENT'`,
+         WHERE u.id = $1 AND r.role_key = 'STUDENT' AND u.deleted_at IS NULL`,
         [id],
       ),
       pool.query(
         `SELECT
            COUNT(DISTINCT us.subject_id)::int AS enrolled_subjects,
-           COALESCE((SELECT COUNT(*)::int FROM user_subtopic_progress WHERE user_id = $1 AND is_completed = true), 0) AS completed_subtopics,
+           COALESCE((
+             SELECT COUNT(DISTINCT lc.subtopic_id)::int 
+             FROM public.user_lesson_progress ulp
+             INNER JOIN public.lesson_content lc ON lc.id = ulp.lesson_content_id
+             WHERE ulp.user_id = $1 AND ulp.is_completed = true AND lc.is_deleted = false
+           ), 0) AS completed_subtopics,
            COALESCE((SELECT SUM(points)::int FROM points_log WHERE user_id = $1), 0) AS total_points,
            COALESCE(MAX(str.current_streak), 0)::int AS current_streak,
            COALESCE(MAX(str.longest_streak), 0)::int AS longest_streak
          FROM users u
          LEFT JOIN user_subjects us ON u.id = us.user_id
          LEFT JOIN user_streaks str ON u.id = str.user_id
-         WHERE u.id = $1`,
+         WHERE u.id = $1 AND u.deleted_at IS NULL`,
         [id],
       ),
       pool.query(
         `SELECT s.id, s.name,
-           COALESCE((
-             SELECT COUNT(*)::int FROM user_subtopic_progress usp
-             JOIN subtopics st ON usp.subtopic_id = st.id AND st.is_deleted = false
+           (
+             SELECT COUNT(lc.id)::int FROM lesson_content lc
+             JOIN subtopics st ON lc.subtopic_id = st.id AND st.is_deleted = false
              JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
              JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
-             WHERE usp.user_id = $1 AND t.subject_id = s.id AND usp.is_completed = true
-           ), 0) AS completed_subtopics,
-           COALESCE((
-             SELECT COUNT(*)::int FROM subtopics st
+             WHERE t.subject_id = s.id AND lc.is_published = true AND lc.is_deleted = false
+           ) + 
+           (
+             SELECT COUNT(q.id)::int FROM quizzes q
+             JOIN units un ON q.unit_id = un.id AND un.is_deleted = false
+             JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+             WHERE t.subject_id = s.id AND q.is_deleted = false
+           ) +
+           (
+             SELECT COUNT(e.id)::int FROM exercises e
+             JOIN subtopics st ON e.subtopic_id = st.id AND st.is_deleted = false
              JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
              JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
-             WHERE t.subject_id = s.id AND st.is_deleted = false
-           ), 0) AS total_subtopics
+             WHERE t.subject_id = s.id AND e.is_deleted = false
+           ) +
+           (
+             SELECT COUNT(a.id)::int FROM assignments a
+             JOIN units un ON a.unit_id = un.id AND un.is_deleted = false
+             JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+             WHERE t.subject_id = s.id AND a.is_deleted = false
+           ) +
+           (
+             SELECT COUNT(p.id)::int FROM projects p
+             JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+             WHERE t.subject_id = s.id AND p.is_deleted = false
+           ) as total_subtopics,
+
+           (
+             SELECT COUNT(DISTINCT ulp.lesson_content_id)::int FROM user_lesson_progress ulp
+             WHERE ulp.user_id = $1 AND ulp.is_completed = true 
+               AND ulp.lesson_content_id IN (
+                 SELECT lc.id FROM lesson_content lc
+                 JOIN subtopics st ON lc.subtopic_id = st.id AND st.is_deleted = false
+                 JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
+                 JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+                 WHERE t.subject_id = s.id AND lc.is_published = true AND lc.is_deleted = false
+               )
+           ) +
+           (
+             SELECT COUNT(DISTINCT qa.quiz_id)::int FROM quiz_attempts qa
+             WHERE qa.user_id = $1 AND qa.is_passed = true
+               AND qa.quiz_id IN (
+                 SELECT q.id FROM quizzes q
+                 JOIN units un ON q.unit_id = un.id AND un.is_deleted = false
+                 JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+                 WHERE t.subject_id = s.id AND q.is_deleted = false
+               )
+           ) +
+           (
+             SELECT COUNT(DISTINCT es.exercise_id)::int FROM exercise_submissions es
+             WHERE es.user_id = $1 AND es.is_passed = true
+               AND es.exercise_id IN (
+                 SELECT e.id FROM exercises e
+                 JOIN subtopics st ON e.subtopic_id = st.id AND st.is_deleted = false
+                 JOIN units un ON st.unit_id = un.id AND un.is_deleted = false
+                 JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+                 WHERE t.subject_id = s.id AND e.is_deleted = false
+               )
+           ) +
+           (
+             SELECT COUNT(DISTINCT asub.assignment_id)::int FROM assignment_submissions asub
+             WHERE asub.user_id = $1
+               AND asub.assignment_id IN (
+                 SELECT a.id FROM assignments a
+                 JOIN units un ON a.unit_id = un.id AND un.is_deleted = false
+                 JOIN topics t ON un.topic_id = t.id AND t.is_deleted = false
+                 WHERE t.subject_id = s.id AND a.is_deleted = false
+               )
+           ) +
+           (
+             SELECT COUNT(DISTINCT ps.project_id)::int FROM project_submissions ps
+             WHERE ps.user_id = $1
+               AND ps.project_id IN (
+                 SELECT p.id FROM projects p
+                 JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+                 WHERE t.subject_id = s.id AND p.is_deleted = false
+               )
+           ) as completed_subtopics,
+           us.progress_percent as progress_percent
          FROM user_subjects us
          JOIN subjects s ON us.subject_id = s.id
          WHERE us.user_id = $1
@@ -3360,13 +3905,7 @@ exports.getStudentProfile = async (req, res) => {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    const subjects = subjectsRes.rows.map((s) => ({
-      ...s,
-      progress_percent:
-        s.total_subtopics > 0
-          ? Math.round((s.completed_subtopics / s.total_subtopics) * 100)
-          : 0,
-    }));
+    const subjects = subjectsRes.rows;
 
     res.json({
       success: true,
@@ -3387,14 +3926,14 @@ exports.getFacilitatorProfile = async (req, res) => {
         `SELECT u.id, u.full_name, u.email, u.is_verified, u.created_at
          FROM users u
          JOIN roles r ON r.id = u.role_id
-         WHERE u.id = $1 AND r.role_key = 'FACILITATOR'`,
+         WHERE u.id = $1 AND r.role_key = 'FACILITATOR' AND u.deleted_at IS NULL`,
         [id],
       ),
       pool.query(
         `SELECT c.id, c.name, c.short_code
          FROM facilitator_colleges fc
          JOIN colleges c ON fc.college_id = c.id
-         WHERE fc.facilitator_id = $1
+         WHERE fc.facilitator_id = $1 AND fc.is_deleted = false
          ORDER BY c.name`,
         [id],
       ),
@@ -3402,7 +3941,7 @@ exports.getFacilitatorProfile = async (req, res) => {
         `SELECT DISTINCT s.id, s.name
          FROM facilitator_subjects fs
          JOIN subjects s ON fs.subject_id = s.id
-         WHERE fs.facilitator_id = $1
+         WHERE fs.facilitator_id = $1 AND fs.is_deleted = false AND s.is_deleted = false
          ORDER BY s.name`,
         [id],
       ),
@@ -3440,7 +3979,7 @@ exports.getCollegeDetail = async (req, res) => {
          FROM users u
          JOIN roles r ON r.id = u.role_id
          JOIN student_profiles sp ON sp.user_id = u.id
-         WHERE sp.college_id = $1 AND r.role_key = 'STUDENT'
+         WHERE sp.college_id = $1 AND r.role_key = 'STUDENT' AND u.deleted_at IS NULL
          ORDER BY u.created_at DESC`,
         [id],
       ),
@@ -3448,8 +3987,8 @@ exports.getCollegeDetail = async (req, res) => {
         `SELECT u.id, u.full_name, u.email, u.is_verified, u.created_at
          FROM users u
          JOIN roles r ON r.id = u.role_id
-         JOIN facilitator_colleges fc ON fc.facilitator_id = u.id
-         WHERE fc.college_id = $1 AND r.role_key = 'FACILITATOR'
+         JOIN facilitator_colleges fc ON fc.facilitator_id = u.id AND fc.is_deleted = false
+         WHERE fc.college_id = $1 AND r.role_key = 'FACILITATOR' AND u.deleted_at IS NULL
          ORDER BY u.created_at DESC`,
         [id],
       ),
@@ -3470,6 +4009,75 @@ exports.getCollegeDetail = async (req, res) => {
   } catch (err) {
     console.error('getCollegeDetail error:', err);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+// ============================================
+// CURRICULUM DEVELOPER MANAGEMENT
+// ============================================
+
+exports.createCurriculumDeveloper = async (req, res) => {
+  const { full_name, email, password, domain, role_focus, role: typedRole } = req.body;
+
+  if (!full_name || !email || !password) {
+    return res.status(400).json({ message: 'Full name, email, and password are required' });
+  }
+
+  const assignedRoleFocus = (role_focus || typedRole || '').trim();
+  const assignedDomain = (domain || '').trim();
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  try {
+    // 1. Check for email collision
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL',
+      [normalizedEmail]
+    );
+
+    if (existing.rowCount > 0) {
+      return res.status(400).json({ message: 'Email already in use' });
+    }
+
+    // 2. Resolve CURRICULUM_DEVELOPER role ID
+    const roleRes = await pool.query(
+      'SELECT id FROM roles WHERE role_key = $1',
+      ['CURRICULUM_DEVELOPER']
+    );
+
+    if (!roleRes.rowCount) {
+      return res.status(500).json({ message: 'CURRICULUM_DEVELOPER role not found in database' });
+    }
+    const role_id = roleRes.rows[0].id;
+
+    // 3. Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // 4. Create user
+    const insertRes = await pool.query(
+      `
+      INSERT INTO users (full_name, email, password_hash, role_id, domain, role_focus, onboarding_step, is_verified, is_email_verified, must_change_password)
+      VALUES ($1, $2, $3, $4, $5, $6, 'done', true, true, true)
+      RETURNING id, full_name, email, domain, role_focus
+      `,
+      [full_name.trim(), normalizedEmail, passwordHash, role_id, assignedDomain || null, assignedRoleFocus || null]
+    );
+
+    logAction({
+      req,
+      action: 'CREATE',
+      entityType: 'user',
+      entityId: insertRes.rows[0].id,
+      details: { email: normalizedEmail, role: 'CURRICULUM_DEVELOPER', domain: assignedDomain, role_focus: assignedRoleFocus }
+    });
+
+    res.json({
+      success: true,
+      data: insertRes.rows[0],
+      message: 'Curriculum Developer created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating curriculum developer:', error);
+    res.status(500).json({ message: 'Server error creating user' });
   }
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
   Plus,
@@ -10,11 +10,13 @@ import {
   BarChart2,
   Trash2,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
-import { getErrorMessage } from '@/lib/utils';
+import { cn, getErrorMessage } from '@/lib/utils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,6 +87,8 @@ export default function AssignmentManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [collegeFilter, setCollegeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<Tab>('Active');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -231,20 +235,26 @@ export default function AssignmentManagement() {
       .finally(() => setLoading(false));
   }, []);
 
-  const tabs: { label: string; value: Tab; dot?: string }[] = [
-    { label: 'Active', value: 'Active' },
+  const tabs: { label: string; shortLabel: string; value: Tab; dot?: string }[] = [
+    { label: 'Active', shortLabel: 'Active', value: 'Active' },
     {
       label: 'Submitted – Pending Evaluation',
+      shortLabel: 'Pending Eval',
       value: 'Submitted',
       dot: 'bg-amber-400',
     },
-    { label: 'Completed', value: 'Completed' },
+    { label: 'Completed', shortLabel: 'Completed', value: 'Completed' },
   ];
 
   // Derive unique colleges
   const uniqueColleges = Array.from(
     new Map(assignments.map((a) => [a.collegeId, a.college])).entries(),
   );
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, collegeFilter, activeTab]);
 
   // Client-side filter
   const filtered = assignments.filter((a) => {
@@ -261,6 +271,12 @@ export default function AssignmentManagement() {
           : a.status === 'Submitted';
     return matchesSearch && matchesCollege && matchesTab;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   const allFilteredSelected =
     filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
@@ -302,9 +318,9 @@ export default function AssignmentManagement() {
   };
 
   return (
-    <div className='p-6 space-y-6 animate-in fade-in duration-500'>
+    <div className='p-3.5 sm:p-6 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
       {/* Breadcrumb */}
-      <div className='text-sm text-slate-500'>
+      <div className='text-xs sm:text-sm text-slate-500'>
         {dashboardType === 'admin' ? 'Dashboard' : 'Facilitator'} /{' '}
         <span className='font-medium text-slate-700'>
           Assignment Management
@@ -312,17 +328,17 @@ export default function AssignmentManagement() {
       </div>
 
       {/* Header */}
-      <div className='flex items-center justify-between'>
+      <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3'>
         <div>
-          <h1 className='text-xl font-bold text-slate-900'>
+          <h1 className='text-xl sm:text-2xl font-bold text-slate-900 tracking-tight'>
             Assignment Management
           </h1>
-          <p className='text-sm text-slate-500 mt-0.5'>
+          <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
             Create, manage and track assignments
           </p>
         </div>
         <Button
-          className='gap-2 bg-blue-600 hover:bg-blue-700'
+          className='w-full sm:w-auto gap-2 bg-blue-600 hover:bg-blue-700 min-h-[40px]'
           onClick={() => navigate(`${basePath}/create-assignment`)}
         >
           <Plus className='w-4 h-4' />
@@ -331,11 +347,11 @@ export default function AssignmentManagement() {
       </div>
 
       {/* Filters Row */}
-      <div className='flex items-center gap-3'>
-        <div className='relative flex-1 max-w-xs'>
+      <div className='flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full'>
+        <div className='relative flex-1 w-full max-w-none sm:max-w-xs'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400' />
           <Input
-            className='pl-9'
+            className='pl-9 text-xs sm:text-sm h-10 bg-white'
             placeholder='Search assignments...'
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -343,7 +359,7 @@ export default function AssignmentManagement() {
         </div>
 
         <Select value={collegeFilter} onValueChange={setCollegeFilter}>
-          <SelectTrigger className='w-[160px]'>
+          <SelectTrigger className='w-full sm:w-[180px] text-xs sm:text-sm h-10 bg-white'>
             <SelectValue placeholder='All Colleges' />
           </SelectTrigger>
           <SelectContent>
@@ -359,16 +375,16 @@ export default function AssignmentManagement() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className='flex items-center justify-between rounded-lg bg-blue-50 border border-blue-200 px-4 py-2.5'>
-          <span className='text-sm font-medium text-blue-800'>
+        <div className='flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 rounded-xl bg-blue-50 border border-blue-200 px-3.5 sm:px-4 py-2.5 shadow-xs'>
+          <span className='text-xs sm:text-sm font-medium text-blue-800 text-center sm:text-left'>
             {selectedIds.size} assignment{selectedIds.size > 1 ? 's' : ''}{' '}
             selected
           </span>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center justify-end gap-2'>
             <Button
               size='sm'
               variant='ghost'
-              className='h-8 text-slate-600 hover:text-slate-800'
+              className='h-8 text-xs text-slate-600 hover:text-slate-800 flex-1 sm:flex-initial'
               onClick={() => setSelectedIds(new Set())}
             >
               <X className='w-3.5 h-3.5 mr-1' />
@@ -376,7 +392,7 @@ export default function AssignmentManagement() {
             </Button>
             <Button
               size='sm'
-              className='h-8 bg-red-600 hover:bg-red-700 text-white'
+              className='h-8 text-xs bg-red-600 hover:bg-red-700 text-white flex-1 sm:flex-initial'
               onClick={() => setBulkDeleteOpen(true)}
             >
               <Trash2 className='w-3.5 h-3.5 mr-1' />
@@ -387,51 +403,197 @@ export default function AssignmentManagement() {
       )}
 
       {/* Tabs */}
-      <div className='flex items-center gap-4 border-b border-slate-200 pb-0'>
+      <div className='grid grid-cols-3 sm:inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1 w-full sm:w-auto shrink-0'>
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
-            className={`flex items-center gap-2 px-1 pb-3 text-sm font-medium transition-colors border-b-2 ${
+            className={cn(
+              'flex items-center justify-center gap-1 sm:gap-2 px-1.5 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all min-h-[38px] text-center',
               activeTab === tab.value
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-500 hover:text-slate-800',
+            )}
           >
-            {tab.label}
-            {tab.dot && <span className={`w-2 h-2 rounded-full ${tab.dot}`} />}
+            <span className='truncate hidden sm:inline'>{tab.label}</span>
+            <span className='truncate sm:hidden'>{tab.shortLabel}</span>
+            {tab.dot && <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${tab.dot}`} />}
           </button>
         ))}
       </div>
 
-      {/* Table */}
-      <Card className='border-none shadow-sm overflow-hidden'>
+      {/* Main Table / Mobile Cards */}
+      <Card className='border-none shadow-sm overflow-hidden min-w-0'>
         <CardContent className='p-0'>
-          <Table>
-            <TableHeader className='bg-slate-50/50'>
-              <TableRow>
-                <TableHead className='w-10 pl-4'>
-                  <Checkbox
-                    checked={allFilteredSelected}
-                    data-state={
-                      someFilteredSelected && !allFilteredSelected
-                        ? 'indeterminate'
-                        : undefined
-                    }
-                    onCheckedChange={toggleSelectAll}
-                    disabled={filtered.length === 0}
-                  />
-                </TableHead>
-                <TableHead className='pl-2'>Assignment Name</TableHead>
-                <TableHead>Course</TableHead>
-                <TableHead>College</TableHead>
-                <TableHead>Batch</TableHead>
-                <TableHead>Submissions</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className='text-right pr-6'>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
+          {/* Mobile Card View (< md): Zero horizontal scroll */}
+          <div className='md:hidden divide-y divide-slate-100'>
+            {loading ? (
+              <div className='py-12 flex justify-center'>
+                <Loader2 className='w-6 h-6 animate-spin text-blue-600' />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className='py-12 text-center text-slate-500 text-xs sm:text-sm'>
+                No assignments found.
+              </div>
+            ) : (
+              paginated.map((assignment) => (
+                <div
+                  key={assignment.id}
+                  className={`p-3.5 space-y-2.5 bg-white transition-colors ${
+                    selectedIds.has(assignment.id) ? 'bg-blue-50/40' : ''
+                  }`}
+                >
+                  {/* Top: Checkbox + Name + Status */}
+                  <div className='flex items-start gap-2.5 justify-between'>
+                    <div className='flex items-start gap-2.5 min-w-0 flex-1'>
+                      <Checkbox
+                        checked={selectedIds.has(assignment.id)}
+                        onCheckedChange={() => toggleSelect(assignment.id)}
+                        className='mt-0.5'
+                      />
+                      <div className='min-w-0 flex-1'>
+                        <p className='font-bold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug'>
+                          {assignment.name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className='shrink-0'>{getStatusBadge(assignment.status)}</div>
+                  </div>
+
+                  {/* Academic details box */}
+                  <div className='text-[11px] bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 space-y-1.5'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='font-semibold text-slate-800 truncate'>
+                        {assignment.course}
+                      </span>
+                      <span className='text-slate-500 font-medium shrink-0 max-w-[140px] truncate' title={assignment.college}>
+                        {assignment.college}
+                      </span>
+                    </div>
+                    <div className='flex items-center justify-between gap-2 pt-1 border-t border-slate-200/50 text-slate-500'>
+                      <div className='flex items-center gap-1.5'>
+                        <span className='font-medium'>{assignment.batch}</span>
+                        <span className='text-slate-300'>•</span>
+                        <span className={`font-bold ${
+                          assignment.submissionsCount === assignment.submissionsTotal
+                            ? 'text-emerald-600'
+                            : 'text-amber-600'
+                        }`}>
+                          {assignment.submissionsCount}/{assignment.submissionsTotal} submitted
+                        </span>
+                      </div>
+                      <span className='text-slate-400 shrink-0 font-medium'>
+                        Due {assignment.dueDate}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className='flex items-center justify-end gap-1.5 pt-1 border-t border-slate-50'>
+                    {activeTab === 'Active' && (
+                      <button
+                        className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
+                        onClick={() => {
+                          navigate(`${basePath}/create-assignment`, {
+                            state: {
+                              editId: assignment.id,
+                              title: assignment.name,
+                              course: assignment.course === 'N/A' ? '' : assignment.course,
+                              collegeId: assignment.collegeId,
+                              deadline: assignment.rawDueDate || '',
+                              description: '',
+                            },
+                          });
+                        }}
+                      >
+                        <Edit3 className='w-3 h-3' />
+                        Edit
+                      </button>
+                    )}
+
+                    {activeTab === 'Submitted' && (
+                      <>
+                        <button
+                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-xs text-emerald-700 hover:bg-emerald-100 font-semibold disabled:opacity-50'
+                          disabled={runningEvalId === assignment.id}
+                          onClick={() => handleRunEvaluation(assignment)}
+                        >
+                          {runningEvalId === assignment.id ? (
+                            <Loader2 className='w-3 h-3 animate-spin' />
+                          ) : (
+                            <Play className='w-3 h-3' />
+                          )}
+                          Evaluate
+                        </button>
+                        <button
+                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
+                          onClick={() => handleViewResults(assignment)}
+                        >
+                          <Eye className='w-3 h-3' />
+                          Submissions
+                        </button>
+                      </>
+                    )}
+
+                    {activeTab === 'Completed' && (
+                      <>
+                        <button
+                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
+                          onClick={() => handleViewResults(assignment)}
+                        >
+                          <Eye className='w-3 h-3' />
+                          View
+                        </button>
+                        <button
+                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-xs text-slate-700 hover:bg-slate-200 font-semibold'
+                          onClick={() => handleViewResults(assignment)}
+                        >
+                          <BarChart2 className='w-3 h-3' />
+                          Analytics
+                        </button>
+                      </>
+                    )}
+
+                    <button
+                      className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-xs text-red-600 hover:bg-red-100 font-semibold'
+                      onClick={() => setDeleteTarget(assignment)}
+                    >
+                      <Trash2 className='w-3 h-3' />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table View (>= md) */}
+          <div className='hidden md:block overflow-x-auto custom-scrollbar w-full min-w-0'>
+            <Table className='min-w-[850px]'>
+              <TableHeader className='bg-slate-50/50'>
+                <TableRow>
+                  <TableHead className='w-10 pl-4'>
+                    <Checkbox
+                      checked={allFilteredSelected}
+                      data-state={
+                        someFilteredSelected && !allFilteredSelected
+                          ? 'indeterminate'
+                          : undefined
+                      }
+                      onCheckedChange={toggleSelectAll}
+                      disabled={filtered.length === 0}
+                    />
+                  </TableHead>
+                  <TableHead className='pl-2 text-[11px] sm:text-xs font-bold uppercase'>Assignment Name</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>Course</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>College</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>Batch</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>Submissions</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>Due Date</TableHead>
+                  <TableHead className='text-[11px] sm:text-xs font-bold uppercase'>Status</TableHead>
+                  <TableHead className='text-right pr-6 text-[11px] sm:text-xs font-bold uppercase'>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
 
             <TableBody>
               {loading ? (
@@ -456,7 +618,7 @@ export default function AssignmentManagement() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((assignment) => (
+                paginated.map((assignment) => (
                   <TableRow
                     key={assignment.id}
                     className={`hover:bg-slate-50/50 ${selectedIds.has(assignment.id) ? 'bg-blue-50/50' : ''}`}
@@ -577,6 +739,65 @@ export default function AssignmentManagement() {
               )}
             </TableBody>
           </Table>
+          </div>
+
+          {/* Pagination Footer */}
+          {filtered.length > 0 && totalPages > 1 && (
+            <div className='flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/70 border-t border-slate-100'>
+              <p className='text-[11px] sm:text-xs text-slate-500 font-medium'>
+                Showing <span className='font-bold text-slate-800'>{(currentPage - 1) * pageSize + 1}</span> to{' '}
+                <span className='font-bold text-slate-800'>{Math.min(currentPage * pageSize, filtered.length)}</span> of{' '}
+                <span className='font-bold text-slate-800'>{filtered.length}</span> assignments
+              </p>
+
+              <div className='flex items-center gap-1.5'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50'
+                >
+                  <ChevronLeft className='h-3.5 w-3.5 mr-1' />
+                  Prev
+                </Button>
+
+                <div className='flex items-center gap-1 mx-0.5'>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                    .map((p, idx, arr) => (
+                      <Fragment key={p}>
+                        {idx > 0 && arr[idx - 1] !== p - 1 && (
+                          <span className='text-slate-300 text-xs px-0.5 select-none'>...</span>
+                        )}
+                        <button
+                          onClick={() => setCurrentPage(p)}
+                          className={cn(
+                            'w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center',
+                            currentPage === p
+                              ? 'bg-[#1e2653] text-white shadow-xs'
+                              : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100',
+                          )}
+                        >
+                          {p}
+                        </button>
+                      </Fragment>
+                    ))}
+                </div>
+
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50'
+                >
+                  Next
+                  <ChevronRight className='h-3.5 w-3.5 ml-1' />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

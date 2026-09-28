@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { CheckCircle2, XCircle, Award, TrendingUp } from 'lucide-react';
-import ExerciseEditor from '@/components/common/ExerciseEditor';
+import EmbeddedIDE from '@/components/common/EmbeddedIDE';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
+import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 
 import LessonAssistant from '@/components/common/LessonAssistant';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -28,6 +29,7 @@ import {
 import type { Quiz, Topic, SubjectDetailResponse } from '@/utils/types';
 import apiClient from '@/services/api';
 import { Skeleton } from '@/components/ui/skeleton';
+import { getYouTubeEmbedUrl } from '@/utils/youtube';
 
 /* =======================
    Types
@@ -105,21 +107,9 @@ const Lesson = () => {
     fetchStructure();
   }, [slug]);
 
-  const getEmbedUrl = (url: string) => {
-    try {
-      const u = new URL(url);
-      if (u.hostname.includes('youtube.com')) {
-        const v = u.searchParams.get('v');
-        if (v) return `https://www.youtube.com/embed/${v}`;
-      }
-      if (u.hostname === 'youtu.be') {
-        const id = u.pathname.replace('/', '');
-        if (id) return `https://www.youtube.com/embed/${id}`;
-      }
-    } catch {
-      // Invalid URL — fall through and return as-is
-    }
-    return url;
+  const getEmbedUrl = (url?: string | null) => {
+    if (!url) return '';
+    return getYouTubeEmbedUrl(url) || url;
   };
 
   /* =======================
@@ -223,7 +213,7 @@ const Lesson = () => {
     try {
       await dispatch(completeLesson(lessonId)).unwrap();
       toast.success('Lesson completed! +10 points 🎉');
-      window.dispatchEvent(new Event('course-progress-updated'));
+      notifyCourseProgressUpdated();
       setIsNavigating(true);
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to mark lesson complete'));
@@ -277,7 +267,7 @@ const Lesson = () => {
       const result = await dispatch(
         submitQuiz({ quizId: quiz.id, answers: quizAnswers }),
       ).unwrap();
-      window.dispatchEvent(new Event('course-progress-updated'));
+      notifyCourseProgressUpdated();
       if (result.attempt.is_passed) {
         toast.success(`Quiz passed! 🎉`);
       } else {
@@ -304,21 +294,16 @@ const Lesson = () => {
      Exercise Submission
   ======================= */
 
-  const handleSubmitExercise = async (exerciseId: string) => {
+  const handleSubmitExercise = async (exerciseId: string, files?: any[], taskId?: string) => {
     if (submittingExercise[exerciseId]) return; // prevent double-submit
     try {
-      const result = await dispatch(submitExercise({ exerciseId })).unwrap();
-      const score = result?.score ?? null;
-      toast.success(
-        score !== null
-          ? `Exercise submitted! Score: ${score} 🎉`
-          : 'Exercise submitted! 🎉',
-      );
-      if (result.isPassed && !lessonCompleted) {
-        setIsNavigating(true);
-      }
+      const result = await dispatch(submitExercise({ exerciseId, files, taskId })).unwrap();
+      toast.success('Exercise submitted! 🎉');
+      notifyCourseProgressUpdated();
+      return result;
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit exercise'));
+      throw error;
     }
   };
 
@@ -370,11 +355,13 @@ const Lesson = () => {
   const hasMarkdown = Boolean(lesson.markdown_content);
 
   return (
-    <div className='mx-auto max-w-4xl space-y-10 p-6 md:p-10'>
+    <div className={`mx-auto space-y-6 sm:space-y-10 p-3 sm:p-6 md:p-10 transition-all duration-300 ${
+      exercises && exercises.length > 0 ? 'w-full max-w-7xl' : 'max-w-4xl'
+    }`}>
       {/* Header */}
-      <header className='space-y-4'>
-        <div className='flex flex-wrap items-center gap-3'>
-          <h1 className='text-4xl font-extrabold tracking-tight text-slate-900'>
+      <header className='space-y-3 sm:space-y-4'>
+        <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
+          <h1 className='text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900'>
             {subtopic.title}
           </h1>
           {lessonCompleted && (
@@ -385,16 +372,16 @@ const Lesson = () => {
         </div>
 
         {subtopic.description && (
-          <p className='text-base text-slate-600'>{subtopic.description}</p>
+          <p className='text-sm sm:text-base text-slate-600'>{subtopic.description}</p>
         )}
 
-        <div className='flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-400'>
+        <div className='flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400'>
           {lessonIndex && totalLessons && (
-            <Badge className='bg-blue-50 text-blue-700 border border-blue-200'>
+            <Badge className='bg-blue-50 text-blue-700 border border-blue-200 text-[11px]'>
               Lesson {lessonIndex} of {totalLessons}
             </Badge>
           )}
-          <Badge className='bg-slate-100 text-slate-600 border border-slate-200'>
+          <Badge className='bg-slate-100 text-slate-600 border border-slate-200 text-[11px]'>
             {lesson.content_type || 'Lesson'}
           </Badge>
           {lesson.read_time && (
@@ -412,22 +399,22 @@ const Lesson = () => {
 
       {/* Lesson Content — hidden on pure quiz pages */}
       {lesson.content_type !== 'quiz' && (
-        <Card className='overflow-hidden rounded-3xl border border-slate-200 shadow-sm'>
-          <div className='flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-6 py-4'>
+        <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm'>
+          <div className='flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 sm:px-6 py-3 sm:py-4'>
             <div>
-              <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
+              <p className='text-[10px] sm:text-xs font-semibold uppercase tracking-widest text-slate-400'>
                 Lesson Content
               </p>
-              <p className='text-sm text-slate-600'>
+              <p className='text-xs sm:text-sm text-slate-600'>
                 Follow the material, then complete to unlock the next lesson
               </p>
             </div>
           </div>
 
-          <div className='bg-white px-6 py-8'>
+          <div className='bg-white px-4 py-6 sm:px-6 sm:py-8'>
             {lesson.video_url && !lesson.video_url.includes('results?') && (
               <div className='not-prose mb-6'>
-                <div className='aspect-video w-full overflow-hidden rounded-2xl border border-slate-200 bg-black'>
+                <div className='aspect-video w-full overflow-hidden rounded-xl sm:rounded-2xl border border-slate-200 bg-black'>
                   <iframe
                     className='h-full w-full'
                     src={getEmbedUrl(lesson.video_url)}
@@ -440,7 +427,7 @@ const Lesson = () => {
               </div>
             )}
 
-            <div className='prose prose-slate max-w-none lg:prose-lg'>
+            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
               {hasMarkdown ? (
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {lesson.markdown_content}
@@ -638,7 +625,7 @@ const Lesson = () => {
 
                           {/* True / False */}
                           {question.question_type === 'true_false' && (
-                            <div className='flex gap-4'>
+                            <div className='grid grid-cols-2 gap-3 sm:gap-4'>
                               {['True', 'False'].map((value) => {
                                 const isSelected =
                                   quizAnswers[question.id] === value;
@@ -659,19 +646,19 @@ const Lesson = () => {
                                 return (
                                   <label
                                     key={value}
-                                    className={`flex items-center gap-2 rounded-lg border px-6 py-3 transition-colors ${
+                                    className={`flex items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-semibold transition-colors min-h-[44px] ${
                                       !quizSubmitted
                                         ? `cursor-pointer ${
                                             isSelected
-                                              ? 'border-indigo-500 bg-indigo-50'
-                                              : 'border-slate-200 hover:bg-slate-50'
+                                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                                              : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                                           }`
                                         : `cursor-default ${
                                             isSelectedCorrect || isRevealedCorrect
-                                              ? 'border-green-500 bg-green-50'
+                                              ? 'border-green-500 bg-green-50 text-green-800'
                                               : isSelectedWrong
-                                                ? 'border-red-500 bg-red-50'
-                                                : 'border-slate-200'
+                                                ? 'border-red-500 bg-red-50 text-red-800'
+                                                : 'border-slate-200 text-slate-500'
                                           }`
                                     }`}
                                   >
@@ -687,13 +674,14 @@ const Lesson = () => {
                                         )
                                       }
                                       disabled={quizSubmitted}
+                                      className='text-indigo-600'
                                     />
-                                    {value}
+                                    <span>{value}</span>
                                     {(isSelectedCorrect || isRevealedCorrect) && (
-                                      <CheckCircle2 className='ml-1 h-4 w-4 text-green-600' />
+                                      <CheckCircle2 className='h-4 w-4 text-green-600 ml-1' />
                                     )}
                                     {isSelectedWrong && (
-                                      <XCircle className='ml-1 h-4 w-4 text-red-600' />
+                                      <XCircle className='h-4 w-4 text-red-600 ml-1' />
                                     )}
                                   </label>
                                 );
@@ -850,7 +838,7 @@ const Lesson = () => {
           </div>
 
           {exercises.length === 1 ? (
-            <ExerciseEditor
+            <EmbeddedIDE
               exercise={exercises[0]}
               submitting={!!submittingExercise[exercises[0].id]}
               onSubmit={handleSubmitExercise}
@@ -870,7 +858,7 @@ const Lesson = () => {
               </TabsList>
               {exercises.map((ex) => (
                 <TabsContent key={ex.id} value={ex.id}>
-                  <ExerciseEditor
+                  <EmbeddedIDE
                     exercise={ex}
                     submitting={!!submittingExercise[ex.id]}
                     onSubmit={handleSubmitExercise}
@@ -899,7 +887,7 @@ const Lesson = () => {
                   className='mt-4 border-emerald-300 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700'
                   onClick={() => navigate(buildNextUrl(nextItem, slug))}
                 >
-                  Next {nextLabel(nextItem.type)}
+                  Next {nextLabel(nextItem?.type || '')}
                 </Button>
               )}
             </div>

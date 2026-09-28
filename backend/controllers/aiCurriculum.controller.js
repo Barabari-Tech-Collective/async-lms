@@ -97,6 +97,79 @@ function uniqueSlug(base, suffix) {
   return `${slugify(base)}-${suffix}`.substring(0, 80);
 }
 
+let columnsMigrated = false;
+async function ensureColumns() {
+  if (columnsMigrated) return;
+  try {
+    // One-time startup sync for legacy published subjects
+    await pool.query(`
+      UPDATE ai_courses c
+      SET subject_id = s.id
+      FROM subjects s
+      WHERE c.subject_id IS NULL AND c.title = s.name AND c.status = 'published'
+    `);
+    columnsMigrated = true;
+  } catch (err) {
+    console.error('ensureColumns error:', err);
+  }
+}
+
+// Helper to flag unpublished changes when a course's curriculum tree is modified
+async function markCourseUpdated(courseId) {
+  if (!courseId) return;
+  try {
+    await ensureColumns();
+    await pool.query(
+      `UPDATE ai_courses
+       SET has_unpublished_changes = CASE WHEN subject_id IS NOT NULL THEN true ELSE has_unpublished_changes END,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [courseId],
+    );
+  } catch (err) {
+    console.error('markCourseUpdated error:', err);
+  }
+}
+
+async function markModuleCourseUpdated(moduleId) {
+  if (!moduleId) return;
+  try {
+    const res = await pool.query(`SELECT course_id FROM ai_course_modules WHERE id = $1`, [moduleId]);
+    if (res.rows.length) await markCourseUpdated(res.rows[0].course_id);
+  } catch (err) {
+    console.error('markModuleCourseUpdated error:', err);
+  }
+}
+
+async function markTopicCourseUpdated(topicId) {
+  if (!topicId) return;
+  try {
+    const res = await pool.query(
+      `SELECT m.course_id FROM ai_course_topics t JOIN ai_course_modules m ON t.module_id = m.id WHERE t.id = $1`,
+      [topicId],
+    );
+    if (res.rows.length) await markCourseUpdated(res.rows[0].course_id);
+  } catch (err) {
+    console.error('markTopicCourseUpdated error:', err);
+  }
+}
+
+async function markLessonCourseUpdated(lessonId) {
+  if (!lessonId) return;
+  try {
+    const res = await pool.query(
+      `SELECT m.course_id FROM ai_course_lessons l
+       JOIN ai_course_topics t ON l.topic_id = t.id
+       JOIN ai_course_modules m ON t.module_id = m.id
+       WHERE l.id = $1`,
+      [lessonId],
+    );
+    if (res.rows.length) await markCourseUpdated(res.rows[0].course_id);
+  } catch (err) {
+    console.error('markLessonCourseUpdated error:', err);
+  }
+}
+
 // ─── Extract skills from JD ───────────────────────────────────────────────────
 
 exports.extractSkills = async (req, res) => {
@@ -251,16 +324,19 @@ exports.saveCourse = async (req, res) => {
 
 exports.listCourses = async (req, res) => {
   try {
+    await ensureColumns();
     const userId = req.user.id;
     const role = req.user.role;
     const { status } = req.query;
 
     let query = `
       SELECT c.*, u.full_name AS creator_name,
-             (SELECT count(*)::int FROM ai_course_modules m WHERE m.course_id = c.id) as module_count,
-             (SELECT count(*)::int FROM ai_course_topics t JOIN ai_course_modules m ON t.module_id = m.id WHERE m.course_id = c.id) as topic_count
+             COALESCE(c.has_unpublished_changes, false)::boolean as has_unpublished_changes,
+             (SELECT count(*)::int FROM ai_course_modules m WHERE m.course_id = c.id AND m.is_deleted = false) as module_count,
+             (SELECT count(*)::int FROM ai_course_topics t JOIN ai_course_modules m ON t.module_id = m.id WHERE m.course_id = c.id AND t.is_deleted = false AND m.is_deleted = false) as topic_count
       FROM ai_courses c
       JOIN users u ON c.created_by = u.id
+      LEFT JOIN subjects s ON (c.subject_id = s.id OR (c.subject_id IS NULL AND s.name = c.title))
     `;
     const params = [];
 
@@ -288,11 +364,13 @@ exports.listCourses = async (req, res) => {
 
 exports.getCourse = async (req, res) => {
   try {
+    await ensureColumns();
     const { id } = req.params;
 
     const courseRes = await pool.query(
       `SELECT c.*, u.full_name AS creator_name,
-              r.full_name AS reviewer_name
+              r.full_name AS reviewer_name,
+              COALESCE(c.has_unpublished_changes, false)::boolean as has_unpublished_changes
        FROM ai_courses c
        JOIN users u ON c.created_by = u.id
        LEFT JOIN users r ON c.reviewed_by = r.id
@@ -303,32 +381,124 @@ exports.getCourse = async (req, res) => {
 
     const course = courseRes.rows[0];
 
+    // Check published live tree if course has a published subject
+    let publishedTopicTitles = new Set();
+    let publishedUnitTitles = new Set();
+    let publishedSubtopicTitles = new Set();
+    const effectiveSubjectId = course.subject_id;
+
+    if (effectiveSubjectId) {
+      try {
+        const pubTopics = await pool.query(
+          `SELECT tp.id, tp.title FROM topics tp WHERE tp.subject_id = $1 AND tp.is_deleted = false`,
+          [effectiveSubjectId],
+        );
+        publishedTopicTitles = new Set(pubTopics.rows.map((r) => (r.title || '').trim().toLowerCase()));
+
+        const pubUnits = await pool.query(
+          `SELECT u.id, u.title FROM units u JOIN topics tp ON u.topic_id = tp.id WHERE tp.subject_id = $1 AND u.is_deleted = false`,
+          [effectiveSubjectId],
+        );
+        publishedUnitTitles = new Set(pubUnits.rows.map((r) => (r.title || '').trim().toLowerCase()));
+
+        const pubSubtopics = await pool.query(
+          `SELECT st.id, st.title FROM subtopics st JOIN units u ON st.unit_id = u.id JOIN topics tp ON u.topic_id = tp.id WHERE tp.subject_id = $1 AND st.is_deleted = false`,
+          [effectiveSubjectId],
+        );
+        publishedSubtopicTitles = new Set(pubSubtopics.rows.map((r) => (r.title || '').trim().toLowerCase()));
+      } catch (e) {
+        console.error('Error fetching published subject structure for change diffing:', e);
+      }
+    }
+
+    const lastPublishedTime = course.last_published_at ? new Date(course.last_published_at).getTime() : null;
+    let newModulesCount = 0;
+    let newTopicsCount = 0;
+    let newLessonsCount = 0;
+
     const modulesRes = await pool.query(
       `SELECT * FROM ai_course_modules WHERE course_id = $1 AND is_deleted = false ORDER BY order_index`,
       [id],
     );
+    const moduleRows = modulesRes.rows;
+    const moduleIds = moduleRows.map((m) => m.id);
+
+    // Batch query all topics for all modules
+    const topicsRes = moduleIds.length > 0
+      ? await pool.query(
+          `SELECT * FROM ai_course_topics WHERE module_id = ANY($1::uuid[]) AND is_deleted = false ORDER BY order_index`,
+          [moduleIds],
+        )
+      : { rows: [] };
+    const topicRows = topicsRes.rows;
+    const topicIds = topicRows.map((t) => t.id);
+
+    // Batch query all lessons for all topics
+    const lessonsRes = topicIds.length > 0
+      ? await pool.query(
+          `SELECT * FROM ai_course_lessons WHERE topic_id = ANY($1::uuid[]) AND is_deleted = false ORDER BY order_index`,
+          [topicIds],
+        )
+      : { rows: [] };
+
+    // Group topics by module_id
+    const topicsByModuleId = new Map();
+    for (const t of topicRows) {
+      if (!topicsByModuleId.has(t.module_id)) topicsByModuleId.set(t.module_id, []);
+      topicsByModuleId.get(t.module_id).push(t);
+    }
+
+    // Group lessons by topic_id
+    const lessonsByTopicId = new Map();
+    for (const l of lessonsRes.rows) {
+      if (!lessonsByTopicId.has(l.topic_id)) lessonsByTopicId.set(l.topic_id, []);
+      lessonsByTopicId.get(l.topic_id).push(l);
+    }
 
     const modules = [];
-    for (const mod of modulesRes.rows) {
-      const topicsRes = await pool.query(
-        `SELECT * FROM ai_course_topics WHERE module_id = $1 AND is_deleted = false ORDER BY order_index`,
-        [mod.id],
+    for (const mod of moduleRows) {
+      const isModuleNew = Boolean(
+        effectiveSubjectId && (
+          !publishedTopicTitles.has((mod.title || '').trim().toLowerCase()) ||
+          (lastPublishedTime && new Date(mod.created_at).getTime() > lastPublishedTime)
+        )
       );
-      const topics = [];
-      for (const topic of topicsRes.rows) {
-        const lessonsRes = await pool.query(
-          `SELECT * FROM ai_course_lessons WHERE topic_id = $1 AND is_deleted = false ORDER BY order_index`,
-          [topic.id],
-        );
+      if (isModuleNew) newModulesCount++;
 
-        // Presign S3 URLs for lessons
-        const signedLessons = await Promise.all(lessonsRes.rows.map(async (lesson) => {
-          const updatedLesson = { ...lesson };
-          
+      const rawTopics = topicsByModuleId.get(mod.id) || [];
+      const topics = [];
+
+      for (const topic of rawTopics) {
+        const isTopicNew = Boolean(
+          effectiveSubjectId && (
+            isModuleNew ||
+            !publishedUnitTitles.has((topic.title || '').trim().toLowerCase()) ||
+            (lastPublishedTime && new Date(topic.created_at).getTime() > lastPublishedTime)
+          )
+        );
+        if (isTopicNew) newTopicsCount++;
+
+        const rawLessons = lessonsByTopicId.get(topic.id) || [];
+        const signedLessons = await Promise.all(rawLessons.map(async (lesson) => {
+          const isLessonNew = Boolean(
+            effectiveSubjectId && (
+              isTopicNew ||
+              !publishedSubtopicTitles.has((lesson.title || '').trim().toLowerCase()) ||
+              (lastPublishedTime && new Date(lesson.created_at).getTime() > lastPublishedTime)
+            )
+          );
+          const isLessonModified = Boolean(
+            !isLessonNew && effectiveSubjectId && lastPublishedTime && lesson.updated_at &&
+            new Date(lesson.updated_at).getTime() > lastPublishedTime
+          );
+          if (isLessonNew) newLessonsCount++;
+
+          const updatedLesson = { ...lesson, is_new: isLessonNew, is_modified: isLessonModified };
+
           if (updatedLesson.video_url) {
             updatedLesson.video_url = await presignS3Url(updatedLesson.video_url);
           }
-          
+
           if (updatedLesson.resource_links) {
             try {
               const parsedResourceLinks = typeof updatedLesson.resource_links === 'string' ? JSON.parse(updatedLesson.resource_links) : updatedLesson.resource_links;
@@ -354,13 +524,14 @@ exports.getCourse = async (req, res) => {
               console.error('Failed to parse exercise_data:', parseError);
             }
           }
-          
+
           return updatedLesson;
         }));
 
-        topics.push({ ...topic, lessons: signedLessons });
+        topics.push({ ...topic, is_new: isTopicNew, lessons: signedLessons });
       }
-      modules.push({ ...mod, topics });
+
+      modules.push({ ...mod, is_new: isModuleNew, topics });
     }
 
     // Review history
@@ -372,7 +543,14 @@ exports.getCourse = async (req, res) => {
       [id],
     );
 
-    res.json({ success: true, data: { ...course, modules, reviews: reviewsRes.rows } });
+    const pending_changes_summary = {
+      new_modules: newModulesCount,
+      new_topics: newTopicsCount,
+      new_lessons: newLessonsCount,
+      total: newModulesCount + newTopicsCount + newLessonsCount,
+    };
+
+    res.json({ success: true, data: { ...course, modules, pending_changes_summary, reviews: reviewsRes.rows } });
   } catch (err) {
     console.error('getCourse error:', err);
     serverError(res, err);
@@ -397,6 +575,7 @@ exports.updateCourse = async (req, res) => {
     }
     if (!updates.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
     updates.push(`updated_at = NOW()`);
+    updates.push(`has_unpublished_changes = CASE WHEN subject_id IS NOT NULL THEN true ELSE has_unpublished_changes END`);
     values.push(id);
     await pool.query(`UPDATE ai_courses SET ${updates.join(', ')} WHERE id = $${i}`, values);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course', entityId: id, details: { fields: Object.keys(req.body) } });
@@ -416,13 +595,17 @@ exports.submitForReview = async (req, res) => {
     if (!courseRes.rows.length) return res.status(404).json({ success: false, message: 'Not found' });
 
     const course = courseRes.rows[0];
-    const allowed = ['draft', 'changes_requested'];
+    const allowed = ['draft', 'changes_requested', 'published', 'approved', 'in_review'];
     if (!allowed.includes(course.status)) {
       return res.status(400).json({ success: false, message: `Cannot submit from status: ${course.status}` });
     }
 
     await pool.query(
-      `UPDATE ai_courses SET status = 'in_review', updated_at = NOW() WHERE id = $1`,
+      `UPDATE ai_courses
+       SET status = 'in_review',
+           has_unpublished_changes = CASE WHEN subject_id IS NOT NULL THEN true ELSE false END,
+           updated_at = NOW()
+       WHERE id = $1`,
       [id],
     );
 
@@ -430,17 +613,20 @@ exports.submitForReview = async (req, res) => {
     const admins = await pool.query(
       `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = 'ADMIN'`,
     );
+    const isRevision = course.status === 'published' || course.status === 'approved';
     for (const admin of admins.rows) {
       notify({
         userId: admin.id,
         type: 'general',
-        title: 'Course Submitted for Review',
-        body: `"${course.title}" has been submitted for vetting.`,
+        title: isRevision ? 'Course Revisions Submitted for Review' : 'Course Submitted for Review',
+        body: isRevision
+          ? `Updates for "${course.title}" have been submitted for vetting.`
+          : `"${course.title}" has been submitted for vetting.`,
         link: `/dashboard/admin/ai-curriculum/${id}/review`,
       });
     }
 
-    logAction({ req, action: 'UPDATE', entityType: 'ai_course', entityId: id, details: { status: 'in_review' } });
+    logAction({ req, action: 'UPDATE', entityType: 'ai_course', entityId: id, details: { status: 'in_review', isRevision } });
     res.json({ success: true });
   } catch (err) {
     console.error('submitForReview error:', err);
@@ -466,7 +652,8 @@ exports.reviewCourse = async (req, res) => {
     if (!courseRes.rows.length) return res.status(404).json({ success: false, message: 'Not found' });
     const course = courseRes.rows[0];
 
-    if (course.status !== 'in_review') {
+    const isPendingPublishedRevision = course.status === 'published' && course.subject_id;
+    if (course.status !== 'in_review' && !isPendingPublishedRevision) {
       return res.status(400).json({ success: false, message: 'Course is not in review' });
     }
 
@@ -524,87 +711,148 @@ exports.publishCourse = async (req, res) => {
     if (!courseRes.rows.length) return res.status(404).json({ success: false, message: 'Not found' });
     const course = courseRes.rows[0];
 
-    if (course.status !== 'approved') {
+    if (course.status !== 'approved' && !(course.status === 'published' && course.subject_id)) {
       return res.status(400).json({ success: false, message: 'Only approved courses can be published' });
     }
 
     await client.query('BEGIN');
 
-    // 1. Create Subject
-    const subjectSlug = uniqueSlug(course.title, Date.now());
-    const subjectRes = await client.query(
-      `INSERT INTO subjects (name, slug, description, is_published, order_index)
-       VALUES ($1, $2, $3, true, (SELECT COALESCE(MAX(order_index),0)+1 FROM subjects))
-       RETURNING id`,
-      [course.title, subjectSlug, `${course.role_focus} — ${course.domain} course`],
-    );
-    const subjectId = subjectRes.rows[0].id;
+    // 1. Create or Update Subject
+    let subjectId = course.subject_id;
+    if (subjectId) {
+      await client.query(
+        `UPDATE subjects SET name = $1, description = $2, is_published = true, updated_at = NOW() WHERE id = $3`,
+        [course.title, `${course.role_focus} — ${course.domain} course`, subjectId],
+      );
+    } else {
+      const subjectSlug = uniqueSlug(course.title, Date.now());
+      const subjectRes = await client.query(
+        `INSERT INTO subjects (name, slug, description, is_published, order_index)
+         VALUES ($1, $2, $3, true, (SELECT COALESCE(MAX(order_index),0)+1 FROM subjects))
+         RETURNING id`,
+        [course.title, subjectSlug, `${course.role_focus} — ${course.domain} course`],
+      );
+      subjectId = subjectRes.rows[0].id;
+    }
 
-    // 2. Fetch modules
+    // 2. Fetch existing published structure for this subject to do non-destructive in-place upserts
+    const existingTopicsRes = await client.query(
+      `SELECT id, title, order_index FROM topics WHERE subject_id = $1 AND is_deleted = false ORDER BY order_index`,
+      [subjectId],
+    );
+    const existingTopics = existingTopicsRes.rows;
+    const activeTopicIds = new Set();
+    const activeUnitIds = new Set();
+    const activeSubtopicIds = new Set();
+
+    // Fetch modules
     const modulesRes = await client.query(
-      `SELECT * FROM ai_course_modules WHERE course_id = $1 ORDER BY order_index`, [id],
+      `SELECT * FROM ai_course_modules WHERE course_id = $1 AND is_deleted = false ORDER BY order_index`, [id],
     );
 
     for (let mi = 0; mi < modulesRes.rows.length; mi++) {
       const mod = modulesRes.rows[mi];
 
-      // 3. Create Topic (= module)
-      const topicRes = await client.query(
-        `INSERT INTO topics (subject_id, title, description, order_index) VALUES ($1,$2,$3,$4) RETURNING id`,
-        [subjectId, mod.title, mod.description || null, mi],
+      // Match existing topic by order_index or title
+      let topicId = null;
+      const matchedTopic = existingTopics[mi] || existingTopics.find((t) => t.title.trim().toLowerCase() === mod.title.trim().toLowerCase());
+      if (matchedTopic) {
+        topicId = matchedTopic.id;
+        await client.query(
+          `UPDATE topics SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+          [mod.title, mod.description || null, mi, topicId],
+        );
+      } else {
+        const topicRes = await client.query(
+          `INSERT INTO topics (subject_id, title, description, order_index) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [subjectId, mod.title, mod.description || null, mi],
+        );
+        topicId = topicRes.rows[0].id;
+      }
+      activeTopicIds.add(topicId);
+
+      const existingUnitsRes = await client.query(
+        `SELECT id, title, order_index FROM units WHERE topic_id = $1 AND is_deleted = false ORDER BY order_index`,
+        [topicId],
       );
-      const topicId = topicRes.rows[0].id;
+      const existingUnits = existingUnitsRes.rows;
 
       const aiTopics = await client.query(
-        `SELECT * FROM ai_course_topics WHERE module_id = $1 ORDER BY order_index`, [mod.id],
+        `SELECT * FROM ai_course_topics WHERE module_id = $1 AND is_deleted = false ORDER BY order_index`, [mod.id],
       );
 
       for (let ti = 0; ti < aiTopics.rows.length; ti++) {
         const aiTopic = aiTopics.rows[ti];
 
-        // 4. Create Unit (= ai topic)
-        const unitSlug = uniqueSlug(aiTopic.title, `${Date.now()}-${ti}`);
-        const unitRes = await client.query(
-          `INSERT INTO units (topic_id, title, description, slug, order_index) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-          [topicId, aiTopic.title, aiTopic.description || null, unitSlug, ti],
-        );
-        const unitId = unitRes.rows[0].id;
+        let unitId = null;
+        const matchedUnit = existingUnits[ti] || existingUnits.find((u) => u.title.trim().toLowerCase() === aiTopic.title.trim().toLowerCase());
+        if (matchedUnit) {
+          unitId = matchedUnit.id;
+          await client.query(
+            `UPDATE units SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+            [aiTopic.title, aiTopic.description || null, ti, unitId],
+          );
+        } else {
+          const unitSlug = uniqueSlug(aiTopic.title, `${Date.now()}-${ti}`);
+          const unitRes = await client.query(
+            `INSERT INTO units (topic_id, title, description, slug, order_index) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+            [topicId, aiTopic.title, aiTopic.description || null, unitSlug, ti],
+          );
+          unitId = unitRes.rows[0].id;
+        }
+        activeUnitIds.add(unitId);
 
-        // Assignment per unit (= ai topic)
+        // Assignment per unit
         if (aiTopic.assignment) {
           const asgn = typeof aiTopic.assignment === 'string' ? JSON.parse(aiTopic.assignment) : aiTopic.assignment;
-          await client.query(
-            `INSERT INTO assignments (unit_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
-            [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100],
-          );
+          const existAsgn = await client.query(`SELECT id FROM assignments WHERE unit_id = $1`, [unitId]);
+          if (existAsgn.rows.length) {
+            await client.query(
+              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
+              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, existAsgn.rows[0].id],
+            );
+          } else {
+            await client.query(
+              `INSERT INTO assignments (unit_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
+              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100],
+            );
+          }
         }
 
-        const aiLessons = await client.query(
-          `SELECT * FROM ai_course_lessons WHERE topic_id = $1 ORDER BY order_index`, [aiTopic.id],
-        );
-
-        // 4a. Create one Quiz per Unit — use quiz_questions stored at the topic level
+        // Quiz per unit
         const rawTopicQuiz = Array.isArray(aiTopic.quiz_questions) ? aiTopic.quiz_questions : [];
-        const allQuizQuestions = rawTopicQuiz;
+        if (rawTopicQuiz.length > 0) {
+          const totalPoints = rawTopicQuiz.length * 10;
+          let quizId = null;
+          const existQuiz = await client.query(`SELECT id FROM quizzes WHERE unit_id = $1`, [unitId]);
+          if (existQuiz.rows.length) {
+            quizId = existQuiz.rows[0].id;
+            await client.query(
+              `UPDATE quizzes SET passing_score = $1, max_score = $2, updated_at = NOW() WHERE id = $3`,
+              [Math.ceil(totalPoints * 0.7), totalPoints, quizId],
+            );
+            // Replace questions cleanly under existing quizId
+            await client.query(
+              `DELETE FROM quiz_question_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id = $1)`,
+              [quizId],
+            );
+            await client.query(`DELETE FROM quiz_questions WHERE quiz_id = $1`, [quizId]);
+          } else {
+            const quizRes = await client.query(
+              `INSERT INTO quizzes (unit_id, passing_score, max_score) VALUES ($1, $2, $3) RETURNING id`,
+              [unitId, Math.ceil(totalPoints * 0.7), totalPoints],
+            );
+            quizId = quizRes.rows[0].id;
+          }
 
-        let quizId = null;
-        if (allQuizQuestions.length > 0) {
-          const totalPoints = allQuizQuestions.length * 10;
-          const quizRes = await client.query(
-            `INSERT INTO quizzes (unit_id, passing_score, max_score) VALUES ($1, $2, $3) RETURNING id`,
-            [unitId, Math.ceil(totalPoints * 0.7), totalPoints],
-          );
-          quizId = quizRes.rows[0].id;
-
-          for (let qi = 0; qi < allQuizQuestions.length; qi++) {
-            const q = allQuizQuestions[qi];
+          for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
+            const q = rawTopicQuiz[qi];
             const qqRes = await client.query(
               `INSERT INTO quiz_questions (quiz_id, question_text, question_type, points, explanation, order_index)
                VALUES ($1, $2, 'multiple_choice', 10, $3, $4) RETURNING id`,
               [quizId, q.question, q.explanation || null, qi],
             );
             const questionId = qqRes.rows[0].id;
-
             const options = Array.isArray(q.options) ? q.options : [];
             for (let oi = 0; oi < options.length; oi++) {
               await client.query(
@@ -616,18 +864,39 @@ exports.publishCourse = async (req, res) => {
           }
         }
 
+        // Subtopics & Lessons
+        const existingSubtopicsRes = await client.query(
+          `SELECT id, title, order_index FROM subtopics WHERE unit_id = $1 AND is_deleted = false ORDER BY order_index`,
+          [unitId],
+        );
+        const existingSubtopics = existingSubtopicsRes.rows;
+
+        const aiLessons = await client.query(
+          `SELECT * FROM ai_course_lessons WHERE topic_id = $1 AND is_deleted = false ORDER BY order_index`, [aiTopic.id],
+        );
+
         for (let li = 0; li < aiLessons.rows.length; li++) {
           const aiLesson = aiLessons.rows[li];
 
-          // 5. Create Subtopic (= ai lesson)
-          const subtopicSlug = uniqueSlug(aiLesson.title, `${Date.now()}-${li}`);
-          const subtopicRes = await client.query(
-            `INSERT INTO subtopics (unit_id, title, description, slug, order_index) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-            [unitId, aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, subtopicSlug, li],
-          );
-          const subtopicId = subtopicRes.rows[0].id;
+          let subtopicId = null;
+          const matchedSubtopic = existingSubtopics[li] || existingSubtopics.find((s) => s.title.trim().toLowerCase() === aiLesson.title.trim().toLowerCase());
+          if (matchedSubtopic) {
+            subtopicId = matchedSubtopic.id;
+            await client.query(
+              `UPDATE subtopics SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+              [aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, li, subtopicId],
+            );
+          } else {
+            const subtopicSlug = uniqueSlug(aiLesson.title, `${Date.now()}-${li}`);
+            const subtopicRes = await client.query(
+              `INSERT INTO subtopics (unit_id, title, description, slug, order_index) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+              [unitId, aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, subtopicSlug, li],
+            );
+            subtopicId = subtopicRes.rows[0].id;
+          }
+          activeSubtopicIds.add(subtopicId);
 
-          // 6. Create Lesson Content (rich markdown from AI)
+          // Lesson Content
           const markdown = [
             aiLesson.explanation || '',
             aiLesson.example ? `\n## Example\n\n${aiLesson.example}` : '',
@@ -637,36 +906,62 @@ exports.publishCourse = async (req, res) => {
               : '',
           ].filter(Boolean).join('\n');
 
-          // Store markdown inline with prefix (subject controller reads it back directly).
-          // Store video_url in its own column so the student lesson view can embed the video.
           await client.query(
             `INSERT INTO lesson_content (subtopic_id, content_type, markdown_path, video_url, is_published, version)
              VALUES ($1, 'markdown', $2, $3, true, 1)
              ON CONFLICT (subtopic_id, version) DO UPDATE SET
                markdown_path = EXCLUDED.markdown_path,
-               video_url = EXCLUDED.video_url`,
+               video_url = EXCLUDED.video_url,
+               updated_at = NOW()`,
             [subtopicId, `ai-generated:${markdown}`, aiLesson.video_url || null],
           );
 
-          // 7. Create Exercise per subtopic (if AI generated one)
+          // Exercise per subtopic
           const exerciseData = aiLesson.exercise_data;
           if (exerciseData) {
             const ex = typeof exerciseData === 'string' ? JSON.parse(exerciseData) : exerciseData;
-            // Use empty tasks array → ExerciseEditor runs in single-task mode using initial_files.
-            await client.query(
-              `INSERT INTO exercises (subtopic_id, title, instructions, max_score, language, tasks, initial_files)
-               VALUES ($1, $2, $3, 100, 'javascript', $4, $5)`,
-              [
-                subtopicId,
-                ex.title || aiLesson.title,
-                ex.description || null,
-                JSON.stringify([]),
-                JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]),
-              ],
-            );
+            const existEx = await client.query(`SELECT id FROM exercises WHERE subtopic_id = $1`, [subtopicId]);
+            if (existEx.rows.length) {
+              await client.query(
+                `UPDATE exercises SET title = $1, instructions = $2, initial_files = $3, updated_at = NOW() WHERE id = $4`,
+                [ex.title || aiLesson.title, ex.description || null, JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]), existEx.rows[0].id],
+              );
+            } else {
+              await client.query(
+                `INSERT INTO exercises (subtopic_id, title, instructions, max_score, language, tasks, initial_files)
+                 VALUES ($1, $2, $3, 100, 'javascript', $4, $5)`,
+                [
+                  subtopicId,
+                  ex.title || aiLesson.title,
+                  ex.description || null,
+                  JSON.stringify([]),
+                  JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]),
+                ],
+              );
+            }
           }
         }
       }
+    }
+
+    // Soft-delete any topics, units, or subtopics removed in the latest draft (preserves foreign keys and completions)
+    if (activeTopicIds.size > 0) {
+      await client.query(
+        `UPDATE topics SET is_deleted = true WHERE subject_id = $1 AND id NOT IN (${Array.from(activeTopicIds).map((_, idx) => `$${idx + 2}`).join(',')})`,
+        [subjectId, ...Array.from(activeTopicIds)],
+      );
+    }
+    if (activeUnitIds.size > 0) {
+      await client.query(
+        `UPDATE units SET is_deleted = true WHERE topic_id IN (${Array.from(activeTopicIds).map((_, idx) => `$${idx + 1}`).join(',')}) AND id NOT IN (${Array.from(activeUnitIds).map((_, idx) => `$${activeTopicIds.size + idx + 1}`).join(',')})`,
+        [...Array.from(activeTopicIds), ...Array.from(activeUnitIds)],
+      );
+    }
+    if (activeSubtopicIds.size > 0) {
+      await client.query(
+        `UPDATE subtopics SET is_deleted = true WHERE unit_id IN (${Array.from(activeUnitIds).map((_, idx) => `$${idx + 1}`).join(',')}) AND id NOT IN (${Array.from(activeSubtopicIds).map((_, idx) => `$${activeUnitIds.size + idx + 1}`).join(',')})`,
+        [...Array.from(activeUnitIds), ...Array.from(activeSubtopicIds)],
+      );
     }
 
     // 7. Create final capstone project (course-level) — attached to last topic
@@ -687,7 +982,13 @@ exports.publishCourse = async (req, res) => {
 
     // 8. Update ai_course
     await client.query(
-      `UPDATE ai_courses SET status = 'published', subject_id = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE ai_courses
+       SET status = 'published',
+           subject_id = $1,
+           has_unpublished_changes = false,
+           last_published_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $2`,
       [subjectId, id],
     );
 
@@ -731,6 +1032,7 @@ exports.updateModule = async (req, res) => {
        practice_tasks ? JSON.stringify(practice_tasks) : null,
        case_studies ? JSON.stringify(case_studies) : null, id],
     );
+    await markModuleCourseUpdated(id);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_module', entityId: id, details: { title } });
     res.json({ success: true });
   } catch (err) {
@@ -752,6 +1054,7 @@ exports.updateTopic = async (req, res) => {
     if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
     vals.push(id);
     await pool.query(`UPDATE ai_course_topics SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+    await markTopicCourseUpdated(id);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_topic', entityId: id, details: { title } });
     res.json({ success: true });
   } catch (err) {
@@ -780,6 +1083,7 @@ exports.updateLesson = async (req, res) => {
     if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
     vals.push(id);
     await pool.query(`UPDATE ai_course_lessons SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+    await markLessonCourseUpdated(id);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_lesson', entityId: id, details: { title } });
     res.json({ success: true });
   } catch (err) {
@@ -803,6 +1107,7 @@ exports.addModule = async (req, res) => {
        VALUES ($1,$2,'',${orderIndex},'[]','[]') RETURNING *`,
       [course_id, title],
     );
+    await markCourseUpdated(course_id);
     logAction({ req, action: 'CREATE', entityType: 'ai_course_module', entityId: result.rows[0].id, details: { title } });
     res.status(201).json({ success: true, data: { ...result.rows[0], topics: [] } });
   } catch (err) {
@@ -824,6 +1129,7 @@ exports.addTopic = async (req, res) => {
        VALUES ($1,$2,'',$3) RETURNING *`,
       [module_id, title, orderIndex],
     );
+    await markModuleCourseUpdated(module_id);
     logAction({ req, action: 'CREATE', entityType: 'ai_course_topic', entityId: result.rows[0].id, details: { title } });
     res.status(201).json({ success: true, data: { ...result.rows[0], lessons: [] } });
   } catch (err) {
@@ -847,6 +1153,7 @@ exports.addLesson = async (req, res) => {
        VALUES ($1,$2,'','','','[]',$3,15,NULL,'[]',NULL,$4) RETURNING *`,
       [topic_id, title, lesson_type || 'video', orderIndex],
     );
+    await markTopicCourseUpdated(topic_id);
     logAction({ req, action: 'CREATE', entityType: 'ai_course_lesson', entityId: result.rows[0].id, details: { title } });
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
@@ -878,6 +1185,7 @@ exports.deleteModule = async (req, res) => {
       [id],
     );
     await client.query('COMMIT');
+    await markCourseUpdated(modRes.rows[0].course_id);
     logAction({ req, action: 'DELETE', entityType: 'ai_course_module', entityId: id, details: { title: modRes.rows[0].title } });
     res.json({ success: true });
   } catch (err) {
@@ -906,6 +1214,7 @@ exports.deleteTopic = async (req, res) => {
       [id],
     );
     await client.query('COMMIT');
+    await markModuleCourseUpdated(topicRes.rows[0].module_id);
     logAction({ req, action: 'DELETE', entityType: 'ai_course_topic', entityId: id, details: { title: topicRes.rows[0].title } });
     res.json({ success: true });
   } catch (err) {
@@ -924,6 +1233,7 @@ exports.deleteLesson = async (req, res) => {
       [id],
     );
     if (!result.rows.length) return res.status(404).json({ success: false, message: 'Not found' });
+    await markTopicCourseUpdated(result.rows[0].topic_id);
     logAction({ req, action: 'DELETE', entityType: 'ai_course_lesson', entityId: id, details: { title: result.rows[0].title } });
     res.json({ success: true });
   } catch (err) {
@@ -936,13 +1246,15 @@ exports.deleteLesson = async (req, res) => {
 exports.reorderModules = async (req, res) => {
   const client = await pool.connect();
   try {
+    const { id } = req.params;
     // orderedIds: [{ id, order_index }]
     const { ordered_ids } = req.body;
     await client.query('BEGIN');
-    for (const { id, order_index } of ordered_ids) {
-      await client.query(`UPDATE ai_course_modules SET order_index = $1 WHERE id = $2`, [order_index, id]);
+    for (const { id: mId, order_index } of ordered_ids) {
+      await client.query(`UPDATE ai_course_modules SET order_index = $1 WHERE id = $2`, [order_index, mId]);
     }
     await client.query('COMMIT');
+    await markCourseUpdated(id);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_module', entityId: null, details: { reordered: ordered_ids.length } });
     res.json({ success: true });
   } catch (err) {
@@ -958,12 +1270,14 @@ exports.reorderModules = async (req, res) => {
 exports.reorderTopics = async (req, res) => {
   const client = await pool.connect();
   try {
+    const { courseId } = req.params;
     const { ordered_ids } = req.body;
     await client.query('BEGIN');
-    for (const { id, order_index } of ordered_ids) {
-      await client.query(`UPDATE ai_course_topics SET order_index = $1 WHERE id = $2`, [order_index, id]);
+    for (const { id: tId, order_index } of ordered_ids) {
+      await client.query(`UPDATE ai_course_topics SET order_index = $1 WHERE id = $2`, [order_index, tId]);
     }
     await client.query('COMMIT');
+    await markCourseUpdated(courseId);
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_topic', entityId: null, details: { reordered: ordered_ids.length } });
     res.json({ success: true });
   } catch (err) {
@@ -1204,6 +1518,7 @@ exports.generateAndSaveUnits = async (req, res) => {
       created.push({ ...r.rows[0], lessons: [] });
     }
     await client.query('COMMIT');
+    await markModuleCourseUpdated(module_id);
     logAction({ req, action: 'CREATE', entityType: 'ai_course_topic', entityId: module_id, details: { created: created.length } });
     res.status(201).json({ success: true, data: created });
   } catch (err) {
@@ -1276,6 +1591,7 @@ exports.generateAndSaveSubtopics = async (req, res) => {
       created.push(r.rows[0]);
     }
     await client.query('COMMIT');
+    await markTopicCourseUpdated(topic_id);
     logAction({ req, action: 'CREATE', entityType: 'ai_course_lesson', entityId: topic_id, details: { created: created.length } });
     res.status(201).json({ success: true, data: created });
   } catch (err) {
@@ -1345,6 +1661,7 @@ exports.generateAndSaveLessonContent = async (req, res) => {
       `UPDATE ai_course_lessons SET ${updateFields} WHERE id = $${updateVals.length}`,
       updateVals,
     );
+    await markCourseUpdated(course_id);
 
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_lesson', entityId: id, details: { type } });
     res.json({ success: true, data: result });
@@ -1387,6 +1704,7 @@ exports.generateAndSaveUnitQuiz = async (req, res) => {
       `UPDATE ai_course_topics SET quiz_questions = $1 WHERE id = $2`,
       [JSON.stringify(result.quiz_questions), id],
     );
+    await markTopicCourseUpdated(id);
 
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_topic', entityId: id, details: { quiz_questions: true } });
     res.json({ success: true, data: result.quiz_questions });
@@ -1422,6 +1740,7 @@ exports.generateAndSaveUnitAssignment = async (req, res) => {
       `UPDATE ai_course_topics SET assignment = $1 WHERE id = $2`,
       [JSON.stringify(result.assignment), id],
     );
+    await markTopicCourseUpdated(id);
 
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_topic', entityId: id, details: { assignment: true } });
     res.json({ success: true, data: result.assignment });
@@ -1462,6 +1781,7 @@ exports.generateAndSaveCapstone = async (req, res) => {
       `UPDATE ai_course_modules SET capstone_project = $1 WHERE id = $2`,
       [JSON.stringify(result.capstone_project), id],
     );
+    await markModuleCourseUpdated(id);
 
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_module', entityId: id, details: { capstone_project: true } });
     res.json({ success: true, data: result.capstone_project });

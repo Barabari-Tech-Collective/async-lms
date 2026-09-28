@@ -35,7 +35,8 @@ exports.validateSignup = validate([
   body('email')
     .isEmail()
     .withMessage('Please provide a valid email address')
-    .normalizeEmail(),
+    .trim()
+    .toLowerCase(),
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),

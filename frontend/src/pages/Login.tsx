@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -22,10 +23,13 @@ import Logo from '@/components/common/Logo';
 import SEO from '@/components/common/SEO';
 import { loginSchema, signupSchema } from '@/lib/validations';
 
-const GOOGLE_AUTH_URL = `${import.meta.env.VITE_API_URL}/api/v1/auth/google`;
+const GOOGLE_AUTH_URL = `${import.meta.env.VITE_API_URL || ''}/api/v1/auth/google`;
 
 export default function Login() {
   const [activeTab, setActiveTab] = useState<'login' | 'signup'>('login');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -70,13 +74,19 @@ export default function Login() {
     validationSchema: loginSchema,
     onSubmit: async (values) => {
       const toastId = toast.loading('Signing in...');
+      const sanitizedValues = { ...values, email: values.email.trim().toLowerCase() };
       try {
-        await dispatch(loginUser(values)).unwrap();
+        await dispatch(loginUser(sanitizedValues)).unwrap();
         toast.success('Login successful!', { id: toastId });
-      } catch (err) {
-        toast.error(typeof err === 'string' ? err : 'Login failed', {
-          id: toastId,
-        });
+      } catch (err: any) {
+        if (err && err.needsVerification) {
+          toast.dismiss(toastId);
+          sessionStorage.setItem('verify_email', sanitizedValues.email);
+          navigate('/verify-email');
+          return;
+        }
+        const errMsg = typeof err === 'string' ? err : (err?.message || 'Login failed');
+        toast.error(errMsg, { id: toastId });
       }
     },
   });
@@ -92,13 +102,15 @@ export default function Login() {
     validationSchema: signupSchema,
     onSubmit: async (values) => {
       const toastId = toast.loading('Creating account...');
+      const sanitizedValues = { ...values, email: values.email.trim().toLowerCase() };
       try {
-        await dispatch(signupUser(values)).unwrap();
-        toast.success('Account created successfully!', { id: toastId });
-      } catch (err) {
-        toast.error(typeof err === 'string' ? err : 'Signup failed', {
-          id: toastId,
-        });
+        const res = await dispatch(signupUser(sanitizedValues)).unwrap();
+        toast.success(res?.message || 'Account created successfully!', { id: toastId });
+        sessionStorage.setItem('verify_email', sanitizedValues.email);
+        navigate('/verify-email');
+      } catch (err: any) {
+        const errMsg = typeof err === 'string' ? err : (err?.message || 'Signup failed');
+        toast.error(errMsg, { id: toastId });
       }
     },
   });
@@ -195,18 +207,36 @@ export default function Login() {
               </div>
 
               <div className='space-y-1'>
-                <label className='text-[13px] font-semibold text-slate-800 tracking-wide'>
-                  Password
-                </label>
-                <Input
-                  name='password'
-                  type='password'
-                  className='h-10 text-sm'
-                  placeholder='Enter Password'
-                  value={loginForm.values.password}
-                  onChange={loginForm.handleChange}
-                  onBlur={loginForm.handleBlur}
-                />
+                <div className='flex justify-between items-center'>
+                  <label className='text-[13px] font-semibold text-slate-800 tracking-wide'>
+                    Password
+                  </label>
+                  <button
+                    type='button'
+                    onClick={() => navigate('/forgot-password')}
+                    className='text-[12px] font-semibold text-indigo-600 hover:text-indigo-800'
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <div className="relative">
+                  <Input
+                    name='password'
+                    type={showLoginPassword ? 'text' : 'password'}
+                    className='h-10 text-sm pr-10'
+                    placeholder='Enter Password'
+                    value={loginForm.values.password}
+                    onChange={loginForm.handleChange}
+                    onBlur={loginForm.handleBlur}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                  >
+                    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {loginForm.touched.password && loginForm.errors.password && (
                   <p className='text-xs text-destructive mt-1'>
                     {loginForm.errors.password}
@@ -272,15 +302,24 @@ export default function Login() {
                 <label className='text-[13px] font-semibold text-slate-800 tracking-wide'>
                   Password
                 </label>
-                <Input
-                  name='password'
-                  type='password'
-                  className='h-10 text-sm'
-                  placeholder='Create a Password'
-                  value={signupForm.values.password}
-                  onChange={signupForm.handleChange}
-                  onBlur={signupForm.handleBlur}
-                />
+                <div className="relative">
+                  <Input
+                    name='password'
+                    type={showSignupPassword ? 'text' : 'password'}
+                    className='h-10 text-sm pr-10'
+                    placeholder='Create a Password'
+                    value={signupForm.values.password}
+                    onChange={signupForm.handleChange}
+                    onBlur={signupForm.handleBlur}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupPassword(!showSignupPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                  >
+                    {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {signupForm.touched.password && signupForm.errors.password && (
                   <p className='text-xs text-destructive mt-1'>
                     {signupForm.errors.password}
@@ -292,15 +331,24 @@ export default function Login() {
                 <label className='text-[13px] font-semibold text-slate-800 tracking-wide'>
                   Confirm Password
                 </label>
-                <Input
-                  name='confirmPassword'
-                  type='password'
-                  className='h-10 text-sm'
-                  placeholder='Confirm your Password'
-                  value={signupForm.values.confirmPassword}
-                  onChange={signupForm.handleChange}
-                  onBlur={signupForm.handleBlur}
-                />
+                <div className="relative">
+                  <Input
+                    name='confirmPassword'
+                    type={showSignupConfirmPassword ? 'text' : 'password'}
+                    className='h-10 text-sm pr-10'
+                    placeholder='Confirm your Password'
+                    value={signupForm.values.confirmPassword}
+                    onChange={signupForm.handleChange}
+                    onBlur={signupForm.handleBlur}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupConfirmPassword(!showSignupConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                  >
+                    {showSignupConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {signupForm.touched.confirmPassword &&
                   signupForm.errors.confirmPassword && (
                     <p className='text-xs text-destructive mt-1'>

@@ -2,10 +2,15 @@ const router = require('express').Router();
 const multer = require('multer');
 const isAdmin = require('../middlewares/isAdmin');
 const verifyToken = require('../middlewares/verfiyToken');
+const {
+  validateExerciseTests,
+} = require('../controllers/exerciseValidation.controller');
 
 const {
   getAdminStats,
   getAdminAnalytics,
+  getStudentRegistrations,
+  getActiveUsersTimeline,
   getAllStudents,
   getProjectSubmissions,
   getStudentProfile,
@@ -41,6 +46,7 @@ const {
   updateProject,
   deleteProject,
   verifyUser,
+  createCurriculumDeveloper,
 } = require('../controllers/admin.controller');
 
 const {
@@ -71,8 +77,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ===== EXISTING ROUTES =====
 router.get('/stats', verifyToken, isAdmin, getAdminStats);
 router.get('/analytics', verifyToken, isAdmin, getAdminAnalytics);
+router.get('/analytics/registrations', verifyToken, isAdmin, getStudentRegistrations);
+router.get('/analytics/active-users', verifyToken, isAdmin, getActiveUsersTimeline);
 router.get('/all-students', verifyToken, isAdmin, getAllStudents);
 router.get('/project-submissions', verifyToken, isAdmin, getProjectSubmissions);
+router.post('/curriculum-developer', verifyToken, isAdmin, createCurriculumDeveloper);
 router.post(
   '/lesson-content/upload',
   verifyToken,
@@ -189,6 +198,14 @@ router.delete(
 );
 
 // ===== EXERCISE MANAGEMENT =====
+// Verify authored test cases against the reference solution before saving.
+// Declared before '/exercises/:id' so it is not captured by that param route.
+router.post(
+  '/exercises/validate-tests',
+  verifyToken,
+  isAdmin,
+  validateExerciseTests,
+);
 router.get('/exercises/:id', verifyToken, isAdmin, getExercise);
 router.post('/exercises', verifyToken, isAdmin, createExercise);
 router.put('/exercises/:id', verifyToken, isAdmin, updateExercise);

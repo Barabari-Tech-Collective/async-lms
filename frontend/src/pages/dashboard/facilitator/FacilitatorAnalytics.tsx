@@ -35,31 +35,33 @@ const FacilitatorAnalytics = () => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
       <div>
-        <p className="text-[11px] text-slate-400 mb-1">Dashboard / Analytics</p>
-        <h1 className="text-2xl font-bold text-slate-800">Analytics Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Quiz, Assignment, Project, and Student Performance Insights</p>
+        <p className="text-[10px] sm:text-[11px] text-slate-400 mb-0.5 sm:mb-1">Dashboard / Analytics</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">Analytics Dashboard</h1>
+        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">Quiz, Assignment, Project, and Student Performance Insights</p>
       </div>
 
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit flex-wrap">
-        {TABS.map((tab) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-2xl w-full">
+        {TABS.map((tab, idx) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all min-h-[38px] ${
+              idx === TABS.length - 1 ? 'col-span-2 sm:col-span-1' : ''
+            } ${
               activeTab === tab.id
-                ? 'bg-white text-slate-800 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                ? 'bg-white text-slate-800 shadow-xs font-bold'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
             }`}
           >
             {tab.icon}
-            {tab.label}
+            <span className="truncate">{tab.label}</span>
           </button>
         ))}
       </div>
 
-      <div>
+      <div className="min-w-0">
         {activeTab === 'quiz' && <QuizTab colleges={colleges} batches={batches} subjects={subjects} />}
         {activeTab === 'assignments' && <AssignmentsTab colleges={colleges} batches={batches} subjects={subjects} />}
         {activeTab === 'projects' && <ProjectsTab colleges={colleges} batches={batches} subjects={subjects} />}

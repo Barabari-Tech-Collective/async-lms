@@ -160,18 +160,18 @@ const CourseIntro = () => {
   const isCompleted = progressPercent >= 100;
 
   return (
-    <div className='max-w-5xl mx-auto p-8 space-y-10 animate-in fade-in duration-700'>
+    <div className='max-w-5xl mx-auto p-4 sm:p-6 md:p-8 space-y-6 sm:space-y-10 animate-in fade-in duration-500'>
       {/* Course Completed banner */}
       {isCompleted && (
-        <div className='flex items-center gap-4 rounded-3xl bg-emerald-50 border border-emerald-200 p-6 shadow-sm'>
-          <div className='p-3 bg-emerald-100 rounded-2xl shrink-0'>
-            <PartyPopper className='w-7 h-7 text-emerald-600' />
+        <div className='flex items-center gap-3 sm:gap-4 rounded-2xl sm:rounded-3xl bg-emerald-50 border border-emerald-200 p-4 sm:p-6 shadow-sm'>
+          <div className='p-2.5 sm:p-3 bg-emerald-100 rounded-xl sm:rounded-2xl shrink-0'>
+            <PartyPopper className='w-6 h-6 sm:w-7 sm:h-7 text-emerald-600' />
           </div>
           <div>
-            <p className='font-bold text-emerald-800 text-lg'>
+            <p className='font-bold text-emerald-800 text-base sm:text-lg'>
               Course Completed!
             </p>
-            <p className='text-sm text-emerald-700'>
+            <p className='text-xs sm:text-sm text-emerald-700 mt-0.5'>
               You've finished every lesson, quiz, and assignment in this course.
               Great work!
             </p>
@@ -180,26 +180,26 @@ const CourseIntro = () => {
       )}
 
       {/* Hero Section */}
-      <div className='relative overflow-hidden rounded-3xl bg-[#1e2653] p-10 text-white shadow-2xl'>
-        <div className='relative z-10 space-y-6 max-w-2xl'>
+      <div className='relative overflow-hidden rounded-2xl sm:rounded-3xl bg-[#1e2653] p-5 sm:p-8 md:p-10 text-white shadow-xl'>
+        <div className='relative z-10 space-y-4 sm:space-y-6 max-w-2xl'>
           {isCompleted && (
             <span className='inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-300'>
               <Trophy className='w-3.5 h-3.5' />
               Completed
             </span>
           )}
-          <h1 className='text-4xl capitalize md:text-5xl font-black tracking-tight leading-tight'>
+          <h1 className='text-2xl sm:text-4xl md:text-5xl capitalize font-black tracking-tight leading-tight'>
             {course?.name}
           </h1>
-          <p className='text-blue-100 text-lg leading-relaxed opacity-90'>
+          <p className='text-blue-100 text-sm sm:text-base md:text-lg leading-relaxed opacity-90'>
             {course?.description}
           </p>
-          <div className='flex flex-wrap gap-4 pt-4'>
+          <div className='flex flex-wrap gap-4 pt-2 sm:pt-4'>
             <Button
               size='lg'
               onClick={continueLearning}
               disabled={!course?.first_lesson_slug}
-              className='bg-blue-600 hover:bg-blue-700 text-white font-bold h-14 px-8 rounded-xl shadow-lg shadow-blue-900/20 gap-2'
+              className='w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 sm:h-14 px-6 sm:px-8 rounded-xl shadow-lg shadow-blue-900/20 gap-2 text-sm sm:text-base'
             >
               {isCompleted ? (
                 <RotateCcw className='w-5 h-5' />
@@ -218,28 +218,28 @@ const CourseIntro = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
+      <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6'>
         <StatCard
-          icon={<BookOpen className='text-blue-600' />}
+          icon={<BookOpen className='w-5 h-5 text-blue-600' />}
           label='Curriculum'
           value={`${course?.total_topics} Topic(s)`}
         />
         <StatCard
-          icon={<Clock className='text-orange-600' />}
+          icon={<Clock className='w-5 h-5 text-orange-600' />}
           label='Content'
           value={`${course?.total_subtopics} Lessons`}
         />
         <StatCard
-          icon={<Trophy className='text-emerald-600' />}
+          icon={<Trophy className='w-5 h-5 text-emerald-600' />}
           label='Certificate'
           value={isCompleted ? 'Earned' : 'On Completion'}
         />
       </div>
 
       {/* Progress & Quick Continue */}
-      <div className='bg-white border border-slate-100 rounded-3xl p-8 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8'>
-        <div className='space-y-2 w-full md:w-1/2'>
-          <div className='flex justify-between text-sm font-bold mb-1'>
+      <div className='bg-white border border-slate-100 rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-6'>
+        <div className='space-y-2 w-full sm:w-1/2'>
+          <div className='flex justify-between text-xs sm:text-sm font-bold mb-1'>
             <span className='text-slate-500 uppercase tracking-wider'>
               Your Progress
             </span>
@@ -251,12 +251,12 @@ const CourseIntro = () => {
           </div>
           <Progress
             value={progressPercent}
-            className={`h-3 bg-slate-100 ${isCompleted ? '[&>div]:bg-emerald-500' : ''}`}
+            className={`h-2.5 sm:h-3 bg-slate-100 ${isCompleted ? '[&>div]:bg-emerald-500' : ''}`}
           />
         </div>
-        <div className='flex items-center gap-4'>
-          <div className='text-right hidden sm:block'>
-            <p className='text-xs font-bold text-slate-400 uppercase tracking-widest'>
+        <div className='flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto'>
+          <div className='text-left sm:text-right'>
+            <p className='text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest'>
               {isCompleted
                 ? 'Status'
                 : isInProgress
@@ -264,7 +264,7 @@ const CourseIntro = () => {
                   : 'Status'}
             </p>
             <p
-              className={`text-sm font-semibold ${isCompleted ? 'text-emerald-600' : 'text-slate-700'}`}
+              className={`text-xs sm:text-sm font-semibold ${isCompleted ? 'text-emerald-600' : 'text-slate-700'}`}
             >
               {isCompleted
                 ? 'Completed'
@@ -275,7 +275,7 @@ const CourseIntro = () => {
           </div>
           <Button
             variant='outline'
-            className='rounded-xl border-slate-200 font-bold'
+            className='rounded-xl border-slate-200 font-bold min-h-[44px] px-4'
             onClick={continueLearning}
             disabled={!course?.first_lesson_slug}
           >
@@ -302,15 +302,16 @@ const StatCard = ({
   label: string;
   value: string;
 }) => (
-  <div className='bg-white border border-slate-100 p-6 rounded-2xl flex items-center gap-4 shadow-sm'>
-    <div className='p-3 bg-slate-50 rounded-xl'>{icon}</div>
-    <div>
-      <p className='text-xs font-bold text-slate-400 uppercase tracking-widest'>
+  <div className='bg-white border border-slate-100 p-4 sm:p-6 rounded-xl sm:rounded-2xl flex items-center gap-3 sm:gap-4 shadow-sm'>
+    <div className='p-2.5 sm:p-3 bg-slate-50 rounded-lg sm:rounded-xl shrink-0'>{icon}</div>
+    <div className='min-w-0'>
+      <p className='text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest truncate'>
         {label}
       </p>
-      <p className='text-lg font-bold text-slate-800'>{value}</p>
+      <p className='text-sm sm:text-lg font-bold text-slate-800 truncate'>{value}</p>
     </div>
   </div>
 );
 
 export default CourseIntro;
+

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowLeft, Sparkles, Loader2, Plus, Trash2, GripVertical, Check } from 'lucide-react';
 import { aiCurriculumApi } from '@/features/aiCurriculum/aiCurriculumApi';
@@ -82,8 +82,8 @@ function SelectField({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className='bg-white border border-slate-200 rounded-xl p-6'>
-      <h2 className='text-sm font-bold text-slate-700 mb-4'>{title}</h2>
+    <div className='bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-xs min-w-0'>
+      <h2 className='text-xs sm:text-sm font-bold text-slate-800 mb-3.5 sm:mb-4'>{title}</h2>
       {children}
     </div>
   );
@@ -198,7 +198,7 @@ function StepOne({
             </div>
           )}
 
-          <div className='grid grid-cols-2 gap-4'>
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
             <div>
               <Label required>Experience Level</Label>
               <SelectField
@@ -232,7 +232,7 @@ function StepOne({
               onChange={(v) => set({ learning_goal: v })}
             />
           </div>
-          <div className='grid grid-cols-2 gap-4'>
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
             <div>
               <Label>Course Duration</Label>
               <SelectField
@@ -255,20 +255,20 @@ function StepOne({
         </div>
       </Section>
 
-      <div className='flex items-center justify-end gap-3 mt-6'>
+      <div className='flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 mt-6'>
         <button
           onClick={onCancel}
-          className='px-5 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors'
+          className='w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors text-center'
         >
           Cancel
         </button>
         <button
           onClick={onNext}
           disabled={!isValid || generating}
-          className='flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm'
+          className='w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold bg-[#1e2653] text-white rounded-xl hover:bg-[#16203f] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-xs min-h-[40px]'
         >
           {generating ? <Loader2 className='w-4 h-4 animate-spin' /> : <Sparkles className='w-4 h-4' />}
-          {generating ? 'Generating Topics...' : 'Generate Topics'}
+          <span>{generating ? 'Generating Topics...' : 'Generate Topics'}</span>
         </button>
       </div>
     </div>
@@ -332,11 +332,11 @@ function Step2TopicSelector({
   };
 
   return (
-    <div className='space-y-4'>
-      <div className='bg-white border border-slate-200 rounded-xl p-6'>
+    <div className='space-y-4 min-w-0'>
+      <div className='bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-xs min-w-0'>
         <div className='flex items-center justify-between mb-1'>
-          <h2 className='text-sm font-bold text-slate-700'>Select Topics</h2>
-          <span className='text-xs text-slate-400'>{selected.length} selected</span>
+          <h2 className='text-xs sm:text-sm font-bold text-slate-800'>Select Topics</h2>
+          <span className='text-xs text-slate-400 font-medium'>{selected.length} selected</span>
         </div>
         <p className='text-xs text-slate-500 mb-4'>
           Check the topics you want to include. Drag to reorder. Click any title to rename it.
@@ -351,7 +351,7 @@ function Step2TopicSelector({
               onDragOver={(e) => { e.preventDefault(); setDragOver(i); }}
               onDrop={() => handleDrop(i)}
               onDragEnd={() => { setDragIdx(null); setDragOver(null); }}
-              className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+              className={`flex items-center gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-xl border transition-all ${
                 topic.selected ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-white opacity-60'
               } ${dragOver === i && dragIdx !== i ? 'outline outline-2 outline-indigo-400 outline-offset-1' : ''}`}
             >
@@ -370,10 +370,10 @@ function Step2TopicSelector({
                 <input
                   value={topic.title}
                   onChange={(e) => rename(topic._key, e.target.value)}
-                  className='w-full text-[13px] font-semibold text-slate-800 bg-transparent border-none outline-none focus:ring-0 p-0'
+                  className='w-full text-xs sm:text-[13px] font-semibold text-slate-800 bg-transparent border-none outline-none focus:ring-0 p-0'
                 />
                 {topic.description && (
-                  <p className='text-[11px] text-slate-400 truncate mt-0.5'>{topic.description}</p>
+                  <p className='text-[10px] sm:text-[11px] text-slate-400 truncate mt-0.5'>{topic.description}</p>
                 )}
               </div>
 
@@ -394,32 +394,32 @@ function Step2TopicSelector({
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addCustom()}
             placeholder='Add custom topic...'
-            className='flex-1 border border-dashed border-slate-300 rounded-lg px-3 py-2 text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white'
+            className='flex-1 border border-dashed border-slate-300 rounded-xl px-3 py-2 text-xs sm:text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white min-h-[38px]'
           />
           <button
             onClick={addCustom}
             disabled={!newTitle.trim()}
-            className='p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-30 transition-colors'
+            className='p-2 text-slate-400 hover:text-indigo-600 disabled:opacity-30 transition-colors shrink-0 min-h-[38px]'
           >
             <Plus className='w-4 h-4' />
           </button>
         </div>
       </div>
 
-      <div className='flex items-center justify-between mt-6'>
+      <div className='flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 mt-6'>
         <button
           onClick={onBack}
-          className='flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors'
+          className='w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors'
         >
-          <ArrowLeft className='w-3.5 h-3.5' /> Back
+          <ArrowLeft className='w-3.5 h-3.5' /> <span>Back</span>
         </button>
         <button
           onClick={() => onCreateCourse(selected.map(({ title, description }) => ({ title, description })))}
           disabled={selected.length === 0 || creating}
-          className='flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm'
+          className='w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold bg-[#1e2653] text-white rounded-xl hover:bg-[#16203f] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-xs min-h-[40px]'
         >
           {creating ? <Loader2 className='w-4 h-4 animate-spin' /> : null}
-          {creating ? 'Creating Course...' : `Create Course with ${selected.length} Topic${selected.length !== 1 ? 's' : ''}`}
+          <span>{creating ? 'Creating Course...' : `Create Course with ${selected.length} Topic${selected.length !== 1 ? 's' : ''}`}</span>
         </button>
       </div>
     </div>
@@ -432,13 +432,27 @@ export default function AiCurriculumBuilder() {
   const navigate = useNavigate();
   const user = useAppSelector(selectUser);
   const isAdmin = user?.role === 'admin';
-  const base = isAdmin ? '/dashboard/admin' : '/dashboard/facilitator';
+  const base = isAdmin
+    ? '/dashboard/admin'
+    : user?.role === 'curriculum_developer'
+    ? '/dashboard/curriculum-developer'
+    : '/dashboard/facilitator';
 
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<CourseFormData>(EMPTY_FORM);
   const [generatingTopics, setGeneratingTopics] = useState(false);
   const [creating, setCreating] = useState(false);
   const [topicSuggestions, setTopicSuggestions] = useState<TopicSuggestion[]>([]);
+
+  useEffect(() => {
+    if (user?.role === 'curriculum_developer' || user?.domain || user?.role_focus) {
+      setForm((prev) => ({
+        ...prev,
+        domain: prev.domain || (user?.domain ? user.domain.toLowerCase() : ''),
+        role_focus: (prev.role_focus === 'student' || !prev.role_focus) && user?.role_focus ? user.role_focus : prev.role_focus,
+      }));
+    }
+  }, [user]);
 
   const set = (partial: Partial<CourseFormData>) => setForm((f) => ({ ...f, ...partial }));
 

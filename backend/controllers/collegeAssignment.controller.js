@@ -102,6 +102,63 @@ async function storeFile(file, { s3KeyPrefix, localSubPath }) {
   return { url, name: file.originalname };
 }
 
+// ─── Get Dynamic Courses for Assignment Creation ─────────────────────────────
+// GET /api/v1/college-assignments/courses
+exports.getCoursesForAssignment = async (req, res) => {
+  try {
+    const role = req.user.role;
+    let query = '';
+    let params = [];
+
+    if (role === 'admin') {
+      // Admin sees all subjects
+      query = `
+        SELECT id as value, name as label, slug
+        FROM subjects
+        WHERE is_published = true AND is_deleted = false
+        ORDER BY name ASC
+      `;
+    } else {
+      // Facilitator sees only their assigned subjects
+      const subjectIds = req.user.subject_ids || [];
+      if (subjectIds.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+      query = `
+        SELECT id as value, name as label, slug
+        FROM subjects
+        WHERE id = ANY($1::uuid[]) AND is_published = true AND is_deleted = false
+        ORDER BY name ASC
+      `;
+      params = [subjectIds];
+    }
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('getCoursesForAssignment error:', error);
+    serverError(res, error);
+  }
+};
+
+// GET /api/v1/college-assignments/courses/:courseId/topics
+exports.getTopicsForCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const query = `
+      SELECT id as value, title as label
+      FROM topics
+      WHERE subject_id = $1 AND is_deleted = false
+      ORDER BY order_index ASC
+    `;
+    const result = await pool.query(query, [courseId]);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('getTopicsForCourse error:', error);
+    serverError(res, error);
+  }
+};
+
 // ─── Upload Instruction Document ─────────────────────────────────────────────
 
 // POST /api/v1/college-assignments/upload-instruction
@@ -118,8 +175,7 @@ exports.uploadInstructionDoc = async (req, res) => {
       localSubPath: '',
     });
 
-    logActi;
-    on({
+    logAction({
       req,
       action: 'CREATE',
       entityType: 'assignment_instruction_doc',
@@ -268,7 +324,7 @@ exports.createAssignment = async (req, res) => {
       });
   }
 
-  // Facilitators may only create assignments for their own colleges
+  // Facilitators may only create assignments for their own colleges and assigned subjects
   if (req.user.role === 'facilitator') {
     const allowed = req.user.college_ids || [];
     for (const cid of targetCollegeIds) {
@@ -276,6 +332,27 @@ exports.createAssignment = async (req, res) => {
         return res.status(403).json({
           success: false,
           message: `You are not assigned to college: ${cid}`,
+        });
+      }
+    }
+
+    const allowedSubjects = req.user.subject_ids || [];
+    if (allowedSubjects.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'You have no assigned subjects to create assignments for',
+      });
+    }
+
+    if (course && course !== 'General') {
+      const validSubj = await pool.query(
+        'SELECT 1 FROM subjects WHERE (id::text = $1 OR slug = $1 OR name = $1) AND id = ANY($2::uuid[])',
+        [course, allowedSubjects],
+      );
+      if (validSubj.rows.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not assigned to this subject/course',
         });
       }
     }
@@ -288,8 +365,8 @@ exports.createAssignment = async (req, res) => {
 
     for (const cid of targetCollegeIds) {
       const { rows } = await client.query(
-        `INSERT INTO college_assignments (college_id, created_by, title, description, due_date, course, instruction_file_url, instruction_file_name, test_cases, rubric, evaluator_type, assignment_description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `INSERT INTO college_assignments (college_id, created_by, title, description, due_date, course, topic_id, instruction_file_url, instruction_file_name, test_cases, rubric, evaluator_type, assignment_description)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [
           cid,
@@ -298,6 +375,7 @@ exports.createAssignment = async (req, res) => {
           description || null,
           due_date || null,
           course || 'General',
+          req.body.topic_id || null,
           req.body.instruction_file_url || null,
           req.body.instruction_file_name || null,
           test_cases ? JSON.stringify(test_cases) : '[]',
@@ -373,12 +451,56 @@ exports.updateAssignment = async (req, res) => {
     }
 
     if (req.user.role === 'facilitator') {
-      const allowed = req.user.college_ids || [];
-      if (!allowed.includes(existing.rows[0].college_id)) {
+      const allowedColleges = req.user.college_ids || [];
+      const allowedSubjects = req.user.subject_ids || [];
+      const assignment = existing.rows[0];
+
+      if (!allowedColleges.includes(assignment.college_id)) {
         return res.status(403).json({
           success: false,
           message: 'You are not assigned to this college',
         });
+      }
+
+      const isAuthor = assignment.created_by === req.user.id;
+      let isSubjectAssigned = assignment.course === 'General';
+      if (!isSubjectAssigned && assignment.course && allowedSubjects.length > 0) {
+        const check = await pool.query(
+          `SELECT 1 FROM subjects 
+           WHERE (id::text = $1 OR slug = $1 OR name = $1) 
+             AND id = ANY($2::uuid[]) AND is_deleted = false`,
+          [assignment.course, allowedSubjects],
+        );
+        isSubjectAssigned = check.rows.length > 0;
+      }
+
+      if (!isAuthor && !isSubjectAssigned) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: You are not authorized to modify this assignment',
+        });
+      }
+
+      // If course is being changed, verify new course is allowed
+      if (course && course !== 'General') {
+        if (allowedSubjects.length === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied: Cannot reassign to an unauthorized subject',
+          });
+        }
+        const newCourseCheck = await pool.query(
+          `SELECT 1 FROM subjects 
+           WHERE (id::text = $1 OR slug = $1 OR name = $1) 
+             AND id = ANY($2::uuid[]) AND is_deleted = false`,
+          [course, allowedSubjects],
+        );
+        if (newCourseCheck.rows.length === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied: Cannot reassign to an unauthorized subject',
+          });
+        }
       }
     }
 
@@ -388,20 +510,22 @@ exports.updateAssignment = async (req, res) => {
            description           = COALESCE($2, description),
            due_date              = COALESCE($3, due_date),
            course                = COALESCE($4, course),
-           instruction_file_url  = COALESCE($5, instruction_file_url),
-           instruction_file_name = COALESCE($6, instruction_file_name),
-           test_cases            = COALESCE($7, test_cases),
-           rubric                = COALESCE($8, rubric),
-           evaluator_type        = COALESCE($9, evaluator_type),
-           assignment_description= COALESCE($10, assignment_description),
+           topic_id              = COALESCE($5, topic_id),
+           instruction_file_url  = COALESCE($6, instruction_file_url),
+           instruction_file_name = COALESCE($7, instruction_file_name),
+           test_cases            = COALESCE($8, test_cases),
+           rubric                = COALESCE($9, rubric),
+           evaluator_type        = COALESCE($10, evaluator_type),
+           assignment_description= COALESCE($11, assignment_description),
            updated_at  = NOW()
-       WHERE id = $11
+       WHERE id = $12
        RETURNING *`,
       [
         title || null,
         description || null,
         due_date || null,
         course || null,
+        req.body.topic_id || null,
         req.body.instruction_file_url || null,
         req.body.instruction_file_name || null,
         test_cases ? JSON.stringify(test_cases) : null,
@@ -431,7 +555,7 @@ exports.deleteAssignment = async (req, res) => {
 
   try {
     const existing = await pool.query(
-      'SELECT college_id FROM college_assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, college_id, course, created_by FROM college_assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!existing.rowCount) {
@@ -441,11 +565,33 @@ exports.deleteAssignment = async (req, res) => {
     }
 
     if (req.user.role === 'facilitator') {
-      const allowed = req.user.college_ids || [];
-      if (!allowed.includes(existing.rows[0].college_id)) {
+      const allowedColleges = req.user.college_ids || [];
+      const allowedSubjects = req.user.subject_ids || [];
+      const assignment = existing.rows[0];
+
+      if (!allowedColleges.includes(assignment.college_id)) {
         return res.status(403).json({
           success: false,
           message: 'You are not assigned to this college',
+        });
+      }
+
+      const isAuthor = assignment.created_by === req.user.id;
+      let isSubjectAssigned = assignment.course === 'General';
+      if (!isSubjectAssigned && assignment.course && allowedSubjects.length > 0) {
+        const check = await pool.query(
+          `SELECT 1 FROM subjects 
+           WHERE (id::text = $1 OR slug = $1 OR name = $1) 
+             AND id = ANY($2::uuid[]) AND is_deleted = false`,
+          [assignment.course, allowedSubjects],
+        );
+        isSubjectAssigned = check.rows.length > 0;
+      }
+
+      if (!isAuthor && !isSubjectAssigned) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: You are not authorized to delete this assignment',
         });
       }
     }
@@ -617,8 +763,9 @@ exports.getCollegeAssignmentById = async (req, res) => {
 exports.getAssignmentSubmissions = async (req, res) => {
   try {
     const { assignmentId } = req.params;
-    const isFacilitator = req.user.role !== 'admin';
+    const isFacilitator = req.user.role === 'facilitator';
     const facilitatorCollegeIds = req.user.college_ids || [];
+    const facilitatorSubjectIds = req.user.subject_ids || [];
 
     // Determine assignment type
     const unitCheck = await pool.query(
@@ -630,6 +777,19 @@ exports.getAssignmentSubmissions = async (req, res) => {
     let rows;
 
     if (isUnitAssignment) {
+      if (isFacilitator) {
+        const subjCheck = await pool.query(
+          `SELECT t.subject_id FROM assignments a
+           JOIN units u ON a.unit_id = u.id
+           JOIN topics t ON u.topic_id = t.id
+           WHERE a.id = $1`,
+          [assignmentId],
+        );
+        if (!subjCheck.rowCount || !facilitatorSubjectIds.includes(subjCheck.rows[0].subject_id)) {
+          return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
+        }
+      }
+
       const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
       const values = isFacilitator
         ? [assignmentId, facilitatorCollegeIds]
@@ -654,10 +814,10 @@ exports.getAssignmentSubmissions = async (req, res) => {
       );
       rows = result.rows;
     } else {
-      // College assignment — check facilitator owns this college
+      // College assignment — check facilitator owns this college and subject
       if (isFacilitator) {
         const ownerCheck = await pool.query(
-          `SELECT college_id FROM college_assignments WHERE id = $1 AND is_deleted = false`,
+          `SELECT ca.college_id, ca.course, ca.created_by FROM college_assignments ca WHERE ca.id = $1 AND ca.is_deleted = false`,
           [assignmentId],
         );
         if (!ownerCheck.rowCount) {
@@ -665,12 +825,25 @@ exports.getAssignmentSubmissions = async (req, res) => {
             .status(404)
             .json({ success: false, message: 'Assignment not found' });
         }
-        if (!facilitatorCollegeIds.includes(ownerCheck.rows[0].college_id)) {
+        const ca = ownerCheck.rows[0];
+        if (!facilitatorCollegeIds.includes(ca.college_id)) {
           return res
             .status(403)
-            .json({ success: false, message: 'Access denied' });
+            .json({ success: false, message: 'Access denied: College not assigned to you' });
+        }
+        if (ca.course && ca.course !== 'General') {
+          const validSubj = await pool.query(
+            'SELECT 1 FROM subjects WHERE (id::text = $1 OR slug = $1 OR name = $1) AND id = ANY($2::uuid[])',
+            [ca.course, facilitatorSubjectIds],
+          );
+          if (validSubj.rows.length === 0) {
+            return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
+          }
         }
       }
+
+      const collegeFilter = isFacilitator ? 'AND sp.college_id = ANY($2)' : '';
+      const values = isFacilitator ? [assignmentId, facilitatorCollegeIds] : [assignmentId];
 
       const result = await pool.query(
         `SELECT
@@ -687,8 +860,9 @@ exports.getAssignmentSubmissions = async (req, res) => {
          LEFT JOIN student_profiles sp ON sp.user_id = cas.student_id
          LEFT JOIN colleges c    ON c.id  = sp.college_id
          WHERE cas.assignment_id = $1
+         ${collegeFilter}
          ORDER BY cas.submitted_at DESC`,
-        [assignmentId],
+        values,
       );
       rows = result.rows;
     }
@@ -713,36 +887,77 @@ exports.getFilteredAssignments = async (req, res) => {
       100,
       Math.max(1, parseInt(req.query.pageSize, 10) || 10),
     );
-    const isFacilitator = req.user.role !== 'admin';
+    const isFacilitator = req.user.role === 'facilitator';
     const facilitatorCollegeIds = req.user.college_ids || [];
+    const facilitatorSubjectIds = req.user.subject_ids || [];
 
-    if (isFacilitator && !facilitatorCollegeIds.length) {
-      return res.json({ success: true, data: [] });
+    if (isFacilitator && (!facilitatorCollegeIds.length || !facilitatorSubjectIds.length)) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page, pageSize, total: 0, totalPages: 1 },
+      });
     }
 
     const values = [];
-    let index = 1;
+    const getNextIndex = (val) => {
+      values.push(val);
+      return values.length;
+    };
+
+    let facCollegesIdx = null;
+    let facSubjectsIdx = null;
+    let facUserIdx = null;
+    if (isFacilitator) {
+      facCollegesIdx = getNextIndex(facilitatorCollegeIds);
+      facSubjectsIdx = getNextIndex(facilitatorSubjectIds);
+      facUserIdx = getNextIndex(req.user.id);
+    }
+
+    let collegeParamIdx = null;
+    if (collegeId) {
+      collegeParamIdx = getNextIndex(collegeId);
+    }
+
+    let batchParamIdx = null;
+    if (batch) {
+      batchParamIdx = getNextIndex(batch);
+    }
 
     let submissionFilterUnit = '';
     let submissionFilterCollege = '';
 
+    if (facCollegesIdx) {
+      submissionFilterUnit += ` AND sp.college_id = ANY($${facCollegesIdx})`;
+      submissionFilterCollege += ` AND sp.college_id = ANY($${facCollegesIdx})`;
+    }
+    if (collegeParamIdx) {
+      submissionFilterUnit += ` AND sp.college_id = $${collegeParamIdx}`;
+      submissionFilterCollege += ` AND sp.college_id = $${collegeParamIdx}`;
+    }
+    if (batchParamIdx) {
+      submissionFilterUnit += ` AND sp.expected_graduation_year = $${batchParamIdx}`;
+      submissionFilterCollege += ` AND sp.expected_graduation_year = $${batchParamIdx}`;
+    }
+
+    let caWhere = 'WHERE ca.is_deleted = false';
     if (isFacilitator) {
-      values.push(facilitatorCollegeIds);
-      submissionFilterUnit += ` AND sp.college_id = ANY($${index})`;
-      index++;
+      caWhere += `
+        AND ca.college_id = ANY($${facCollegesIdx})
+        AND (
+          EXISTS (
+            SELECT 1 FROM public.subjects s_chk
+            WHERE s_chk.id = ANY($${facSubjectsIdx})
+              AND (s_chk.id::text = ca.course OR s_chk.slug = ca.course OR s_chk.name = ca.course)
+          )
+          OR (ca.course = 'General' AND ca.created_by = $${facUserIdx})
+        )
+      `;
     }
 
-    if (collegeId) {
-      values.push(collegeId);
-      submissionFilterUnit += ` AND sp.college_id = $${index}`;
-      index++;
-    }
-
-    if (batch) {
-      values.push(batch);
-      submissionFilterUnit += ` AND sp.expected_graduation_year = $${index}`;
-      submissionFilterCollege += ` AND sp.expected_graduation_year = $${index}`;
-      index++;
+    let aWhere = 'WHERE a.is_deleted = false';
+    if (isFacilitator) {
+      aWhere += ` AND t.subject_id = ANY($${facSubjectsIdx})`;
     }
 
     let query = `
@@ -760,7 +975,7 @@ exports.getFilteredAssignments = async (req, res) => {
           (
             SELECT COUNT(*)::int 
             FROM public.college_assignment_submissions cas 
-            ${batch ? 'JOIN public.student_profiles sp ON sp.user_id = cas.student_id' : ''}
+            JOIN public.student_profiles sp ON sp.user_id = cas.student_id
             WHERE cas.assignment_id = ca.id
             ${submissionFilterCollege}
           ) as submissions_count,
@@ -774,7 +989,7 @@ exports.getFilteredAssignments = async (req, res) => {
           ORDER BY created_at DESC
           LIMIT 1
         ) e ON true
-        WHERE ca.is_deleted = false
+        ${caWhere}
 
         UNION ALL
 
@@ -807,36 +1022,27 @@ exports.getFilteredAssignments = async (req, res) => {
           ORDER BY created_at DESC
           LIMIT 1
         ) e ON true
+        ${aWhere}
       )
       SELECT * FROM all_assignments
       WHERE 1=1
     `;
 
-    // 🔒 Role-based restriction (facilitator)
-    if (isFacilitator) {
-      // $1 is always facilitatorCollegeIds if isFacilitator is true
-      query += ` AND (college_id IS NULL OR college_id = ANY($1))`;
-    }
-
-    // 🎯 College filter
-    if (collegeId) {
-      values.push(collegeId);
-      query += ` AND (college_id = $${index} OR type = 'unit')`;
-      index++;
+    // 🎯 College filter on outer query
+    if (collegeParamIdx) {
+      query += ` AND (college_id = $${collegeParamIdx} OR type = 'unit')`;
     }
 
     // 🎯 Domain filter
     if (domain) {
-      query += ` AND (LOWER(course) LIKE LOWER('%' || $${index} || '%') OR LOWER($${index}) LIKE '%' || LOWER(course) || '%')`;
-      values.push(domain);
-      index++;
+      const domainIdx = getNextIndex(domain);
+      query += ` AND (LOWER(course) LIKE LOWER('%' || $${domainIdx} || '%') OR LOWER($${domainIdx}) LIKE '%' || LOWER(course) || '%')`;
     }
 
     // 🔍 Search filter
     if (search) {
-      query += ` AND LOWER(title) LIKE LOWER($${index})`;
-      values.push(`%${search}%`);
-      index++;
+      const searchIdx = getNextIndex(`%${search}%`);
+      query += ` AND LOWER(title) LIKE LOWER($${searchIdx})`;
     }
 
     // Only show assignments that have at least one submission matching the criteria
@@ -844,11 +1050,9 @@ exports.getFilteredAssignments = async (req, res) => {
 
     query += ` ORDER BY created_at DESC NULLS LAST, title ASC`;
 
-    values.push(pageSize);
-    const limitIndex = index++;
-    values.push((page - 1) * pageSize);
-    const offsetIndex = index++;
-    query = `SELECT *, COUNT(*) OVER()::int AS total_count FROM (${query}) paged LIMIT $${limitIndex} OFFSET $${offsetIndex}`;
+    const limitIdx = getNextIndex(pageSize);
+    const offsetIdx = getNextIndex((page - 1) * pageSize);
+    query = `SELECT *, COUNT(*) OVER()::int AS total_count FROM (${query}) paged LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
 
     const { rows } = await pool.query(query, values);
     const total = rows[0]?.total_count ?? 0;

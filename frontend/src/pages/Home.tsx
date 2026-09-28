@@ -19,6 +19,8 @@ export default function Home() {
       navigate('/dashboard/admin');
     } else if (user.role === 'facilitator') {
       navigate('/dashboard/facilitator');
+    } else if (user.role === 'curriculum_developer') {
+      navigate('/dashboard/curriculum-developer');
     } else if (user.role === 'student') {
       navigate(
         user.onboarding_step !== 'done'

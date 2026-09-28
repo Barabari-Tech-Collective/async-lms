@@ -143,23 +143,30 @@ const LockControl = () => {
 
   const fetchOverview = useCallback(async () => {
     if (!selectedSubjectId) return;
+
     try {
       setLoadingOverview(true);
       const res = await apiClient.get<LockOverviewResponse>(
         '/admin/lock-control/overview',
         { params: filterParams },
       );
-      const data = res.data.data;
-      // Flatten units into subtopics for compatible display
-      const transformedTopics = data.topics.map((topic) => ({
-        ...topic,
-        subtopics: topic.units
-          ? topic.units.flatMap((u) => u.subtopics)
-          : topic.subtopics || [],
-      }));
-      setOverview({ ...data, topics: transformedTopics });
+      const raw = res.data.data;
+      if (raw && Array.isArray(raw.topics)) {
+        const normalizedTopics: LockTopic[] = raw.topics.map((t) => ({
+          ...t,
+          subtopics: (Array.isArray(t.subtopics) && t.subtopics.length > 0)
+            ? t.subtopics
+            : (t.units || []).flatMap((u) => u.subtopics || []),
+        }));
+        setOverview({
+          ...raw,
+          topics: normalizedTopics,
+        });
+      } else {
+        setOverview(raw || null);
+      }
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to load lock overview'));
+      toast.error(getErrorMessage(error, 'Failed to load lock control overview'));
     } finally {
       setLoadingOverview(false);
     }
@@ -174,62 +181,66 @@ const LockControl = () => {
   }, [fetchBatches]);
 
   useEffect(() => {
-    fetchOverview();
-  }, [fetchOverview]);
-
-  useEffect(() => {
-    if (!overview?.topics?.length) return;
-    setExpandedTopics((prev) =>
-      prev.length > 0 ? prev : [overview.topics[0].id],
-    );
-  }, [overview?.topics]);
+    if (selectedSubjectId) {
+      fetchOverview();
+    }
+  }, [fetchOverview, selectedSubjectId]);
 
   const stats = useMemo(() => {
-    if (!overview) {
-      return { lockedTopics: 0, unlockedTopics: 0, completionRate: 0 };
+    if (!overview || !Array.isArray(overview.topics)) {
+      return {
+        completionRate: 0,
+        lockedTopics: 0,
+        unlockedTopics: 0,
+      };
     }
-    const unlockedTopics = overview.topics.filter((topic) =>
-      topic.subtopics.length > 0
-        ? topic.subtopics.every((subtopic) => subtopic.is_unlocked)
-        : false,
-    ).length;
+
+    const totalTopics = overview.topics.length;
+    const fullyUnlockedTopics = overview.topics.filter((topic) => {
+      const subs = Array.isArray(topic.subtopics)
+        ? topic.subtopics
+        : (topic.units || []).flatMap((u) => u.subtopics || []);
+      return subs.length > 0 && subs.every((subtopic) => subtopic.is_unlocked);
+    }).length;
 
     return {
-      lockedTopics: overview.topics.length - unlockedTopics,
-      unlockedTopics,
-      completionRate: overview.completion_rate,
+      completionRate: Math.round(overview.completion_rate || 0),
+      lockedTopics: totalTopics - fullyUnlockedTopics,
+      unlockedTopics: fullyUnlockedTopics,
     };
   }, [overview]);
 
   const filteredTopics = useMemo(() => {
-    if (!overview) return [];
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return overview.topics;
+    if (!overview?.topics || !Array.isArray(overview.topics)) return [];
+    if (!searchQuery.trim()) return overview.topics;
 
-    return overview.topics
-      .map((topic) => {
-        const topicMatch = topic.title.toLowerCase().includes(query);
-        const subtopics = topic.subtopics.filter((subtopic) =>
+    const query = searchQuery.toLowerCase();
+    return overview.topics.filter((topic) => {
+      const subs = Array.isArray(topic.subtopics)
+        ? topic.subtopics
+        : (topic.units || []).flatMap((u) => u.subtopics || []);
+      return (
+        topic.title.toLowerCase().includes(query) ||
+        subs.some((subtopic) =>
           subtopic.title.toLowerCase().includes(query),
-        );
-        if (topicMatch) return topic;
-        if (subtopics.length > 0) {
-          return { ...topic, subtopics };
-        }
-        return null;
-      })
-      .filter((topic): topic is LockTopic => Boolean(topic));
+        )
+      );
+    });
   }, [overview, searchQuery]);
 
   const handleTopicToggle = async (topicId: string, unlock: boolean) => {
     try {
       setTopicLoadingIds((prev) => [...prev, topicId]);
+      const action = unlock ? 'unlock' : 'lock';
       await apiClient.post(
-        `/admin/lock-control/topics/${topicId}/${unlock ? 'unlock' : 'lock'}`,
-        null,
+        `/admin/lock-control/topics/${topicId}/${action}`,
+        { unlock, ...filterParams },
         { params: filterParams },
       );
-      toast.success(unlock ? 'Topic unlocked' : 'Topic locked');
+
+      toast.success(
+        unlock ? 'Topic unlocked for cohort' : 'Topic locked for cohort',
+      );
       await fetchOverview();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to update topic lock'));
@@ -241,12 +252,16 @@ const LockControl = () => {
   const handleSubtopicToggle = async (subtopicId: string, unlock: boolean) => {
     try {
       setSubtopicLoadingIds((prev) => [...prev, subtopicId]);
+      const action = unlock ? 'unlock' : 'lock';
       await apiClient.post(
-        `/admin/lock-control/subtopics/${subtopicId}/${unlock ? 'unlock' : 'lock'}`,
-        null,
+        `/admin/lock-control/subtopics/${subtopicId}/${action}`,
+        { unlock, ...filterParams },
         { params: filterParams },
       );
-      toast.success(unlock ? 'Subtopic unlocked' : 'Subtopic locked');
+
+      toast.success(
+        unlock ? 'Subtopic unlocked for cohort' : 'Subtopic locked for cohort',
+      );
       await fetchOverview();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to update subtopic lock'));
@@ -256,78 +271,78 @@ const LockControl = () => {
   };
 
   return (
-    <div className='p-6 space-y-6 animate-in fade-in duration-500'>
+    <div className='space-y-4 sm:space-y-6 min-w-0 animate-in fade-in duration-300'>
       {/* Stats */}
-      <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4'>
-        <Card className='border-none shadow-sm'>
-          <CardContent className='p-5 flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium text-slate-500'>
-                Batch Progress
+      <div className='grid grid-cols-3 gap-2 sm:gap-4'>
+        <Card className='border border-slate-200/80 shadow-xs rounded-2xl bg-white'>
+          <CardContent className='p-2.5 sm:p-5 flex flex-col sm:flex-row items-center sm:justify-between text-center sm:text-left gap-1 sm:gap-3'>
+            <div className='min-w-0'>
+              <p className='text-[10px] sm:text-sm font-semibold text-slate-500 truncate'>
+                Progress
               </p>
-              <h3 className='text-2xl font-bold text-slate-900 mt-1'>
+              <h3 className='text-base sm:text-2xl font-bold text-slate-900 tracking-tight'>
                 {stats.completionRate}%
               </h3>
-              <p className='text-xs text-slate-400 mt-1'>Completion Rate</p>
+              <p className='text-[9px] sm:text-xs text-slate-400 hidden sm:block mt-0.5'>Completion Rate</p>
             </div>
-            <div className='bg-blue-50 p-3 rounded-2xl'>
-              <GraduationCap className='w-5 h-5 text-blue-600' />
+            <div className='bg-blue-50 p-2 sm:p-3 rounded-xl sm:rounded-2xl shrink-0'>
+              <GraduationCap className='w-4 h-4 sm:w-5 sm:h-5 text-blue-600' />
             </div>
           </CardContent>
         </Card>
-        <Card className='border-none shadow-sm'>
-          <CardContent className='p-5 flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium text-red-500'>Locked Topics</p>
-              <h3 className='text-2xl font-bold text-slate-900 mt-1'>
+
+        <Card className='border border-slate-200/80 shadow-xs rounded-2xl bg-white'>
+          <CardContent className='p-2.5 sm:p-5 flex flex-col sm:flex-row items-center sm:justify-between text-center sm:text-left gap-1 sm:gap-3'>
+            <div className='min-w-0'>
+              <p className='text-[10px] sm:text-sm font-semibold text-red-500 truncate'>
+                Locked
+              </p>
+              <h3 className='text-base sm:text-2xl font-bold text-slate-900 tracking-tight'>
                 {stats.lockedTopics}
               </h3>
-              <p className='text-xs text-slate-400 mt-1'>
-                Students cannot access
-              </p>
+              <p className='text-[9px] sm:text-xs text-slate-400 hidden sm:block mt-0.5'>Cannot access</p>
             </div>
-            <div className='bg-red-50 p-3 rounded-2xl'>
-              <Lock className='w-5 h-5 text-red-500' />
+            <div className='bg-red-50 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl shrink-0'>
+              <Lock className='w-4 h-4 sm:w-5 sm:h-5 text-red-500' />
             </div>
           </CardContent>
         </Card>
-        <Card className='border-none shadow-sm'>
-          <CardContent className='p-5 flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium text-emerald-600'>
-                Unlocked Topics
+
+        <Card className='border border-slate-200/80 shadow-xs rounded-2xl bg-white'>
+          <CardContent className='p-2.5 sm:p-5 flex flex-col sm:flex-row items-center sm:justify-between text-center sm:text-left gap-1 sm:gap-3'>
+            <div className='min-w-0'>
+              <p className='text-[10px] sm:text-sm font-semibold text-emerald-600 truncate'>
+                Unlocked
               </p>
-              <h3 className='text-2xl font-bold text-slate-900 mt-1'>
+              <h3 className='text-base sm:text-2xl font-bold text-slate-900 tracking-tight'>
                 {stats.unlockedTopics}
               </h3>
-              <p className='text-xs text-slate-400 mt-1'>
-                Available to students
-              </p>
+              <p className='text-[9px] sm:text-xs text-slate-400 hidden sm:block mt-0.5'>Available</p>
             </div>
-            <div className='bg-emerald-50 p-3 rounded-2xl'>
-              <Unlock className='w-5 h-5 text-emerald-600' />
+            <div className='bg-emerald-50 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl shrink-0'>
+              <Unlock className='w-4 h-4 sm:w-5 sm:h-5 text-emerald-600' />
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Filters */}
-      <Card className='border-none shadow-sm overflow-hidden'>
-        <div className='flex items-center gap-3 px-5 py-4 border-b border-slate-100 bg-slate-50/60'>
-          <div className='bg-slate-100 p-2 rounded-xl'>
-            <ShieldCheck className='w-4 h-4 text-slate-600' />
+      <Card className='border border-slate-200/80 shadow-xs rounded-2xl overflow-hidden bg-white min-w-0'>
+        <div className='flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 bg-slate-50/60'>
+          <div className='bg-indigo-50 text-indigo-600 p-1.5 sm:p-2 rounded-xl shrink-0 border border-indigo-100'>
+            <ShieldCheck className='w-3.5 h-3.5 sm:w-4 sm:h-4' />
           </div>
-          <div>
-            <h3 className='text-sm font-bold text-slate-900'>Class Controls</h3>
-            <p className='text-xs text-slate-400'>Manage topic access by cohort</p>
+          <div className='min-w-0'>
+            <h3 className='text-xs sm:text-sm font-bold text-slate-900 tracking-tight'>Cohort Class Controls</h3>
+            <p className='text-[10px] sm:text-[11px] text-slate-400 truncate'>Manage topic access and schedule by cohort</p>
           </div>
         </div>
 
-        <CardContent className='p-5'>
-          <div className='flex flex-wrap items-end gap-4'>
-            <div className='flex flex-col gap-1.5'>
-              <label className='flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider'>
-                <Building2 className='w-3 h-3' />
+        <CardContent className='p-3.5 sm:p-5'>
+          <div className='grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3'>
+            <div className='flex flex-col gap-1 sm:gap-1.5'>
+              <label className='flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider truncate'>
+                <Building2 className='w-3 h-3 shrink-0' />
                 College
               </label>
               <Select
@@ -335,10 +350,10 @@ const LockControl = () => {
                 onValueChange={setSelectedCollegeId}
                 disabled={loadingFilters}
               >
-                <SelectTrigger className='w-52 bg-white border-slate-200 shadow-xs'>
+                <SelectTrigger className='w-full bg-white border-slate-200 shadow-xs h-9 sm:h-10 rounded-xl text-xs sm:text-sm'>
                   <SelectValue placeholder='Select college' />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className='rounded-xl shadow-lg border-slate-200 max-h-60'>
                   <SelectItem value='all'>All Colleges</SelectItem>
                   {colleges.map((college) => (
                     <SelectItem key={college.id} value={college.id}>
@@ -349,9 +364,9 @@ const LockControl = () => {
               </Select>
             </div>
 
-            <div className='flex flex-col gap-1.5'>
-              <label className='flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider'>
-                <Users2 className='w-3 h-3' />
+            <div className='flex flex-col gap-1 sm:gap-1.5'>
+              <label className='flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider truncate'>
+                <Users2 className='w-3 h-3 shrink-0' />
                 Batch
               </label>
               <Select
@@ -359,10 +374,10 @@ const LockControl = () => {
                 onValueChange={setSelectedBatch}
                 disabled={loadingFilters}
               >
-                <SelectTrigger className='w-36 bg-white border-slate-200 shadow-xs'>
+                <SelectTrigger className='w-full bg-white border-slate-200 shadow-xs h-9 sm:h-10 rounded-xl text-xs sm:text-sm'>
                   <SelectValue placeholder='Select batch' />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className='rounded-xl shadow-lg border-slate-200 max-h-60'>
                   <SelectItem value='all'>All Batches</SelectItem>
                   {batches.map((batch) => (
                     <SelectItem key={batch} value={String(batch)}>
@@ -373,9 +388,9 @@ const LockControl = () => {
               </Select>
             </div>
 
-            <div className='flex flex-col gap-1.5'>
-              <label className='flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider'>
-                <BookOpen className='w-3 h-3' />
+            <div className='flex flex-col gap-1 sm:gap-1.5'>
+              <label className='flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider truncate'>
+                <BookOpen className='w-3 h-3 shrink-0' />
                 Subject
               </label>
               <Select
@@ -383,10 +398,10 @@ const LockControl = () => {
                 onValueChange={setSelectedSubjectId}
                 disabled={loadingFilters}
               >
-                <SelectTrigger className='w-60 bg-white border-slate-200 shadow-xs'>
+                <SelectTrigger className='w-full bg-white border-slate-200 shadow-xs h-9 sm:h-10 rounded-xl text-xs sm:text-sm'>
                   <SelectValue placeholder='Select subject' />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className='rounded-xl shadow-lg border-slate-200 max-h-60'>
                   {subjects.map((subject) => (
                     <SelectItem key={subject.id} value={subject.id}>
                       {subject.name}
@@ -396,16 +411,16 @@ const LockControl = () => {
               </Select>
             </div>
 
-            <div className='flex flex-col gap-1.5 flex-1 min-w-48'>
-              <label className='flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider'>
-                <Search className='w-3 h-3' />
+            <div className='flex flex-col gap-1 sm:gap-1.5'>
+              <label className='flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider truncate'>
+                <Search className='w-3 h-3 shrink-0' />
                 Search
               </label>
               <div className='relative'>
-                <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400' />
+                <Search className='absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400' />
                 <Input
                   placeholder='Find topic...'
-                  className='pl-9 bg-white border-slate-200 shadow-xs'
+                  className='pl-8 sm:pl-9 bg-white border-slate-200 shadow-xs h-9 sm:h-10 rounded-xl text-xs sm:text-sm'
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -417,39 +432,42 @@ const LockControl = () => {
 
       {/* Topics */}
       {loadingOverview ? (
-        <div className='flex items-center justify-center h-60'>
-          <Loader2 className='w-8 h-8 animate-spin text-[#333D7C]' />
+        <div className='flex items-center justify-center py-20 bg-white rounded-2xl border border-slate-200/80'>
+          <Loader2 className='w-8 h-8 animate-spin text-indigo-500' />
         </div>
       ) : !overview || filteredTopics.length === 0 ? (
-        <Card className='border-none shadow-sm'>
-          <CardContent className='p-16 text-center text-slate-400'>
+        <Card className='border border-slate-200/80 shadow-xs rounded-2xl bg-white'>
+          <CardContent className='p-12 sm:p-16 text-center text-slate-400 text-xs sm:text-sm'>
             No topics found for this selection.
           </CardContent>
         </Card>
       ) : (
-        <div className='space-y-4'>
+        <div className='space-y-3 sm:space-y-4'>
           {filteredTopics.map((topic) => {
             const isExpanded = expandedTopics.includes(topic.id);
-            const unlockedSubtopics = topic.subtopics.filter(
+            const topicSubtopics = Array.isArray(topic.subtopics)
+              ? topic.subtopics
+              : (topic.units || []).flatMap((u) => u.subtopics || []);
+            const unlockedSubtopics = topicSubtopics.filter(
               (subtopic) => subtopic.is_unlocked,
             ).length;
             const progress =
-              topic.subtopics.length > 0
-                ? Math.round((unlockedSubtopics / topic.subtopics.length) * 100)
+              topicSubtopics.length > 0
+                ? Math.round((unlockedSubtopics / topicSubtopics.length) * 100)
                 : 0;
             const fullyUnlocked =
-              topic.subtopics.length > 0 &&
-              topic.subtopics.every((subtopic) => subtopic.is_unlocked);
+              topicSubtopics.length > 0 &&
+              topicSubtopics.every((subtopic) => subtopic.is_unlocked);
             const topicLoading = topicLoadingIds.includes(topic.id);
 
             return (
-              <Card key={topic.id} className='border-none shadow-sm'>
+              <Card key={topic.id} className='border border-slate-200/80 shadow-xs rounded-2xl overflow-hidden bg-white'>
                 <CardContent className='p-0'>
-                  <div className='flex flex-col gap-4 p-5 border-b border-slate-100'>
-                    <div className='flex items-center justify-between gap-4'>
-                      <div className='flex items-center gap-3'>
+                  <div className='p-3.5 sm:p-5 border-b border-slate-100'>
+                    <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4'>
+                      <div className='flex items-center gap-2 sm:gap-3 min-w-0'>
                         <button
-                          className='text-slate-400 hover:text-slate-700 transition'
+                          className='p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0 min-h-[30px] min-w-[30px] flex items-center justify-center'
                           onClick={() =>
                             setExpandedTopics((prev) =>
                               prev.includes(topic.id)
@@ -460,36 +478,35 @@ const LockControl = () => {
                           aria-label='Toggle topic'
                         >
                           {isExpanded ? (
-                            <ChevronDown className='w-5 h-5' />
+                            <ChevronDown className='w-4 h-4' />
                           ) : (
-                            <ChevronRight className='w-5 h-5' />
+                            <ChevronRight className='w-4 h-4' />
                           )}
                         </button>
-                        <div>
-                          <p className='text-xs font-semibold tracking-widest text-slate-400'>
-                            TOPIC: {topic.title.toUpperCase()}
+                        <div className='min-w-0 flex-1'>
+                          <p className='text-xs sm:text-sm font-bold text-slate-800 tracking-tight truncate'>
+                            {topic.title}
                           </p>
-                          <p className='text-sm text-slate-500'>
-                            {unlockedSubtopics}/{topic.subtopics.length}{' '}
-                            Subtopics Unlocked
+                          <p className='text-[10px] sm:text-xs text-slate-500 font-medium'>
+                            {unlockedSubtopics}/{topicSubtopics.length} Subtopics Unlocked
                           </p>
                         </div>
                       </div>
 
-                      <div className='flex items-center gap-3'>
-                        <div className='w-36 bg-slate-100 rounded-full h-2 overflow-hidden'>
+                      <div className='flex items-center gap-2.5 sm:gap-3 justify-between sm:justify-end pl-8 sm:pl-0'>
+                        <div className='w-24 sm:w-36 bg-slate-100 rounded-full h-2 overflow-hidden shrink-0'>
                           <div
-                            className='h-full bg-emerald-500'
+                            className='h-full bg-emerald-500 transition-all duration-500'
                             style={{ width: `${progress}%` }}
                           />
                         </div>
                         <button
                           disabled={topicLoading}
                           onClick={() => handleTopicToggle(topic.id, !fullyUnlocked)}
-                          className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                          className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none shrink-0 min-h-[30px] sm:min-h-[34px] ${
                             fullyUnlocked
-                              ? 'border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300'
-                              : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300'
+                              ? 'border-red-200 text-red-600 bg-red-50/50 hover:bg-red-50 hover:border-red-300'
+                              : 'border-emerald-200 text-emerald-700 bg-emerald-50/50 hover:bg-emerald-50 hover:border-emerald-300'
                           }`}
                         >
                           {topicLoading ? (
@@ -505,8 +522,8 @@ const LockControl = () => {
                   </div>
 
                   {isExpanded && (
-                    <div className='divide-y divide-slate-100'>
-                      {topic.subtopics.map((subtopic) => {
+                    <div className='divide-y divide-slate-100 bg-slate-50/40'>
+                      {topicSubtopics.map((subtopic) => {
                         const subtopicLoading = subtopicLoadingIds.includes(
                           subtopic.id,
                         );
@@ -515,18 +532,18 @@ const LockControl = () => {
                         return (
                           <div
                             key={subtopic.id}
-                            className='flex flex-col md:flex-row md:items-center justify-between gap-4 p-5'
+                            className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3.5 sm:p-5'
                           >
-                            <div className='flex items-center gap-4'>
-                              <div className='bg-emerald-50 text-emerald-600 p-2 rounded-xl'>
-                                <BookOpen className='w-4 h-4' />
+                            <div className='flex items-center gap-2.5 sm:gap-4 min-w-0'>
+                              <div className='bg-emerald-50 text-emerald-600 p-1.5 sm:p-2 rounded-xl shrink-0 border border-emerald-100'>
+                                <BookOpen className='w-3.5 h-3.5 sm:w-4 sm:h-4' />
                               </div>
-                              <div>
-                                <p className='font-semibold text-slate-900 text-sm'>
+                              <div className='min-w-0'>
+                                <p className='font-semibold text-slate-800 text-xs sm:text-sm truncate'>
                                   {subtopic.title}
                                 </p>
-                                <div className='flex items-center gap-2 mt-1'>
-                                  <Badge className='bg-slate-100 text-slate-500 text-[10px] uppercase tracking-wide'>
+                                <div className='flex items-center gap-2 mt-0.5'>
+                                  <Badge className='bg-slate-100 text-slate-500 text-[10px] uppercase font-semibold border border-slate-200/60'>
                                     {subtopic.content_type === 'video'
                                       ? 'Video'
                                       : subtopic.content_type === 'external'
@@ -537,17 +554,17 @@ const LockControl = () => {
                               </div>
                             </div>
 
-                            <div className='flex items-center gap-4 justify-between md:justify-end'>
-                              <div className='flex items-center gap-2 text-slate-500 text-sm'>
-                                <Calendar className='w-4 h-4' />
+                            <div className='flex items-center gap-3 sm:gap-4 justify-between sm:justify-end pl-9 sm:pl-0'>
+                              <div className='flex items-center gap-1 text-slate-400 text-[11px] sm:text-xs font-medium'>
+                                <Calendar className='w-3 h-3 sm:w-3.5 sm:h-3.5' />
                                 <span>Schedule</span>
                               </div>
                               <div className='flex items-center gap-2'>
                                 <span
                                   className={
                                     isUnlocked
-                                      ? 'text-emerald-600 text-sm font-medium'
-                                      : 'text-red-500 text-sm font-medium'
+                                      ? 'text-emerald-700 text-[11px] sm:text-xs font-semibold'
+                                      : 'text-slate-400 text-[11px] sm:text-xs font-semibold'
                                   }
                                 >
                                   {isUnlocked ? 'Unlocked' : 'Locked'}

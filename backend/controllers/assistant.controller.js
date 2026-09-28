@@ -1,7 +1,10 @@
 const OpenAI = require('openai');
 const pool = require('../config/pg');
 
-const openai = new OpenAI({ apiKey: process.env.CHATGPT_API_KEY });
+const openai = new OpenAI({ 
+  apiKey: process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL || 'https://api.deepseek.com' 
+});
 
 const SYSTEM_PROMPT = `You are CodeGuru AI, a coding tutor inside a learning management system for students learning programming.
 
@@ -73,7 +76,7 @@ exports.chat = async (req, res) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
       messages: [{ role: 'system', content: systemPrompt }, ...sanitized],
       max_tokens: 600,
       temperature: 0.7,
@@ -214,7 +217,7 @@ Instructions:
 - Keep the tone professional and data-driven.`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -265,7 +268,7 @@ exports.optimizeWithJD = async (req, res) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
       messages: [
         {
           role: 'system',

@@ -96,9 +96,12 @@ export default function CreateAssignment() {
   const [selectedColleges, setSelectedColleges] = useState<string[]>(
     editData.collegeId ? [editData.collegeId] : []
   );
-  const [domain, setDomain] = useState(editData.domain || '');
-  const [type, setType] = useState(editData.type || '');
+  const [topicId, setTopicId] = useState(editData.topicId || editData.domain || '');
   const [deadline, setDeadline] = useState(editData.deadline || '');
+
+  // Dynamic subjects (courses) and topics
+  const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
+  const [availableTopics, setAvailableTopics] = useState<{value: string, label: string}[]>([]);
 
   // ── Colleges & Evaluators from API ──
   const [colleges, setColleges] = useState<College[]>([]);
@@ -150,7 +153,23 @@ export default function CreateAssignment() {
       .get<{ data: { id: string; name: string }[] }>('/evaluations/evaluators')
       .then((res) => setEvaluators(res.data.data || (res.data as any) || []))
       .catch((error) => toast.error(getErrorMessage(error, 'Failed to load evaluators')));
+
+    apiClient
+      .get<{ data: any[] }>('/college-assignments/courses')
+      .then((res) => setAvailableCourses(res.data.data || []))
+      .catch((error) => console.error('Failed to load courses', error));
   }, []);
+
+  useEffect(() => {
+    if (!course) {
+      setAvailableTopics([]);
+      return;
+    }
+    apiClient
+      .get<{ data: any[] }>(`/college-assignments/courses/${course}/topics`)
+      .then((res) => setAvailableTopics(res.data.data || []))
+      .catch((error) => console.error('Failed to load topics', error));
+  }, [course]);
 
   // ── Evaluation Setup ──
   const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
@@ -168,9 +187,7 @@ export default function CreateAssignment() {
   const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
 
   // ── Submission Settings ──
-  const [allowFileUpload, setAllowFileUpload] = useState(editData.allowFileUpload ?? true);
   const [allowGithubLink, setAllowGithubLink] = useState(editData.allowGithubLink ?? true);
-  const [allowCodeEditor, setAllowCodeEditor] = useState(editData.allowCodeEditor ?? false);
 
   // ── Rubrics helpers ──
   const totalScore = rubrics.reduce((sum, r) => sum + r.maxScore, 0);
@@ -221,8 +238,7 @@ export default function CreateAssignment() {
     if (!title.trim()) missing.push('Assignment Title');
     if (!course) missing.push('Course');
     if (editId ? !college : selectedColleges.length === 0) missing.push('College');
-    if (!domain) missing.push('Domain');
-    if (!type) missing.push('Type');
+    if (!topicId) missing.push('Subject');
     if (!deadline) missing.push('Deadline');
 
     if (missing.length > 0) {
@@ -247,6 +263,7 @@ export default function CreateAssignment() {
           description: description.trim() || null,
           due_date: deadline || null,
           course: course || null,
+          topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
           instruction_file_name: instructionName || null,
           test_cases: testCases.map((t) => ({ input: t.input, output: t.output, score: t.score })),
@@ -262,6 +279,7 @@ export default function CreateAssignment() {
           description: description.trim() || null,
           due_date: deadline || null,
           course: course || null,
+          topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
           instruction_file_name: instructionName || null,
           test_cases: testCases.map((t) => ({ input: t.input, output: t.output, score: t.score })),
@@ -278,7 +296,7 @@ export default function CreateAssignment() {
           editId: resId,
           title,
           description,
-          course,
+          course: availableCourses.find(c => c.value === course)?.label || course,
           college: editId
             ? (colleges.find((c) => String(c.id) === college)?.name || college)
             : (selectedColleges.length === colleges.length
@@ -288,16 +306,13 @@ export default function CreateAssignment() {
                   .filter(Boolean)
                   .join(', ')),
           collegeId: editId ? college : selectedColleges[0],
-          domain,
-          type,
+          topicId: availableTopics.find(t => t.value === topicId)?.label || topicId,
           deadline,
           assignmentDescription,
           aiEvaluationType,
           weightage,
           enablePlagiarism,
-          allowFileUpload,
           allowGithubLink,
-          allowCodeEditor,
           totalMarks: isCodeEvaluator ? totalTestCaseScore : totalScore,
           rubricsList: rubrics,
           testCasesList: testCases,
@@ -320,18 +335,18 @@ export default function CreateAssignment() {
 
   return (
     <div className='min-h-screen bg-slate-50/60'>
-      <div className='max-w-3xl mx-auto px-6 py-8 space-y-6 animate-in fade-in duration-500'>
+      <div className='max-w-3xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
         {/* ── Page Header ── */}
         <div className='flex items-center gap-3'>
           <button
-            className='text-slate-500 hover:text-slate-700 transition'
+            className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
             onClick={() => navigate(`${basePath}/assignment-management`)}
           >
             <ArrowLeft className='w-5 h-5' />
           </button>
-          <div>
-            <h1 className='text-xl font-bold text-slate-900'>Create Assignment</h1>
-            <p className='text-sm text-slate-500'>Set up a new assignment for a branch</p>
+          <div className='min-w-0'>
+            <h1 className='text-lg sm:text-xl font-bold text-slate-900 truncate'>Create Assignment</h1>
+            <p className='text-xs sm:text-sm text-slate-500 truncate'>Set up a new assignment for a branch</p>
           </div>
         </div>
 
@@ -339,25 +354,26 @@ export default function CreateAssignment() {
             SECTION 1 — Basic Information
         ================================================================ */}
         <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-2'>
-            <CardTitle className='text-base font-semibold text-slate-900'>Basic Information</CardTitle>
+          <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Basic Information</CardTitle>
           </CardHeader>
 
-          <CardContent className='space-y-4'>
+          <CardContent className='space-y-3.5 sm:space-y-4 px-4 sm:px-6 pb-4 sm:pb-6'>
             {/* Assignment Title */}
             <div className='space-y-1.5'>
-              <Label className='text-sm text-slate-600'>Assignment Title</Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Assignment Title</Label>
               <Input
                 placeholder='e.g. React Hooks Unit Test 3'
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                className='text-xs sm:text-sm h-10'
               />
             </div>
 
             {/* Description */}
             <div className='space-y-1.5'>
-              <div className='flex items-center justify-between'>
-                <Label className='text-sm text-slate-600'>Description</Label>
+              <div className='flex items-center justify-between flex-wrap gap-2'>
+                <Label className='text-xs sm:text-sm text-slate-600'>Description</Label>
                 <EditorToggle value={editorType} onChange={setEditorType} />
               </div>
               {editorType === 'rich' ? (
@@ -378,39 +394,35 @@ export default function CreateAssignment() {
             </div>
 
             {/* Course & College */}
-            <div className='grid grid-cols-2 gap-4'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Course</Label>
-                <Select value={course} onValueChange={setCourse}>
-                  <SelectTrigger className='w-full'>
+                <Label className='text-xs sm:text-sm text-slate-600'>Course</Label>
+                <Select value={course} onValueChange={(val) => { setCourse(val); setTopicId(''); }}>
+                  <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
                     <SelectValue placeholder='Select Course' />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value='js-fundamentals'>Java Script Fundamentals</SelectItem>
-                    <SelectItem value='html-css'>HTML & CSS</SelectItem>
-                    <SelectItem value='js-dom'>JS DOM</SelectItem>
-                    <SelectItem value='react'>React</SelectItem>
-                    <SelectItem value='node'>Node.js</SelectItem>
-                    <SelectItem value='python'>Python</SelectItem>
-                    <SelectItem value='java'>Java</SelectItem>
+                    {availableCourses.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>College</Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>College</Label>
                 {editId ? (
                   <Input
                     value={colleges.find((c) => String(c.id) === college)?.name || college || 'Loading...'}
                     disabled
-                    className="bg-slate-100/80 border-slate-200 text-slate-500 font-medium"
+                    className="bg-slate-100/80 border-slate-200 text-slate-500 font-medium text-xs sm:text-sm h-10"
                   />
                 ) : (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="outline"
-                        className="w-full flex items-center justify-between px-3 py-2 text-sm font-normal bg-white border border-slate-200 rounded-md shadow-xs hover:bg-slate-50 focus:outline-none text-left text-slate-700"
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs sm:text-sm font-normal bg-white border border-slate-200 rounded-md shadow-xs hover:bg-slate-50 focus:outline-none text-left text-slate-700 h-10"
                       >
                         <span className="truncate">
                           {selectedColleges.length === 0
@@ -427,7 +439,7 @@ export default function CreateAssignment() {
                         <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-[340px] max-h-[300px] overflow-y-auto bg-white border border-slate-200 rounded-md shadow-lg p-1 z-50">
+                    <DropdownMenuContent className="w-[300px] sm:w-[340px] max-h-[300px] overflow-y-auto bg-white border border-slate-200 rounded-md shadow-lg p-1 z-50">
                       <DropdownMenuItem
                         onSelect={(e) => {
                           e.preventDefault(); // Keep dropdown open
@@ -437,7 +449,7 @@ export default function CreateAssignment() {
                             setSelectedColleges(colleges.map((c) => String(c.id)));
                           }
                         }}
-                        className="flex items-center gap-2.5 px-2.5 py-1.5 text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
+                        className="flex items-center gap-2.5 px-2.5 py-1.5 text-xs sm:text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
                       >
                         <Checkbox
                           checked={selectedColleges.length === colleges.length && colleges.length > 0}
@@ -457,7 +469,7 @@ export default function CreateAssignment() {
                                 : [...prev, String(c.id)]
                             );
                           }}
-                          className="flex items-center gap-2.5 px-2.5 py-1.5 text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
+                          className="flex items-center gap-2.5 px-2.5 py-1.5 text-xs sm:text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
                         >
                           <Checkbox
                             checked={selectedColleges.includes(String(c.id))}
@@ -472,43 +484,29 @@ export default function CreateAssignment() {
               </div>
             </div>
 
-            {/* Domain, Type, Deadline */}
-            <div className='grid grid-cols-3 gap-4'>
+            {/* Subject, Deadline */}
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Domain</Label>
-                <Select value={domain} onValueChange={setDomain}>
-                  <SelectTrigger className='w-full'>
-                    <SelectValue placeholder='Select' />
+                <Label className='text-xs sm:text-sm text-slate-600'>Subject</Label>
+                <Select value={topicId} onValueChange={setTopicId} disabled={!course}>
+                  <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
+                    <SelectValue placeholder={course ? 'Select Subject' : 'Select a course first'} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value='frontend'>Frontend</SelectItem>
-                    <SelectItem value='backend'>Backend</SelectItem>
-                    <SelectItem value='fullstack'>Full Stack</SelectItem>
-                    <SelectItem value='mobile'>Mobile</SelectItem>
+                    {availableTopics.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Type</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger className='w-full'>
-                    <SelectValue placeholder='Select' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value='individual'>Individual</SelectItem>
-                    <SelectItem value='group'>Group</SelectItem>
-                    <SelectItem value='lab'>Lab</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Deadline</Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Deadline</Label>
                 <Input
                   type='date'
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
+                  className='text-xs sm:text-sm h-10'
                 />
               </div>
             </div>
@@ -519,14 +517,14 @@ export default function CreateAssignment() {
             SECTION 2 — Evaluation Setup
         ================================================================ */}
         <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-2'>
-            <CardTitle className='text-base font-semibold text-slate-900'>Evaluation Setup</CardTitle>
+          <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Setup</CardTitle>
           </CardHeader>
 
-          <CardContent className='space-y-4'>
+          <CardContent className='space-y-3.5 sm:space-y-4 px-4 sm:px-6 pb-4 sm:pb-6'>
             {/* Instruction Document */}
             <div className='space-y-1.5'>
-              <Label className='text-sm text-slate-600'>Instruction Document</Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Instruction Document</Label>
               <input
                 ref={fileInputRef}
                 type='file'
@@ -538,11 +536,11 @@ export default function CreateAssignment() {
                 }}
               />
               {instructionFile ? (
-                <div className='flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4'>
-                  <FileText className='w-8 h-8 text-blue-500 shrink-0' />
+                <div className='flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4'>
+                  <FileText className='w-7 h-7 sm:w-8 sm:h-8 text-blue-500 shrink-0' />
                   <div className='flex-1 min-w-0'>
-                    <p className='text-sm font-medium text-slate-700 truncate'>{instructionFile.name}</p>
-                    <p className='text-xs text-slate-400'>
+                    <p className='text-xs sm:text-sm font-medium text-slate-700 truncate'>{instructionFile.name}</p>
+                    <p className='text-[10px] sm:text-xs text-slate-400'>
                       {uploading ? 'Uploading...' : 'Uploaded successfully'}
                     </p>
                   </div>
@@ -550,7 +548,7 @@ export default function CreateAssignment() {
                     <Loader2 className='w-5 h-5 text-blue-500 animate-spin shrink-0' />
                   ) : (
                     <button
-                      className='text-slate-400 hover:text-red-500 transition shrink-0'
+                      className='text-slate-400 hover:text-red-500 transition shrink-0 p-1.5'
                       onClick={() => {
                         setInstructionFile(null);
                         setInstructionUrl('');
@@ -563,7 +561,7 @@ export default function CreateAssignment() {
                 </div>
               ) : (
                 <div
-                  className='border-2 border-dashed border-slate-200 rounded-lg p-8 text-center hover:border-blue-400 transition cursor-pointer'
+                  className='border-2 border-dashed border-slate-200 rounded-xl p-5 sm:p-8 text-center hover:border-blue-400 transition cursor-pointer'
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onDrop={(e) => {
@@ -573,16 +571,16 @@ export default function CreateAssignment() {
                     if (f) handleFileUpload(f);
                   }}
                 >
-                  <Upload className='w-8 h-8 text-slate-300 mx-auto mb-2' />
-                  <p className='text-sm text-slate-500'>Drag & drop instruction file or click to browse</p>
-                  <p className='text-xs text-slate-400 mt-1'>Supports PDF, DOCX, TXT</p>
+                  <Upload className='w-6 h-6 sm:w-8 sm:h-8 text-slate-300 mx-auto mb-2' />
+                  <p className='text-xs sm:text-sm text-slate-500'>Drag & drop instruction file or click to browse</p>
+                  <p className='text-[10px] sm:text-xs text-slate-400 mt-1'>Supports PDF, DOCX, TXT</p>
                 </div>
               )}
             </div>
 
             {/* Assignment Description */}
             <div className='space-y-1.5'>
-              <Label className='text-sm text-slate-600'>Assignment Description</Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Assignment Description</Label>
               {editorType === 'rich' ? (
                 <RichTextEditor
                   minHeight='100px'
@@ -601,11 +599,11 @@ export default function CreateAssignment() {
             </div>
 
             {/* AI Evaluation Type & Weightage */}
-            <div className='grid grid-cols-2 gap-4'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Evaluator</Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Evaluator</Label>
                 <Select value={aiEvaluationType} onValueChange={setAiEvaluationType}>
-                  <SelectTrigger className='w-full'>
+                  <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
                     <SelectValue placeholder='Select' />
                   </SelectTrigger>
                   <SelectContent>
@@ -619,21 +617,22 @@ export default function CreateAssignment() {
               </div>
 
               <div className='space-y-1.5'>
-                <Label className='text-sm text-slate-600'>Weightage (%)</Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Weightage (%)</Label>
                 <Input
                   type='number'
                   placeholder='100'
                   value={weightage}
                   onChange={(e) => setWeightage(e.target.value)}
+                  className='text-xs sm:text-sm h-10'
                 />
               </div>
             </div>
 
             {/* Plagiarism Check Toggle */}
-            <div className='flex items-center justify-between py-2'>
-              <div>
-                <p className='text-sm font-medium text-slate-900'>Enable Plagiarism Check</p>
-                <p className='text-xs text-slate-500'>AI will cross-check submissions for similarity</p>
+            <div className='flex items-center justify-between py-2 gap-3'>
+              <div className='min-w-0 flex-1'>
+                <p className='text-xs sm:text-sm font-medium text-slate-900'>Enable Plagiarism Check</p>
+                <p className='text-[10px] sm:text-xs text-slate-500'>AI will cross-check submissions for similarity</p>
               </div>
               <Switch checked={enablePlagiarism} onCheckedChange={setEnablePlagiarism} />
             </div>
@@ -645,17 +644,17 @@ export default function CreateAssignment() {
         ================================================================ */}
         {isCodeEvaluator ? (
           <Card className='border-none shadow-sm'>
-            <CardHeader className='pb-2'>
-              <div className='flex items-center justify-between'>
-                <CardTitle className='text-base font-semibold text-slate-900'>Test Cases Builder</CardTitle>
-                <div className='flex items-center gap-3'>
-                  <span className='text-sm text-slate-500'>
+            <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+              <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
+                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Test Cases Builder</CardTitle>
+                <div className='flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto'>
+                  <span className='text-xs sm:text-sm text-slate-500'>
                     Total: <span className='font-semibold text-blue-600'>{totalTestCaseScore}</span> Points
                   </span>
                   <Button
                     variant='outline'
                     size='sm'
-                    className='gap-1 text-blue-600 border-blue-200 hover:bg-blue-50'
+                    className='gap-1 text-xs sm:text-sm text-blue-600 border-blue-200 hover:bg-blue-50'
                     onClick={addTestCase}
                   >
                     <Plus className='w-3.5 h-3.5' /> Add Test Case
@@ -664,46 +663,48 @@ export default function CreateAssignment() {
               </div>
             </CardHeader>
 
-            <CardContent className='space-y-3'>
+            <CardContent className='space-y-3 px-4 sm:px-6 pb-4 sm:pb-6'>
               {testCases.map((tc) => (
                 <div
                   key={tc.id}
-                  className='grid grid-cols-[1fr_1fr_80px_40px] gap-3 items-center'
+                  className='flex flex-col sm:grid sm:grid-cols-[1fr_1fr_80px_40px] gap-2.5 sm:gap-3 items-stretch sm:items-center p-3 sm:p-0 bg-slate-50 sm:bg-transparent rounded-xl sm:rounded-none border border-slate-100 sm:border-0'
                 >
                   <div className='space-y-1'>
-                    <Label className='text-xs text-slate-400'>Input (Arguments)</Label>
+                    <Label className='text-[11px] sm:text-xs text-slate-400'>Input (Arguments)</Label>
                     <Input
                       value={tc.input}
                       onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
-                      className='text-sm font-mono'
+                      className='text-xs sm:text-sm font-mono h-9 sm:h-10'
                       placeholder='e.g. 5, 10'
                     />
                   </div>
                   <div className='space-y-1'>
-                    <Label className='text-xs text-slate-400'>Expected Output</Label>
+                    <Label className='text-[11px] sm:text-xs text-slate-400'>Expected Output</Label>
                     <Input
                       value={tc.output}
                       onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
-                      className='text-sm font-mono'
+                      className='text-xs sm:text-sm font-mono h-9 sm:h-10'
                       placeholder='e.g. 15'
                     />
                   </div>
-                  <div className='space-y-1'>
-                    <Label className='text-xs text-slate-400'>Score</Label>
-                    <Input
-                      type='number'
-                      value={tc.score}
-                      onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
-                      className='text-sm'
-                    />
-                  </div>
-                  <div className='pt-5'>
-                    <button
-                      className='text-slate-400 hover:text-red-500 transition'
-                      onClick={() => removeTestCase(tc.id)}
-                    >
-                      <Trash2 className='w-4 h-4' />
-                    </button>
+                  <div className='flex items-center justify-between sm:block gap-2'>
+                    <div className='space-y-1 flex-1 sm:w-auto'>
+                      <Label className='text-[11px] sm:text-xs text-slate-400'>Score</Label>
+                      <Input
+                        type='number'
+                        value={tc.score}
+                        onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
+                        className='text-xs sm:text-sm h-9 sm:h-10'
+                      />
+                    </div>
+                    <div className='pt-5 sm:pt-5 shrink-0'>
+                      <button
+                        className='p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition'
+                        onClick={() => removeTestCase(tc.id)}
+                      >
+                        <Trash2 className='w-4 h-4' />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -711,119 +712,103 @@ export default function CreateAssignment() {
           </Card>
         ) : (
           <Card className='border-none shadow-sm'>
-            <CardHeader className='pb-2'>
-              <div className='flex items-center justify-between'>
-                <CardTitle className='text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
-              <div className='flex items-center gap-3'>
-                <span className='text-sm text-slate-500'>
-                  Total: <span className='font-semibold text-blue-600'>{totalScore}</span> Points
-                </span>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  className='gap-1 text-blue-600 border-blue-200 hover:bg-blue-50'
-                  onClick={addRubric}
-                >
-                  <Plus className='w-3.5 h-3.5' /> Add Criteria
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className='space-y-3'>
-            {rubrics.map((rubric) => (
-              <div
-                key={rubric.id}
-                className='grid grid-cols-[1fr_2fr_80px_40px] gap-3 items-center'
-              >
-                <div className='space-y-1'>
-                  <Label className='text-xs text-slate-400'>Criteria</Label>
-                  <Input
-                    value={rubric.criteria}
-                    onChange={(e) => updateRubric(rubric.id, 'criteria', e.target.value)}
-                    className='text-sm'
-                  />
-                </div>
-                <div className='space-y-1'>
-                  <Label className='text-xs text-slate-400'>Description</Label>
-                  <Input
-                    value={rubric.description}
-                    onChange={(e) => updateRubric(rubric.id, 'description', e.target.value)}
-                    className='text-sm'
-                  />
-                </div>
-                <div className='space-y-1'>
-                  <Label className='text-xs text-slate-400'>Max Score</Label>
-                  <Input
-                    type='number'
-                    value={rubric.maxScore}
-                    onChange={(e) => updateRubric(rubric.id, 'maxScore', Number(e.target.value))}
-                    className='text-sm'
-                  />
-                </div>
-                <div className='pt-5'>
-                  <button
-                    className='text-slate-400 hover:text-red-500 transition'
-                    onClick={() => removeRubric(rubric.id)}
+            <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+              <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
+                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
+                <div className='flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto'>
+                  <span className='text-xs sm:text-sm text-slate-500'>
+                    Total: <span className='font-semibold text-blue-600'>{totalScore}</span> Points
+                  </span>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='gap-1 text-xs sm:text-sm text-blue-600 border-blue-200 hover:bg-blue-50'
+                    onClick={addRubric}
                   >
-                    <Trash2 className='w-4 h-4' />
-                  </button>
+                    <Plus className='w-3.5 h-3.5' /> Add Criteria
+                  </Button>
                 </div>
               </div>
-            ))}
-          </CardContent>
-        </Card>
+            </CardHeader>
+
+            <CardContent className='space-y-3 px-4 sm:px-6 pb-4 sm:pb-6'>
+              {rubrics.map((rubric) => (
+                <div
+                  key={rubric.id}
+                  className='flex flex-col sm:grid sm:grid-cols-[1fr_2fr_80px_40px] gap-2.5 sm:gap-3 items-stretch sm:items-center p-3 sm:p-0 bg-slate-50 sm:bg-transparent rounded-xl sm:rounded-none border border-slate-100 sm:border-0'
+                >
+                  <div className='space-y-1'>
+                    <Label className='text-[11px] sm:text-xs text-slate-400'>Criteria</Label>
+                    <Input
+                      value={rubric.criteria}
+                      onChange={(e) => updateRubric(rubric.id, 'criteria', e.target.value)}
+                      className='text-xs sm:text-sm h-9 sm:h-10'
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label className='text-[11px] sm:text-xs text-slate-400'>Description</Label>
+                    <Input
+                      value={rubric.description}
+                      onChange={(e) => updateRubric(rubric.id, 'description', e.target.value)}
+                      className='text-xs sm:text-sm h-9 sm:h-10'
+                    />
+                  </div>
+                  <div className='flex items-center justify-between sm:block gap-2'>
+                    <div className='space-y-1 flex-1 sm:w-auto'>
+                      <Label className='text-[11px] sm:text-xs text-slate-400'>Max Score</Label>
+                      <Input
+                        type='number'
+                        value={rubric.maxScore}
+                        onChange={(e) => updateRubric(rubric.id, 'maxScore', Number(e.target.value))}
+                        className='text-xs sm:text-sm h-9 sm:h-10'
+                      />
+                    </div>
+                    <div className='pt-5 sm:pt-5 shrink-0'>
+                      <button
+                        className='p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition'
+                        onClick={() => removeRubric(rubric.id)}
+                      >
+                        <Trash2 className='w-4 h-4' />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         )}
 
         {/* ================================================================
             SECTION 4 — Submission Settings
         ================================================================ */}
         <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-2'>
-            <CardTitle className='text-base font-semibold text-slate-900'>Submission Settings</CardTitle>
+          <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Submission Settings</CardTitle>
           </CardHeader>
 
-          <CardContent className='space-y-1'>
-            {/* Allow File Upload */}
-            <div className='flex items-center justify-between py-3'>
-              <div>
-                <p className='text-sm font-medium text-slate-900'>Allow File Upload</p>
-                <p className='text-xs text-slate-500'>Students can upload files</p>
-              </div>
-              <Switch checked={allowFileUpload} onCheckedChange={setAllowFileUpload} />
-            </div>
-
+          <CardContent className='space-y-1 px-4 sm:px-6 pb-4 sm:pb-6'>
             {/* Allow GitHub Link */}
-            <div className='flex items-center justify-between py-3'>
-              <div>
-                <p className='text-sm font-medium text-slate-900'>Allow GitHub Link</p>
-                <p className='text-xs text-slate-500'>Students can submit a GitHub repository URL</p>
+            <div className='flex items-center justify-between py-2.5 sm:py-3 gap-3'>
+              <div className='min-w-0 flex-1'>
+                <p className='text-xs sm:text-sm font-medium text-slate-900'>Allow GitHub Link</p>
+                <p className='text-[10px] sm:text-xs text-slate-500'>Students can submit a GitHub repository URL</p>
               </div>
               <Switch checked={allowGithubLink} onCheckedChange={setAllowGithubLink} />
-            </div>
-
-            {/* Allow Code Editor Submission */}
-            <div className='flex items-center justify-between py-3'>
-              <div>
-                <p className='text-sm font-medium text-slate-900'>Allow Code Editor Submission</p>
-                <p className='text-xs text-slate-500'>Students can write code in the built-in editor</p>
-              </div>
-              <Switch checked={allowCodeEditor} onCheckedChange={setAllowCodeEditor} />
             </div>
           </CardContent>
         </Card>
 
         {/* ── Footer Actions ── */}
-        <div className='flex justify-end gap-3 pb-8'>
+        <div className='flex flex-col-reverse sm:flex-row justify-end gap-2.5 sm:gap-3 pb-8'>
           <Button
             variant='outline'
-            className='px-6'
+            className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
             onClick={() => navigate(`${basePath}/assignment-management`)}
           >
             Cancel
           </Button>
           <Button
-            className='px-6 bg-blue-600 hover:bg-blue-700'
+            className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm'
             onClick={handleCreate}
             disabled={submitting}
           >

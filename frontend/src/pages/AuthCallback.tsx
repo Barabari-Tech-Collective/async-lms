@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Loader2 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { loginWithToken } from '@/features/auth/authSlice';
+import { setCredentials } from '@/features/auth/authSlice';
+import { exchangeGoogleAuthCode } from '@/features/auth/authThunks';
 import { selectAuth } from '@/features/auth/authSelectors';
 import toast from 'react-hot-toast';
 
@@ -12,17 +13,32 @@ export default function AuthCallback() {
   const dispatch = useAppDispatch();
   const { user, isAuthenticated, status } = useAppSelector(selectAuth);
 
+  const exchangeStarted = useRef(false);
+
   useEffect(() => {
-    const token = searchParams.get('token');
+    const code = searchParams.get('code');
     const error = searchParams.get('error');
 
-    if (error || !token) {
+    if (error || !code) {
       toast.error('Google sign-in failed. Please try again.');
       navigate('/login');
       return;
     }
 
-    dispatch(loginWithToken(token));
+    if (exchangeStarted.current) return;
+    exchangeStarted.current = true;
+
+    dispatch(exchangeGoogleAuthCode(code))
+      .unwrap()
+      .then((result) => {
+        dispatch(setCredentials({ token: result.token, user: result.user }));
+      })
+      .catch((message) => {
+        toast.error(
+          typeof message === 'string' ? message : 'Google sign-in failed.',
+        );
+        navigate('/login');
+      });
   }, []);
 
   useEffect(() => {

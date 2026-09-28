@@ -30,6 +30,18 @@ function LessonRow({ lesson }: { lesson: AiLesson }) {
     <div className='flex items-center gap-3 py-1.5'>
       <Icon className={`w-4 h-4 shrink-0 ${iconColor}`} />
       <span className='flex-1 text-[13px] text-slate-700'>{lesson.title}</span>
+      {lesson.is_new && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
+          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+          New
+        </span>
+      )}
+      {lesson.is_modified && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+          Edited
+        </span>
+      )}
       <span className='text-[12px] text-slate-400 shrink-0'>{lesson.duration_mins ?? 15} min</span>
       <span className='text-[11px] text-slate-400 border border-slate-200 rounded px-1.5 py-px shrink-0 font-medium'>
         Required
@@ -43,13 +55,29 @@ function LessonRow({ lesson }: { lesson: AiLesson }) {
 function ModuleCard({ mod, index }: { mod: AiModule; index: number }) {
   return (
     <div className='bg-white border border-slate-200 rounded-xl px-6 py-5'>
-      <h3 className='text-[15px] font-bold text-slate-800 mb-4'>
-        Topic {index + 1}: {mod.title}
-      </h3>
+      <div className='flex items-center gap-2 mb-4 flex-wrap'>
+        <h3 className='text-[15px] font-bold text-slate-800'>
+          Topic {index + 1}: {mod.title}
+        </h3>
+        {mod.is_new && (
+          <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+            <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+            New Topic
+          </span>
+        )}
+      </div>
       <div className='space-y-4'>
         {mod.topics.map((topic) => (
           <div key={topic.id}>
-            <p className='text-[12px] font-bold text-slate-500 mb-1.5'>Unit: {topic.title}</p>
+            <div className='flex items-center gap-2 mb-1.5 flex-wrap'>
+              <p className='text-[12px] font-bold text-slate-500'>Unit: {topic.title}</p>
+              {topic.is_new && (
+                <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                  <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+                  New Unit
+                </span>
+              )}
+            </div>
             <div className='space-y-0.5 pl-1'>
               {topic.lessons.map((lesson) => (
                 <LessonRow key={lesson.id} lesson={lesson} />
@@ -214,7 +242,11 @@ export default function AiCurriculumReview() {
   const navigate = useNavigate();
   const user = useAppSelector(selectUser);
   const isAdmin = user?.role === 'admin';
-  const base = isAdmin ? '/dashboard/admin' : '/dashboard/facilitator';
+  const base = isAdmin
+    ? '/dashboard/admin'
+    : user?.role === 'curriculum_developer'
+    ? '/dashboard/curriculum-developer'
+    : '/dashboard/facilitator';
 
   const [course, setCourse] = useState<AiCourse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -281,8 +313,13 @@ export default function AiCurriculumReview() {
   const totalLessons = course.modules.reduce((s, m) =>
     s + m.topics.reduce((ts, t) => ts + t.lessons.length, 0), 0);
 
-  const canSubmit = ['draft', 'changes_requested'].includes(course.status) && !isAdmin;
-  const isAdminReview = isAdmin && course.status === 'in_review';
+  const canSubmit =
+    ['draft', 'changes_requested', 'published', 'approved'].includes(course.status) &&
+    !isAdmin;
+  const isAdminReview =
+    isAdmin &&
+    (course.status === 'in_review' ||
+      (course.status === 'published' && Boolean(course.has_unpublished_changes)));
 
   return (
     <div className='min-h-screen bg-slate-50 flex flex-col'>
@@ -299,18 +336,18 @@ export default function AiCurriculumReview() {
         </div>
 
         {/* Header */}
-        <div className='flex items-center gap-3 mb-6'>
+        <div className='flex items-center gap-3 mb-4 sm:mb-6'>
           <button
             onClick={() => navigate(`${base}/ai-curriculum/${id}/edit`)}
-            className='p-1.5 hover:bg-white rounded-lg text-slate-500 border border-transparent hover:border-slate-200 transition-colors'
+            className='p-1.5 hover:bg-white rounded-xl text-slate-500 border border-transparent hover:border-slate-200 transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center'
           >
             <ArrowLeft className='w-4 h-4' />
           </button>
-          <div>
-            <h1 className='text-2xl font-extrabold text-slate-800'>
+          <div className='min-w-0 flex-1'>
+            <h1 className='text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight'>
               {isAdminReview ? 'Review Course' : 'Review & Submit'}
             </h1>
-            <p className='text-[13px] text-slate-400 mt-0.5'>
+            <p className='text-xs sm:text-[13px] text-slate-400 mt-0.5 truncate'>
               {isAdminReview
                 ? `Reviewing "${course.title}" by ${course.creator_name}`
                 : 'Review your course before submitting for approval'}
@@ -318,26 +355,26 @@ export default function AiCurriculumReview() {
           </div>
         </div>
 
-        <div className={isAdminReview ? 'flex gap-6 items-start' : ''}>
+        <div className={isAdminReview ? 'flex flex-col lg:flex-row gap-6 items-start min-w-0' : 'min-w-0'}>
           {/* Main content */}
-          <div className='flex-1 min-w-0 space-y-4'>
+          <div className='flex-1 min-w-0 space-y-4 w-full'>
             {/* Stats strip */}
-            <div className='bg-white border border-slate-200 rounded-xl px-6 py-4 grid grid-cols-4 divide-x divide-slate-100'>
-              <div className='pr-6'>
+            <div className='bg-white border border-slate-200 rounded-2xl px-4 sm:px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-0 sm:divide-x divide-slate-100 shadow-xs'>
+              <div className='sm:pr-6 min-w-0'>
                 <p className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Course Title</p>
-                <p className='text-[14px] font-bold text-slate-800 truncate'>{course.title}</p>
+                <p className='text-xs sm:text-[14px] font-bold text-slate-800 truncate'>{course.title}</p>
               </div>
-              <div className='px-6'>
+              <div className='sm:px-6'>
                 <p className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Topics</p>
-                <p className='text-[22px] font-extrabold text-slate-800'>{course.modules.length}</p>
+                <p className='text-lg sm:text-[22px] font-extrabold text-slate-800'>{course.modules.length}</p>
               </div>
-              <div className='px-6'>
+              <div className='sm:px-6'>
                 <p className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Units</p>
-                <p className='text-[22px] font-extrabold text-slate-800'>{totalTopics}</p>
+                <p className='text-lg sm:text-[22px] font-extrabold text-slate-800'>{totalTopics}</p>
               </div>
-              <div className='pl-6'>
+              <div className='sm:pl-6'>
                 <p className='text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1'>Subtopics</p>
-                <p className='text-[22px] font-extrabold text-slate-800'>{totalLessons}</p>
+                <p className='text-lg sm:text-[22px] font-extrabold text-slate-800'>{totalLessons}</p>
               </div>
             </div>
 
@@ -348,11 +385,11 @@ export default function AiCurriculumReview() {
 
             {/* Course-level capstone */}
             {course.capstone_project && (
-              <div className='flex items-center gap-2 px-4 py-3 rounded-xl bg-indigo-50 border border-indigo-200'>
+              <div className='flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-indigo-50 border border-indigo-200 shadow-xs'>
                 <Trophy className='w-4 h-4 text-indigo-500 shrink-0' />
                 <div className='flex-1 min-w-0'>
-                  <p className='text-[12px] font-bold text-indigo-700'>Final Capstone: {course.capstone_project.title}</p>
-                  <p className='text-[11px] text-indigo-500 truncate'>{course.capstone_project.description}</p>
+                  <p className='text-xs sm:text-[12px] font-bold text-indigo-700 truncate'>Final Capstone: {course.capstone_project.title}</p>
+                  <p className='text-[10px] sm:text-[11px] text-indigo-500 truncate'>{course.capstone_project.description}</p>
                 </div>
               </div>
             )}
@@ -360,7 +397,7 @@ export default function AiCurriculumReview() {
 
           {/* Admin review sidebar */}
           {isAdminReview && (
-            <div className='w-80 shrink-0'>
+            <div className='w-full lg:w-80 shrink-0'>
               <AdminReviewPanel
                 course={course}
                 action={reviewAction}
@@ -376,43 +413,42 @@ export default function AiCurriculumReview() {
       </div>
 
       {/* ── Sticky bottom bar ── */}
-      <div className='fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between z-10'>
+      <div className='fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between z-10 gap-2 shadow-md'>
         <button
           onClick={() => navigate(`${base}/ai-curriculum/${id}/edit`)}
-          className='flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors'
+          className='flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors min-h-[36px]'
         >
-          <ArrowLeft className='w-4 h-4' /> Back to Editor
+          <ArrowLeft className='w-4 h-4' /> <span className='hidden xs:inline'>Back to</span> Editor
         </button>
 
-        <div className='flex items-center gap-3'>
+        <div className='flex items-center gap-2 sm:gap-3'>
           {/* Facilitator: submit for review */}
           {canSubmit && (
             <button
               onClick={handleSubmitForReview}
               disabled={submitting}
-              className='flex items-center gap-2 px-5 py-2 text-sm font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-50 transition-colors'
+              className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-[#1e2653] text-white rounded-xl hover:bg-[#16203f] disabled:opacity-50 transition-colors min-h-[36px]'
             >
               {submitting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Send className='w-4 h-4' />}
-              Submit for Review
+              <span>{course.status === 'published' ? 'Submit Updates for Review' : 'Submit for Review'}</span>
             </button>
           )}
 
           {/* Facilitator: pending state */}
           {course.status === 'in_review' && !isAdmin && (
-            <span className='text-sm font-semibold text-yellow-600 bg-yellow-50 border border-yellow-200 px-4 py-2 rounded-lg'>
+            <span className='text-xs sm:text-sm font-semibold text-yellow-600 bg-yellow-50 border border-yellow-200 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl'>
               Pending Review
             </span>
           )}
 
-
-          {/* Admin: publish approved course */}
-          {isAdmin && course.status === 'approved' && (
+          {/* Admin: publish approved or republish published course */}
+          {isAdmin && (course.status === 'approved' || (course.status === 'published' && course.subject_id)) && (
             <button
               onClick={async () => {
                 setSubmitting(true);
                 try {
                   await aiCurriculumApi.publish(id!);
-                  toast.success('Course published!');
+                  toast.success(course.subject_id ? 'Course republished!' : 'Course published!');
                   navigate(`${base}/ai-curriculum`);
                 } catch (err: any) {
                   toast.error(err?.response?.data?.message || 'Failed to publish');
@@ -421,10 +457,10 @@ export default function AiCurriculumReview() {
                 }
               }}
               disabled={submitting}
-              className='flex items-center gap-2 px-5 py-2 text-sm font-bold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors'
+              className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
             >
               {submitting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Sparkles className='w-4 h-4' />}
-              Publish Course
+              <span>{course.status === 'published' || course.subject_id ? 'Republish Course' : 'Publish Course'}</span>
             </button>
           )}
         </div>

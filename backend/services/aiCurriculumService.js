@@ -1,7 +1,10 @@
 const OpenAI = require('openai');
 const { recommendBestVideo } = require('./videoRecommendation.service');
 
-const openai = new OpenAI({ apiKey: process.env.CHATGPT_API_KEY });
+const openai = new OpenAI({ 
+  apiKey: process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL || 'https://api.deepseek.com' 
+});
 
 /**
  * Generate a full curriculum tree from course metadata + JD.
@@ -127,7 +130,7 @@ Rules:
 - Avoid generic filler — every subtopic must teach something directly employable for ${roleFocus}`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 32000,
@@ -171,7 +174,7 @@ Rewrite this lesson following the instruction. Return ONLY a valid JSON object:
 }`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 1500,
@@ -203,7 +206,7 @@ Categories must be exactly: "technical", "tools", or "soft".
 Extract 8–20 skills. Focus on what's directly required, not implied.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1000,
@@ -247,7 +250,7 @@ Rules:
 - Order them from foundational to advanced`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.6,
     max_tokens: 1500,
@@ -284,7 +287,7 @@ Rules:
 - Progress logically from foundational concepts to more complex ones within the topic`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.6,
     max_tokens: 1000,
@@ -328,7 +331,7 @@ Rules:
 - Each must be granular enough to have its own 10–15 minute video`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.6,
     max_tokens: 600,
@@ -432,7 +435,7 @@ Return ONLY a valid JSON object:
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         response_format: { type: 'json_object' }
@@ -505,7 +508,7 @@ Rules:
   }
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: maxTokens,
@@ -562,7 +565,7 @@ Rules:
 - Focus on what a ${roleFocus} must know`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.5,
     max_tokens: 2000,
@@ -610,7 +613,7 @@ Rules:
 - Covers the key skills from the entire unit`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.6,
     max_tokens: 800,
@@ -652,7 +655,7 @@ Rules:
 - Instructions must be clear and self-contained`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 1000,
@@ -667,17 +670,20 @@ Rules:
 }
 
 async function generateExerciseTests({ instructions, language, roleFocus, level }) {
-  const prompt = `You are an expert software tester and curriculum designer.
-  
-Generate automated test cases for a coding task.
-Task Instructions:
-${instructions}
+  const prompt = `You are an expert software tester, curriculum designer, and programming language specialist.
 
-Programming Language: ${language}
-Target Role: ${roleFocus}
-Complexity Level: ${level}
+## Your Task
+Generate automated test cases for a coding assignment based on the provided content.
 
-Return ONLY a valid JSON object:
+## Inputs
+- **Task Instructions:** ${instructions}
+- **Programming Language:** ${language}
+- **Target Role:** ${roleFocus}
+- **Complexity Level:** ${level}
+
+## Output Format
+Return ONLY a valid JSON object with NO markdown wrappers (no \`\`\`json blocks):
+
 {
   "test_cases": [
     {
@@ -688,19 +694,97 @@ Return ONLY a valid JSON object:
   ]
 }
 
-Syntax Rules:
-1. Use \`__test(description, () => { ... })\` for the test block.
-2. Use \`__expect(actual).toBe(expected)\` for assertions.
-3. For JavaScript: The student's code is available in the scope. You can call their functions directly.
-4. For Python: Use similar \`__test\` and \`__expect\` wrappers.
-5. Generate 2-4 comprehensive test cases covering edge cases and main functionality.
-6. Return only the JSON, no markdown wrappers.`;
+---
+
+## UNIVERSAL SYNTAX RULES (Apply based on ${language})
+
+### Test Block Syntax
+- **JavaScript:** Use \`__test(description, async () => { ... })\` if async, else \`__test(description, () => { ... })\`
+- **Python:** Use \`async def _t(): ... \\n__test(description, _t)\` if async, else \`__test(description, lambda: (...))\`
+
+### Assertion Syntax
+- **JavaScript:** Use \`__expect(actual).toBe(expected)\`
+- **Python:** Use \`__expect(actual).to_be(expected)\`
+- **Strict equality is used.** The expected value MUST match the actual output in both value AND type.
+
+---
+
+## CRITICAL GENERATION RULES (Follow in exact order)
+
+### Rule 1: Identify ALL Executable Tasks
+Read the entire assignment and identify EVERY task that requires the student to output an answer. 
+- Some tasks provide code for the student to run ("Predict the output").
+- Other tasks only describe a problem for the student to solve ("Calculate factorial of 5").
+You must generate a test for EVERY expected \`console.log()\` or \`print()\` statement.
+
+### Rule 2: Determine Expected Output BEFORE Writing Tests
+For every task identified in Rule 1, you MUST determine the exact expected output.
+1. **For provided code:** Mentally execute it step-by-step. Respect operator precedence and type coercion.
+2. **For problem descriptions:** Determine the correct mathematical or logical answer (e.g., factorial of 5 is 120).
+3. **Pure Expressions (ENGINE DELEGATION):** Do NOT calculate the answer for pure expressions yourself. Write the raw expression in .toBe(). e.g., \`__expect(__logs[0]).toBe("9" > "100")\`.
+4. **Mutation Operators (++, --, +=):** NEVER inline these onto literal numbers. Hardcode the final result. e.g., \`__expect(__logs[5]).toBe('56')\`.
+
+### Rule 3: ALWAYS use __logs — NEVER test variables directly
+**The golden rule:** ALL assertions MUST use \`__logs\`. Never assert a variable name directly.
+
+- ❌ FORBIDDEN: \`__expect(x).toBe(24)\`
+- ❌ FORBIDDEN: \`__expect(p).toBe(5)\`  
+- ✅ CORRECT: \`__expect(__logs[n]).toBe(24)\` (because the student logged x)
+- ✅ CORRECT: \`__expect(__logs[n]).toBe(5)\` (because the student logged p)
+
+This works because assignments instruct the student to console.log ALL their final answers.
+
+### Rule 4: No Code Inside Test Blocks — ONLY __expect Statements
+**The test block body MUST ONLY contain \`__expect(__logs[n]).toBe(...)\` statements.**
+
+- ❌ FORBIDDEN (variable declaration): \`__test('...', () => { let x = 10; x += 5; __expect(x).toBe(15); })\`
+- ❌ FORBIDDEN (console.log in test): \`__test('...', () => { console.log(a + b); __expect(__logs[5]).toBe(...); })\`
+- ✅ CORRECT: \`__test('...', () => { __expect(__logs[5]).toBe(15); })\`
+
+### Rule 5: Maintain Continuous Log Indexing
+\`__logs\` is a SINGLE global array accumulating ALL \`console.log\` / \`print\` outputs.
+- Start at \`__logs[0]\` for the very first log in the entire solution.
+- NEVER reset to 0 for a new test.
+- Mentally map every console.log → index before writing the JSON.
+
+### Rule 6: Type Matching is NON-NEGOTIABLE
+The value in .toBe() MUST match the runtime output type exactly.
+- Numbers: \`.toBe(16)\` not \`.toBe('16')\`
+- Strings: \`.toBe("hello")\`
+- Booleans: \`.toBe(true)\` not \`.toBe('true')\`
+- null/undefined/None: use exact keyword
+
+### Rule 7: Test Case Grouping
+- Generate one test per logical section.
+- Do NOT skip any section.
+
+### Rule 8: Asynchronous Operations
+If the student's code is asynchronous (setTimeout, Promises, fetch, asyncio):
+- **JavaScript:** \`__test(description, async () => { await new Promise(r => setTimeout(r, 1100)); __expect(__logs[n]).toBe(...); })\`
+- **Python:** \`async def _t(): await asyncio.sleep(1.1); __expect(__logs[n]).to_be(...)\n__test(description, _t)\`
+
+### Rule 9: Language-Specific Adaptations
+- **JavaScript:** == vs === differ. Template literals, coercions.
+- **Python:** / is float, // is int. None is not False. Indentation matters.
+
+---
+
+## FINAL VERIFICATION CHECKLIST
+Before returning JSON, confirm:
+1. Every test body contains ONLY \`__expect(__logs[n]).toBe(...)\` statements.
+2. No variable declarations (let/const/var/def) inside any test block.
+3. No console.log or print inside any test block.
+4. Pure expressions are delegated to the engine.
+5. Mutation/sequential results are hardcoded final values.
+6. __logs indices are continuous from 0 with no gaps.
+7. Types match exactly.
+8. Return only raw JSON.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0.6,
-    max_tokens: 1500,
+    temperature: 0.1,
+    max_tokens: 2000,
     response_format: { type: 'json_object' },
   });
 
@@ -732,7 +816,7 @@ ${fileText.substring(0, 15000)}
 `;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.5,
     max_tokens: 1500,
@@ -763,7 +847,7 @@ ${fileText.substring(0, 15000)}
 `;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.5,
     max_tokens: 2500,

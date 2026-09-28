@@ -57,12 +57,12 @@ const Students = () => {
 
   if (loading)
     return (
-      <div className='p-6 space-y-6'>
-        <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-4'>
-          <Skeleton className='h-10 w-96' />
-          <Skeleton className='h-10 w-32' />
+      <div className='space-y-4 sm:space-y-6 min-w-0'>
+        <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
+          <Skeleton className='h-10 w-full sm:w-96 rounded-xl' />
+          <Skeleton className='h-10 w-32 rounded-xl' />
         </div>
-        <Card className='border-none shadow-sm overflow-hidden'>
+        <Card className='border border-slate-200/80 shadow-xs rounded-2xl overflow-hidden bg-white'>
           <div className='bg-slate-50/50 px-4 py-3 grid grid-cols-5 gap-4'>
             {[...Array(5)].map((_, i) => <Skeleton key={i} className='h-3 w-full' />)}
           </div>
@@ -92,119 +92,122 @@ const Students = () => {
     );
 
   return (
-    <div className='p-6 space-y-6 animate-in fade-in duration-500'>
+    <div className='space-y-4 sm:space-y-6 min-w-0 animate-in fade-in duration-300'>
       {/* Filters Header */}
-      <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-4'>
-        <div className='relative w-full md:w-96'>
+      <div className='flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3'>
+        <div className='relative w-full sm:w-96'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400' />
           <Input
             placeholder='Search student by name or email...'
-            className='pl-10 bg-white border-slate-200'
+            className='pl-9 bg-white border-slate-200 h-10 rounded-xl text-xs sm:text-sm shadow-xs'
             value={searchQuery}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
               setSearchQuery(e.target.value)
             }
           />
         </div>
-        <div className='flex items-center gap-3 w-full md:w-auto'>
-          <Button variant='outline' className='bg-white'>
-            <Filter className='w-4 h-4 mr-2' /> All Colleges
+        <div className='flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto'>
+          <Button variant='outline' className='bg-white border-slate-200 rounded-xl min-h-[40px] text-xs sm:text-sm font-semibold shadow-xs'>
+            <Filter className='w-3.5 h-3.5 mr-2 text-slate-500' /> All Colleges
           </Button>
-          <p className='text-sm text-slate-500 font-medium whitespace-nowrap'>
-            Showing{' '}
-            <span className='text-slate-900'>{filteredStudents.length}</span>{' '}
-            students
+          <p className='text-xs font-semibold text-slate-400 whitespace-nowrap'>
+            Showing <strong className='text-slate-800'>{filteredStudents.length}</strong> students
           </p>
         </div>
       </div>
 
       {/* Students Table */}
-      <Card className='border-none shadow-sm overflow-hidden'>
-        <Table>
-          <TableHeader className='bg-slate-50/50'>
-            <TableRow>
-              <TableHead className='font-bold text-slate-700 uppercase'>
-                Student Name
-              </TableHead>
-              <TableHead className='font-bold text-slate-700 uppercase'>
-                College
-              </TableHead>
-              <TableHead className='font-bold text-slate-700 uppercase'>
-                Batch
-              </TableHead>
-              <TableHead className='font-bold text-slate-700 uppercase'>
-                Joined Date
-              </TableHead>
-              <TableHead className='font-bold text-slate-700 text-right uppercase'>
-                Actions
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody className='bg-white'>
-            {filteredStudents.map((student) => (
-              <TableRow key={student.id} className='hover:bg-slate-50/50'>
-                <TableCell>
-                  <div className='flex items-center gap-3'>
-                    <div className='w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0'>
-                      {student.full_name
-                        .split(' ')
-                        .map((n) => n[0])
-                        .join('')}
-                    </div>
-                    <div className='min-w-0'>
-                      <p className='font-bold text-slate-900 truncate'>
-                        {student.full_name}
-                      </p>
-                      <p className='text-xs text-slate-500 truncate'>
-                        {student.email}
-                      </p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <p className='text-sm text-slate-700 truncate max-w-45'>
-                    {student.college_name || 'N/A'}
-                  </p>
-                </TableCell>
-                <TableCell>
-                  <span className='px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-bold'>
-                    Year {student.batch}
-                  </span>
-                </TableCell>
-                <TableCell className='text-slate-500 text-sm whitespace-nowrap'>
-                  {new Date(student.joined_date).toLocaleDateString('en-GB', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                </TableCell>
-                <TableCell className='text-right'>
-                  <div className='flex justify-end gap-1'>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='text-slate-400 hover:text-blue-600'
-                      onClick={() => setProfileId(student.id)}
-                    >
-                      <Eye className='w-4 h-4' />
-                    </Button>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='text-slate-400'
-                    >
-                      <MoreHorizontal className='w-4 h-4' />
-                    </Button>
-                  </div>
-                </TableCell>
+      <Card className='border border-slate-200/80 shadow-xs rounded-2xl overflow-hidden bg-white min-w-0'>
+        <div className='overflow-x-auto custom-scrollbar w-full min-w-0'>
+          <Table className='min-w-[620px] text-xs sm:text-sm'>
+            <TableHeader className='bg-slate-50 border-b border-slate-100'>
+              <TableRow>
+                <TableHead className='font-bold text-slate-600 uppercase text-[11px] py-3.5 pl-4 sm:pl-6'>
+                  Student Name
+                </TableHead>
+                <TableHead className='font-bold text-slate-600 uppercase text-[11px] py-3.5'>
+                  College
+                </TableHead>
+                <TableHead className='font-bold text-slate-600 uppercase text-[11px] py-3.5'>
+                  Batch
+                </TableHead>
+                <TableHead className='font-bold text-slate-600 uppercase text-[11px] py-3.5'>
+                  Joined Date
+                </TableHead>
+                <TableHead className='font-bold text-slate-600 text-right uppercase text-[11px] py-3.5 pr-4 sm:pr-6'>
+                  Actions
+                </TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody className='divide-y divide-slate-100'>
+              {filteredStudents.map((student) => (
+                <TableRow key={student.id} className='hover:bg-slate-50/60 transition-colors'>
+                  <TableCell className='pl-4 sm:pl-6 py-3.5'>
+                    <div className='flex items-center gap-3 min-w-0'>
+                      <div className='w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100'>
+                        {student.full_name
+                          .split(' ')
+                          .map((n) => n[0])
+                          .join('')
+                          .slice(0, 2)}
+                      </div>
+                      <div className='min-w-0'>
+                        <p className='font-bold text-slate-900 truncate'>
+                          {student.full_name}
+                        </p>
+                        <p className='text-xs text-slate-500 truncate'>
+                          {student.email}
+                        </p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className='py-3.5'>
+                    <p className='text-xs sm:text-sm text-slate-700 truncate max-w-[180px]'>
+                      {student.college_name || 'N/A'}
+                    </p>
+                  </TableCell>
+                  <TableCell className='py-3.5 whitespace-nowrap'>
+                    <span className='px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold border border-blue-200/60'>
+                      Year {student.batch}
+                    </span>
+                  </TableCell>
+                  <TableCell className='text-slate-500 text-xs sm:text-sm py-3.5 whitespace-nowrap'>
+                    {new Date(student.joined_date).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </TableCell>
+                  <TableCell className='text-right pr-4 sm:pr-6 py-3.5'>
+                    <div className='flex items-center justify-end gap-1'>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-8 w-8 text-slate-400 hover:text-indigo-600 rounded-lg'
+                        onClick={() => setProfileId(student.id)}
+                        title='View Profile'
+                      >
+                        <Eye className='w-4 h-4' />
+                      </Button>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-8 w-8 text-slate-400 hover:text-slate-700 rounded-lg'
+                        title='More Actions'
+                      >
+                        <MoreHorizontal className='w-4 h-4' />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
 
         {filteredStudents.length === 0 && (
-          <div className='p-20 text-center'>
-            <p className='text-slate-400'>
+          <div className='p-12 sm:p-16 text-center'>
+            <p className='text-slate-400 text-xs sm:text-sm'>
               No students found matching your search.
             </p>
           </div>

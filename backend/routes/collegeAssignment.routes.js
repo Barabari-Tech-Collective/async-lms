@@ -40,6 +40,10 @@ const {
 } = require('../controllers/collegeAssignment.controller');
 const isAdminOrFacilitator = require('../middlewares/isAdminOrFacilitator');
 
+// Admin / Facilitator: get courses for creating assignments
+router.get('/courses', verifyToken, isAdminOrFacilitator, require('../controllers/collegeAssignment.controller').getCoursesForAssignment);
+router.get('/courses/:courseId/topics', verifyToken, isAdminOrFacilitator, require('../controllers/collegeAssignment.controller').getTopicsForCourse);
+
 // Admin / Facilitator: manage assignments (MUST COME BEFORE /:id)
 router.get('/manage', verifyToken, isFacilitator, manageAssignments);
 router.get(

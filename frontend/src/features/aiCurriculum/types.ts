@@ -37,6 +37,8 @@ export interface AiLesson {
   quiz_questions: AiQuizQuestion[];
   exercise_data: AiExercise | null;
   resource_links?: string[];
+  is_new?: boolean;
+  is_modified?: boolean;
 }
 
 export interface AiAssignment {
@@ -61,6 +63,8 @@ export interface AiTopic {
   quiz_questions: AiQuizQuestion[];
   assignment: AiAssignment | null;
   lessons: AiLesson[];
+  is_new?: boolean;
+  is_modified?: boolean;
 }
 
 export interface AiModule {
@@ -73,6 +77,8 @@ export interface AiModule {
   case_studies: string[];
   capstone_project: AiCapstoneProject | null;
   topics: AiTopic[];
+  is_new?: boolean;
+  is_modified?: boolean;
 }
 
 export interface CourseReview {
@@ -112,6 +118,14 @@ export interface AiCourse {
   reviewed_by: string | null;
   reviewer_name: string | null;
   subject_id: string | null;
+  has_unpublished_changes?: boolean;
+  last_published_at?: string | null;
+  pending_changes_summary?: {
+    new_modules: number;
+    new_topics: number;
+    new_lessons: number;
+    total: number;
+  };
   created_at: string;
   updated_at: string;
   modules_count?: number;

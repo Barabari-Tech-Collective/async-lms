@@ -57,8 +57,18 @@ export interface Quiz {
 export interface TestCase {
   id: string;
   description: string;
-  test_code: string;
   is_hidden: boolean;
+  /** Code-mode only: author-written assertion code. */
+  test_code?: string;
+  /** Data-mode: arguments passed to the entry function. */
+  args?: unknown[];
+  /** Data-mode: the value the entry function must return. */
+  expected?: unknown;
+  /** Data-mode: shown as a sample and run by "Run tests"; hidden cases only run on Submit. */
+  visible?: boolean;
+  /** Editing-only scratch text, stripped before save. */
+  _argsText?: string;
+  _expectedText?: string;
 }
 
 export interface ExerciseTask {
@@ -67,6 +77,15 @@ export interface ExerciseTask {
   instructions?: string;
   initial_files: { name: string; content: string }[];
   test_cases?: TestCase[];
+  /**
+   * The author's worked answer, used only to verify the test cases at
+   * authoring time. Stripped from every student-facing response.
+   */
+  reference_solution?: { name: string; content: string }[];
+  /** 'data' = args/expected table (default for new exercises); 'code' = legacy authored test code. */
+  test_kind?: 'data' | 'code';
+  /** Data-mode: the function the test cases call, e.g. "updateSalary". */
+  entry_function?: string;
 }
 
 export interface Exercise {
@@ -79,6 +98,7 @@ export interface Exercise {
   initial_files?: { name: string; content: string }[];
   test_cases?: TestCase[];
   tasks?: ExerciseTask[];
+  rubric?: any;
 }
 
 export interface CollegeAssignment {
@@ -266,6 +286,7 @@ export interface ExerciseModalProps {
     initial_files: { name: string; content: string }[];
     test_cases: TestCase[];
     tasks: ExerciseTask[];
+    rubric?: any;
   }) => void;
   editData?: {
     title: string;
@@ -275,7 +296,65 @@ export interface ExerciseModalProps {
     initial_files?: { name: string; content: string }[];
     test_cases?: TestCase[];
     tasks?: ExerciseTask[];
+    rubric?: any;
   };
   subtopicTitle: string;
   loading?: boolean;
+}
+
+export interface RubricBreakdownItem {
+  item?: string;
+  criterion?: string;
+  name?: string;
+  awarded?: number;
+  points_awarded?: number;
+  score?: number;
+  max?: number;
+  max_points?: number;
+  weight?: number;
+  reason?: string;
+  feedback?: string;
+}
+
+export interface EvaluationFeedback {
+  summary?: string;
+  feedback?: string;
+  strengths?: string[];
+  issues?: string[];
+  breakdown?: RubricBreakdownItem[];
+  rubric_breakdown?: RubricBreakdownItem[];
+  [key: string]: any;
+}
+
+export type AssignmentLifecycleStatus = 'pending' | 'pending_evaluation' | 'evaluated';
+
+export interface StudentAssignmentOverviewItem {
+  id: string;
+  title: string;
+  type: 'CURRICULUM' | 'COLLEGE';
+  course_name: string;
+  subject_slug?: string | null;
+  topic_title?: string | null;
+  unit_title?: string | null;
+  max_score: number;
+  due_date?: string | null;
+  created_at?: string;
+  status: AssignmentLifecycleStatus;
+  submitted_at?: string | null;
+  submission_link?: string | null;
+  submission_file_url?: string | null;
+  marks?: number | null;
+  feedback?: EvaluationFeedback | null;
+  navigation_url: string;
+}
+
+export interface StudentAssignmentsOverviewResponse {
+  success: boolean;
+  data: StudentAssignmentOverviewItem[];
+  counts: {
+    total: number;
+    pending: number;
+    pending_evaluation: number;
+    evaluated: number;
+  };
 }

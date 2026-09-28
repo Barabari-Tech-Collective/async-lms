@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft,
@@ -37,13 +37,32 @@ export default function AiCurriculumEditor() {
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<AiLesson | null>(null);
+  const contentPreviewRef = useRef<HTMLDivElement>(null);
   const [addingModule, setAddingModule] = useState(false);
   const [savingModule, setSavingModule] = useState(false);
   const [meta, setMeta] = useState({ title: '', domain: '', duration: '' });
   const [dragModuleIdx, setDragModuleIdx] = useState<number | null>(null);
   const [dragModuleOver, setDragModuleOver] = useState<number | null>(null);
 
-  const base = isAdmin ? '/dashboard/admin' : '/dashboard/facilitator';
+  const handleSelectLesson = (lesson: AiLesson | null) => {
+    setSelectedLesson(lesson);
+    if (lesson) {
+      setTimeout(() => {
+        if (contentPreviewRef.current) {
+          contentPreviewRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }, 60);
+    }
+  };
+
+  const base = isAdmin
+    ? '/dashboard/admin'
+    : user?.role === 'curriculum_developer'
+    ? '/dashboard/curriculum-developer'
+    : '/dashboard/facilitator';
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -52,10 +71,10 @@ export default function AiCurriculumEditor() {
       const res = await aiCurriculumApi.get(id);
       const c = res.data.data;
       setCourse(c);
-      setModules(c.modules);
+      setModules(c.modules || []);
       setMeta({
-        title: c.title,
-        domain: c.domain,
+        title: c.title || '',
+        domain: c.domain || '',
         duration: c.duration_weeks ? `${c.duration_weeks}` : '',
       });
     } catch {
@@ -69,19 +88,15 @@ export default function AiCurriculumEditor() {
     load();
   }, [load]);
 
-  const canEdit = useMemo(
-    () =>
-      course ? ['draft', 'changes_requested'].includes(course.status) : false,
-    [course],
-  );
+  const canEdit = Boolean(course);
   const totalTopics = useMemo(
-    () => modules.reduce((s, m) => s + m.topics.length, 0),
+    () => (modules || []).reduce((s, m) => s + (m.topics || []).length, 0),
     [modules],
   );
   const totalLessons = useMemo(
     () =>
-      modules.reduce(
-        (s, m) => s + m.topics.reduce((ts, t) => ts + t.lessons.length, 0),
+      (modules || []).reduce(
+        (s, m) => s + (m.topics || []).reduce((ts, t) => ts + (t.lessons || []).length, 0),
         0,
       ),
     [modules],
@@ -135,7 +150,9 @@ export default function AiCurriculumEditor() {
     (moduleId: string, topic: AiTopic) =>
       setModules((ms) =>
         ms.map((m) =>
-          m.id === moduleId ? { ...m, topics: [...m.topics, topic] } : m,
+          m.id === moduleId
+            ? { ...m, topics: [...(m.topics || []), topic] }
+            : m,
         ),
       ),
     [],
@@ -146,8 +163,10 @@ export default function AiCurriculumEditor() {
       setModules((ms) =>
         ms.map((m) => ({
           ...m,
-          topics: m.topics.map((t) =>
-            t.id === topicId ? { ...t, lessons: [...t.lessons, lesson] } : t,
+          topics: (m.topics || []).map((t) =>
+            t.id === topicId
+              ? { ...t, lessons: [...(t.lessons || []), lesson] }
+              : t,
           ),
         })),
       ),
@@ -160,8 +179,8 @@ export default function AiCurriculumEditor() {
       setModules((ms) => {
         const mod = ms.find((m) => m.id === moduleId);
         if (
-          mod?.topics.some((t) =>
-            t.lessons.some((l) => l.id === selectedLesson?.id),
+          mod?.topics?.some((t) =>
+            t.lessons?.some((l) => l.id === selectedLesson?.id),
           )
         )
           setSelectedLesson(null);
@@ -176,12 +195,12 @@ export default function AiCurriculumEditor() {
       setModules((ms) => {
         const topic = ms
           .find((m) => m.id === moduleId)
-          ?.topics.find((t) => t.id === topicId);
-        if (topic?.lessons.some((l) => l.id === selectedLesson?.id))
+          ?.topics?.find((t) => t.id === topicId);
+        if (topic?.lessons?.some((l) => l.id === selectedLesson?.id))
           setSelectedLesson(null);
         return ms.map((m) =>
           m.id === moduleId
-            ? { ...m, topics: m.topics.filter((t) => t.id !== topicId) }
+            ? { ...m, topics: (m.topics || []).filter((t) => t.id !== topicId) }
             : m,
         );
       });
@@ -195,9 +214,9 @@ export default function AiCurriculumEditor() {
       setModules((ms) =>
         ms.map((m) => ({
           ...m,
-          topics: m.topics.map((t) => ({
+          topics: (m.topics || []).map((t) => ({
             ...t,
-            lessons: t.lessons.filter((l) => l.id !== lessonId),
+            lessons: (t.lessons || []).filter((l) => l.id !== lessonId),
           })),
         })),
       );
@@ -476,7 +495,7 @@ export default function AiCurriculumEditor() {
     try {
       await aiCurriculumApi.publish(id!);
       toast.success('Course published!');
-      navigate('/dashboard/admin/subjects');
+      navigate(`${base}/ai-curriculum`);
     } catch (err) {
       const msg = (err as { response?: { data?: { message?: string } } })
         ?.response?.data?.message;
@@ -484,7 +503,7 @@ export default function AiCurriculumEditor() {
     } finally {
       setPublishing(false);
     }
-  }, [id, navigate]);
+  }, [id, navigate, base]);
 
   if (loading) {
     return (
@@ -503,110 +522,103 @@ export default function AiCurriculumEditor() {
   return (
     <div className='flex flex-col min-h-screen bg-slate-50'>
       {/* Top bar */}
-      <div className='bg-white border-b border-slate-200 px-8 py-4 shrink-0'>
-        <div className='flex items-center gap-1.5 text-[11px] text-slate-400 mb-3'>
-          <span
-            className='hover:text-slate-600 cursor-pointer'
-            onClick={() => navigate(base)}
-          >
-            Dashboard
-          </span>
-          <span>/</span>
-          <span
-            className='hover:text-slate-600 cursor-pointer'
-            onClick={() => navigate(`${base}/ai-curriculum`)}
-          >
-            Courses
-          </span>
-          <span>/</span>
-          <span className='text-slate-600 font-medium truncate max-w-48'>
-            {course.title}
-          </span>
-        </div>
-        <div className='flex items-center justify-between gap-4'>
+      <div className='border-b border-slate-200 bg-white px-3.5 sm:px-8 py-3 sm:py-4 shrink-0'>
+        <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
           <div className='flex items-center gap-3 min-w-0'>
             <button
               onClick={() => navigate(`${base}/ai-curriculum`)}
-              className='p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors shrink-0'
+              className='p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center'
             >
               <ArrowLeft className='w-4 h-4' />
             </button>
-            <div className='min-w-0'>
-              <div className='flex items-center gap-2.5'>
-                <h1 className='text-xl font-extrabold text-slate-800 leading-tight truncate'>
+            <div className='min-w-0 flex-1'>
+              <div className='flex items-center gap-2 flex-wrap'>
+                <h1 className='text-base sm:text-lg font-bold text-slate-900 truncate tracking-tight'>
                   {course.title}
                 </h1>
                 <span
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[course.status] ?? 'bg-slate-100 text-slate-600'}`}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0 ${
+                    STATUS_COLORS[course.status] ??
+                    'bg-slate-100 text-slate-600'
+                  }`}
                 >
                   {STATUS_LABELS[course.status]}
                 </span>
               </div>
-              <p className='text-[12px] text-slate-400 mt-0.5'>
+              <p className='text-xs text-slate-500 mt-0.5 truncate'>
                 {modules.length} topics · {totalTopics} units · {totalLessons}{' '}
-                subtopics
-                {canEdit
-                  ? ' · Double-click any title to rename · Drag to reorder'
-                  : ' · Read-only'}
+                subtopics · Double-click to rename
               </p>
             </div>
           </div>
-          <div className='flex items-center gap-2 shrink-0'>
-            {canEdit && (
-              <button
-                onClick={handleSaveDraft}
-                disabled={saving}
-                className='flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors'
-              >
-                {saving ? (
-                  <Loader2 className='w-3.5 h-3.5 animate-spin' />
-                ) : (
-                  <Save className='w-3.5 h-3.5' />
-                )}{' '}
-                Save Draft
-              </button>
-            )}
+          <div className='flex items-center gap-1.5 sm:gap-2 flex-wrap shrink-0'>
+            <button
+              onClick={handleSaveDraft}
+              disabled={saving}
+              className='flex items-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors min-h-[36px]'
+            >
+              {saving ? (
+                <Loader2 className='w-3.5 h-3.5 animate-spin' />
+              ) : (
+                <Save className='w-3.5 h-3.5' />
+              )}{' '}
+              {course.status === 'published' ? 'Save Changes' : 'Save Draft'}
+            </button>
             <button
               onClick={() => navigate(`${base}/ai-curriculum/${id}/preview`)}
-              className='flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors'
+              className='flex items-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors min-h-[36px]'
             >
               <Eye className='w-3.5 h-3.5' /> Preview
             </button>
             {isAdmin && course.status === 'in_review' && (
               <button
                 onClick={() => navigate(`${base}/ai-curriculum/${id}/review`)}
-                className='flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors'
+                className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-yellow-500 text-white rounded-xl hover:bg-yellow-600 transition-colors min-h-[36px]'
               >
                 Review Course
               </button>
             )}
-            {canEdit && (
+            {isAdmin && course.status === 'published' && Boolean(course.has_unpublished_changes) && (
+              <button
+                onClick={() => navigate(`${base}/ai-curriculum/${id}/review`)}
+                className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-colors min-h-[36px]'
+              >
+                <Sparkles className='w-3.5 h-3.5' />
+                Review Changes
+              </button>
+            )}
+            {!isAdmin && course.status !== 'in_review' && (
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
-                className='flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-50 transition-colors'
+                className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-[#1e2653] text-white rounded-xl hover:bg-[#16203f] disabled:opacity-50 transition-colors min-h-[36px]'
               >
                 {submitting ? (
                   <Loader2 className='w-4 h-4 animate-spin' />
                 ) : (
                   <>
-                    Submit <ArrowRight className='w-4 h-4' />
+                    {course.status === 'published'
+                      ? 'Submit Updates'
+                      : course.status === 'changes_requested'
+                      ? 'Resubmit'
+                      : 'Submit'}{' '}
+                    <ArrowRight className='w-4 h-4' />
                   </>
                 )}
               </button>
             )}
-            {isAdmin && course.status === 'approved' && (
+            {isAdmin && (course.status === 'approved' || (course.status === 'published' && course.subject_id)) && (
               <button
                 onClick={handlePublish}
                 disabled={publishing}
-                className='flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors'
+                className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
               >
                 {publishing ? (
                   <Loader2 className='w-4 h-4 animate-spin' />
                 ) : (
                   <Sparkles className='w-4 h-4' />
                 )}{' '}
-                Publish
+                {course.status === 'published' || course.subject_id ? 'Republish Course' : 'Publish Course'}
               </button>
             )}
           </div>
@@ -614,8 +626,8 @@ export default function AiCurriculumEditor() {
       </div>
 
       {/* Metadata strip */}
-      <div className='px-8 pt-4 pb-3 shrink-0'>
-        <div className='bg-white border border-slate-200 rounded-xl overflow-hidden grid grid-cols-3 divide-x divide-slate-100'>
+      <div className='px-3.5 sm:px-8 pt-3 sm:pt-4 pb-2 sm:pb-3 shrink-0'>
+        <div className='bg-white border border-slate-200 rounded-2xl overflow-hidden grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100 shadow-xs'>
           {[
             {
               label: 'Course Title',
@@ -629,12 +641,12 @@ export default function AiCurriculumEditor() {
               placeholder: 'e.g. 8',
             },
           ].map(({ label, key, placeholder }) => (
-            <div key={key} className='px-4 py-3'>
+            <div key={key} className='px-4 py-2.5 sm:py-3'>
               <label className='block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-1'>
                 {label}
               </label>
               <input
-                className='w-full text-sm text-slate-700 placeholder:text-slate-300 focus:outline-none bg-transparent disabled:text-slate-400'
+                className='w-full text-xs sm:text-sm text-slate-700 placeholder:text-slate-300 focus:outline-none bg-transparent disabled:text-slate-400'
                 placeholder={placeholder}
                 disabled={!canEdit}
                 value={meta[key]}
@@ -647,36 +659,95 @@ export default function AiCurriculumEditor() {
         </div>
         {course.status === 'changes_requested' && course.reviews?.[0] && (
           <div className='mt-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3'>
-            <p className='text-sm font-semibold text-orange-800 mb-0.5'>
+            <p className='text-xs sm:text-sm font-semibold text-orange-800 mb-0.5'>
               Changes Requested
             </p>
             {course.reviews[0].feedback?.suggestions && (
-              <p className='text-sm text-orange-700'>
+              <p className='text-xs sm:text-sm text-orange-700'>
                 {course.reviews[0].feedback.suggestions}
               </p>
             )}
             {course.reviews[0].feedback?.missing_skills && (
-              <p className='text-sm text-orange-600 mt-1'>
+              <p className='text-xs sm:text-sm text-orange-600 mt-1'>
                 Missing skills: {course.reviews[0].feedback.missing_skills}
               </p>
             )}
           </div>
         )}
-        {!canEdit && course.status !== 'changes_requested' && (
-          <div className='mt-3 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-2'>
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${course.status === 'published' ? 'bg-blue-400' : course.status === 'approved' ? 'bg-green-400' : 'bg-yellow-400'}`}
-            />
-            This course is <strong>{STATUS_LABELS[course.status]}</strong> —
-            editing is locked.
+        {course.status === 'published' && (
+          <div className='mt-3 text-xs sm:text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 sm:py-3 flex items-center gap-2.5'>
+            <span className='w-2 h-2 rounded-full bg-blue-500 shrink-0 animate-pulse' />
+            <div className='flex-1'>
+              <span className='font-semibold'>Live Course in Production:</span> Students are actively learning from the published version.
+              {course.has_unpublished_changes ? (
+                <span className='ml-1 text-amber-900 font-medium'>
+                  — <strong>New draft changes are pending.</strong> {isAdmin ? 'Review the changes and click "Republish Course" to make them live for students.' : 'When your revisions are ready, click "Submit Updates" for admin review.'}
+                </span>
+              ) : (
+                <span className='ml-1'>
+                  You can freely edit and save your working draft here without affecting active students. When your changes are complete, submit them for review so an Admin can republish.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        {course.status === 'in_review' && (
+          <div className='mt-3 text-xs sm:text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 sm:py-3 flex items-center gap-2.5'>
+            <span className='w-2 h-2 rounded-full bg-amber-500 shrink-0' />
+            <div className='flex-1'>
+              <span className='font-semibold'>In Review:</span> This course is currently under review by an administrator. You can still refine and save your working draft.
+            </div>
+          </div>
+        )}
+        {course.status === 'approved' && (
+          <div className='mt-3 text-xs sm:text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 sm:py-3 flex items-center gap-2.5'>
+            <span className='w-2 h-2 rounded-full bg-emerald-500 shrink-0' />
+            <div className='flex-1'>
+              <span className='font-semibold'>Approved:</span> This course has been approved and is ready to be published to students.
+            </div>
+          </div>
+        )}
+
+        {/* Change diffing summary bar */}
+        {course.pending_changes_summary && course.pending_changes_summary.total > 0 && (
+          <div className='mt-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs'>
+            <div className='flex items-center gap-2.5 flex-wrap'>
+              <span className='flex h-2.5 w-2.5 relative shrink-0'>
+                <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75'></span>
+                <span className='relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500'></span>
+              </span>
+              <span className='text-xs sm:text-sm font-bold text-amber-950'>
+                {isAdmin ? 'New Changes Awaiting Review:' : 'Your Working Revisions:'}
+              </span>
+              <div className='flex items-center gap-1.5 flex-wrap'>
+                {course.pending_changes_summary.new_modules > 0 && (
+                  <span className='inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200'>
+                    +{course.pending_changes_summary.new_modules} new topic{course.pending_changes_summary.new_modules > 1 ? 's' : ''}
+                  </span>
+                )}
+                {course.pending_changes_summary.new_topics > 0 && (
+                  <span className='inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200'>
+                    +{course.pending_changes_summary.new_topics} new unit{course.pending_changes_summary.new_topics > 1 ? 's' : ''}
+                  </span>
+                )}
+                {course.pending_changes_summary.new_lessons > 0 && (
+                  <span className='inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 border border-blue-200'>
+                    +{course.pending_changes_summary.new_lessons} new subtopic{course.pending_changes_summary.new_lessons > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+            <span className='text-[11px] text-amber-800 font-medium'>
+              All additions are highlighted with green <span className='font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded'>New</span> badges in the tree below.
+            </span>
           </div>
         )}
       </div>
 
       {/* Course tree + sidebar */}
-      <div className='px-8 pb-10 flex-1'>
-        <div className='flex gap-6 items-start'>
-          <div className='basis-7/12 min-w-0 space-y-3'>
+      <div className='px-3.5 sm:px-8 pb-10 flex-1 min-w-0'>
+        <div className='flex flex-col lg:flex-row gap-4 sm:gap-6 items-start min-w-0'>
+          <div className='w-full lg:basis-7/12 min-w-0 space-y-3'>
             {modules.map((mod, i) => (
               <ModuleItem
                 key={mod.id}
@@ -684,7 +755,7 @@ export default function AiCurriculumEditor() {
                 index={i}
                 selectedLessonId={selectedLesson?.id ?? null}
                 canEdit={canEdit}
-                onSelectLesson={setSelectedLesson}
+                onSelectLesson={handleSelectLesson}
                 onDeleteLesson={handleDeleteLesson}
                 onDeleteTopic={handleDeleteTopic}
                 onDeleteModule={handleDeleteModule}
@@ -738,18 +809,22 @@ export default function AiCurriculumEditor() {
               ) : (
                 <button
                   onClick={() => setAddingModule(true)}
-                  className='w-full flex items-center justify-center gap-2 py-3.5 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/30 transition-all'
+                  className='w-full flex items-center justify-center gap-2 py-3.5 border-2 border-dashed border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/30 transition-all min-h-[44px]'
                 >
                   <Plus className='w-4 h-4' /> Add Topic
                 </button>
               ))}
 
           </div>
-          {/* end flex-1 tree column */}
+          {/* end tree column */}
 
           {/* Right sidebar */}
-          <div className='basis-5/12 shrink-0 sticky top-6 max-h-[calc(100vh-6rem)] overflow-y-auto'>
-            <h3 className='text-md font-bold mb-2'>Content Preview</h3>
+          <div
+            ref={contentPreviewRef}
+            id='content-preview-panel'
+            className='w-full lg:basis-5/12 shrink-0 lg:sticky lg:top-6 lg:max-h-[calc(100vh-6rem)] overflow-y-auto min-w-0 scroll-mt-6'
+          >
+            <h3 className='text-sm sm:text-base font-bold text-slate-800 mb-2'>Content Preview</h3>
             <RightSidebar
               selectedLesson={selectedLesson}
               canEdit={canEdit}

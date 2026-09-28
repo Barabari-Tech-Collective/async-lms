@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
 import type { AiExercise, AiLesson } from '@/features/aiCurriculum/types';
 import { aiCurriculumApi } from '@/features/aiCurriculum/aiCurriculumApi';
+import { extractYouTubeVideoId } from '@/utils/youtube';
 
 export function getDisplayFilename(url: string) {
   try {
@@ -56,8 +57,9 @@ function TabStrip({ active, onTab }: { active: Tab; onTab: (t: Tab) => void }) {
 type VideoResult = {
   videoId: string;
   title: string;
-  thumbnail: string;
-  channel: string;
+  thumbnail?: string;
+  channel?: string;
+  channelTitle?: string;
   url: string;
 };
 
@@ -97,43 +99,78 @@ function VideoTab({
     }
   };
 
-  const videoId = useMemo(() => {
-    try {
-      const u = new URL(url);
-      return u.searchParams.get('v') ?? u.pathname.split('/').pop() ?? null;
-    } catch { return null; }
-  }, [url]);
+  const videoId = useMemo(() => extractYouTubeVideoId(url), [url]);
 
   return (
-    <div className='p-5 space-y-4 flex-1 overflow-y-auto'>
-      {/* Embed preview */}
+    <div className='p-4 sm:p-5 space-y-4 flex-1 overflow-y-auto'>
+      {/* Embed preview when valid video ID exists */}
       {videoId && !url.includes('results?') && (
-        <div className='rounded-xl overflow-hidden aspect-video bg-black'>
+        <div className='rounded-xl overflow-hidden aspect-video bg-black shadow-sm'>
           <iframe
-            src={`https://www.youtube.com/embed/${videoId}`}
-            className='w-full h-full'
+            src={`https://www.youtube.com/embed/${videoId}?rel=0`}
+            className='w-full h-full border-0'
+            allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
             allowFullScreen
             title='Video preview'
           />
         </div>
       )}
 
+      {/* When no video is set yet */}
+      {!url && (
+        <div className='border-2 border-dashed border-slate-200 rounded-xl p-5 text-center bg-slate-50/50'>
+          <MonitorPlay className='w-7 h-7 text-slate-300 mx-auto mb-1.5' />
+          <p className='text-[12px] font-semibold text-slate-600'>No Video Assigned</p>
+          <p className='text-[11px] text-slate-400 mt-0.5'>
+            Paste a YouTube URL below or click &quot;Search YouTube&quot; to discover top videos.
+          </p>
+        </div>
+      )}
+
+      {/* Incomplete or invalid URL state */}
+      {url && !videoId && !url.includes('results?') && (
+        <div className='bg-amber-50/90 border border-amber-200 rounded-xl p-3.5 text-center'>
+          <MonitorPlay className='w-5 h-5 text-amber-500 mx-auto mb-1.5' />
+          <p className='text-[12px] font-bold text-amber-800 mb-0.5'>Incomplete or Invalid Video URL</p>
+          <p className='text-[11px] text-amber-600 mb-2.5'>
+            Please enter a complete YouTube video link (e.g. <span className='font-mono text-[10px] bg-amber-100/60 px-1 py-0.5 rounded'>https://youtube.com/watch?v=...</span>) or pick from search results.
+          </p>
+          {url.startsWith('http') && (
+            <a
+              href={url}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-[11px] font-semibold transition-colors'
+            >
+              <MonitorPlay className='w-3.5 h-3.5' /> Open URL in new tab
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* YouTube search query fallback */}
       {url && url.includes('results?') && (
-        <div className='bg-slate-50 border border-slate-200 rounded-xl p-5 text-center'>
+        <div className='bg-slate-50 border border-slate-200 rounded-xl p-4 text-center'>
           <MonitorPlay className='w-6 h-6 text-slate-400 mx-auto mb-2' />
-          <p className='text-[12px] font-semibold text-slate-700 mb-1'>Search Result URL</p>
-          <p className='text-[11px] text-slate-500 mb-3'>AI returned a search query instead of a specific video.</p>
-          <a href={url} target='_blank' rel='noopener noreferrer' className='inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold text-[11px] hover:bg-red-100 transition-colors'>
+          <p className='text-[12px] font-semibold text-slate-700 mb-1'>Search Query URL</p>
+          <p className='text-[11px] text-slate-500 mb-3'>A search query was saved instead of a specific video.</p>
+          <a
+            href={url}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold text-[11px] hover:bg-red-100 transition-colors'
+          >
             Open Search Results
           </a>
         </div>
       )}
 
+      {/* YouTube URL input */}
       <div>
         <label className='block text-[11px] font-semibold text-slate-500 mb-1.5'>YouTube URL</label>
         <div className='flex gap-2'>
           <input
-            className='flex-1 border border-slate-200 rounded-lg px-3 py-2 text-[13px] text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50 disabled:text-slate-400'
+            className='flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-[13px] text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50 disabled:text-slate-400'
             placeholder='https://youtube.com/watch?v=...'
             disabled={!canEdit}
             value={url}
@@ -145,6 +182,7 @@ function VideoTab({
               onClick={handleSave}
               disabled={saving || url === (lesson.video_url ?? '')}
               className='px-3 py-2 text-[12px] font-bold bg-slate-800 text-white rounded-lg hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0'
+              title='Save URL'
             >
               {saving ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Save className='w-3.5 h-3.5' />}
             </button>
@@ -157,7 +195,7 @@ function VideoTab({
         <button
           onClick={onSearchYouTube}
           disabled={searching}
-          className='flex items-center gap-2 w-full justify-center px-4 py-2.5 text-[12px] font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors'
+          className='flex items-center gap-2 w-full justify-center px-4 py-2.5 text-[12px] font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors min-h-[40px]'
         >
           {searching ? <Loader2 className='w-4 h-4 animate-spin' /> : <MonitorPlay className='w-4 h-4' />}
           {searching ? 'Searching YouTube...' : lesson.video_url ? '🔍 Find a Better Video' : '🔍 Search YouTube for Best Video'}
@@ -166,47 +204,62 @@ function VideoTab({
 
       {/* YouTube Search Results */}
       {videoResults.length > 0 && (
-        <div className='space-y-2'>
-          <p className='text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+        <div className='space-y-2.5 pt-2 border-t border-slate-100'>
+          <p className='text-[11px] font-bold text-slate-500 uppercase tracking-wider'>
             Search Results — Click to select
           </p>
-          {videoResults.map((v) => {
-            const isSelected = url === v.url;
-            return (
-              <button
-                key={v.videoId}
-                onClick={() => onSelectVideo(v.url)}
-                className={`w-full flex items-start gap-3 p-2 rounded-lg border text-left transition-all ${
-                  isSelected
-                    ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200'
-                    : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
-                }`}
-              >
-                <img
-                  src={v.thumbnail}
-                  alt={v.title}
-                  className='w-24 h-14 rounded-md object-cover shrink-0 bg-slate-100'
-                />
-                <div className='min-w-0 flex-1'>
-                  <p className='text-[12px] font-semibold text-slate-800 line-clamp-2 leading-tight'
-                     dangerouslySetInnerHTML={{ __html: v.title }}
-                  />
-                  <p className='text-[10px] text-slate-400 mt-0.5'>{v.channel}</p>
-                  {isSelected && (
-                    <span className='inline-block mt-1 text-[10px] font-bold text-indigo-600'>✓ Selected</span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+          <div className='space-y-2'>
+            {videoResults.map((v) => {
+              const itemVideoId = extractYouTubeVideoId(v.url || v.videoId);
+              const isSelected = videoId && itemVideoId ? videoId === itemVideoId : (url === v.url || url === v.videoId);
+              const channelName = v.channel || v.channelTitle || '';
+              const targetUrl = v.url || (itemVideoId ? `https://www.youtube.com/watch?v=${itemVideoId}` : '');
+              const thumbUrl = v.thumbnail || (itemVideoId ? `https://img.youtube.com/vi/${itemVideoId}/mqdefault.jpg` : '');
 
-      {url && !videoId && (
-        <a href={url} target='_blank' rel='noopener noreferrer'
-          className='inline-flex items-center gap-1.5 text-[12px] font-semibold text-red-600 hover:underline'>
-          <MonitorPlay className='w-3.5 h-3.5' /> Open link
-        </a>
+              return (
+                <button
+                  key={v.videoId || v.url}
+                  type='button'
+                  onClick={() => onSelectVideo(targetUrl)}
+                  className={`w-full flex items-start gap-3 p-2.5 rounded-xl border text-left transition-all ${
+                    isSelected
+                      ? 'border-indigo-500 bg-indigo-50/70 ring-2 ring-indigo-300 shadow-xs'
+                      : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className='relative w-24 sm:w-28 aspect-video rounded-lg overflow-hidden shrink-0 bg-slate-200'>
+                    {thumbUrl ? (
+                      <img
+                        src={thumbUrl}
+                        alt={v.title}
+                        className='w-full h-full object-cover'
+                        loading='lazy'
+                      />
+                    ) : (
+                      <div className='w-full h-full flex items-center justify-center bg-slate-800 text-slate-400'>
+                        <MonitorPlay className='w-5 h-5' />
+                      </div>
+                    )}
+                  </div>
+                  <div className='min-w-0 flex-1 flex flex-col justify-between py-0.5'>
+                    <p
+                      className='text-[12px] font-semibold text-slate-800 line-clamp-2 leading-snug'
+                      dangerouslySetInnerHTML={{ __html: v.title }}
+                    />
+                    {channelName && (
+                      <p className='text-[11px] text-slate-500 mt-1 truncate'>{channelName}</p>
+                    )}
+                    {isSelected && (
+                      <span className='inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 text-indigo-700 w-fit'>
+                        ✓ Selected
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -459,39 +512,58 @@ function ContentTab({
   return (
     <div className='flex flex-col flex-1 min-h-0'>
       {/* Toolbar */}
-      <div className='flex items-center gap-1.5 px-4 py-2 border-b border-slate-100 shrink-0'>
+      <div className='flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-slate-100 bg-slate-50/50 shrink-0'>
         {/* Section selector */}
-        <div className='flex bg-slate-100 rounded-lg p-0.5 mr-2'>
+        <div className='flex items-center bg-slate-200/60 p-0.5 rounded-lg shrink-0'>
           {sections.map((s) => (
             <button
               key={s.key}
               onClick={() => setSection(s.key)}
-              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors ${
-                section === s.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-2 sm:px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                section === s.key ? 'bg-white text-slate-800 shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               {s.label}
             </button>
           ))}
         </div>
-        <div className='flex-1' />
-        {/* View toggle */}
-        <button
-          onClick={() => setPreview((v) => !v)}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border ${
-            preview ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-          }`}
-        >
-          {preview ? <Pencil className='w-3 h-3' /> : <Eye className='w-3 h-3' />}
-          {preview ? 'Edit' : 'Preview'}
-        </button>
-        <button onClick={handleDownload} title='Download .md' className='p-1.5 text-slate-400 hover:text-slate-600 transition-colors'>
-          <Download className='w-3.5 h-3.5' />
-        </button>
-        <label className='p-1.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer' title='Upload .md'>
-          <Upload className='w-3.5 h-3.5' />
-          <input type='file' accept='.md,.txt' className='hidden' onChange={handleUpload} />
-        </label>
+
+        {/* Action button group */}
+        <div className='flex items-center gap-1.5 shrink-0 ml-auto'>
+          {/* View toggle */}
+          <button
+            type='button'
+            onClick={() => setPreview((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border shadow-2xs ${
+              preview
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+            title={preview ? 'Switch to edit mode' : 'Preview content'}
+          >
+            {preview ? <Pencil className='w-3.5 h-3.5 text-indigo-600' /> : <Eye className='w-3.5 h-3.5 text-slate-500' />}
+            <span>{preview ? 'Edit' : 'Preview'}</span>
+          </button>
+
+          {/* Download file */}
+          <button
+            type='button'
+            onClick={handleDownload}
+            title='Download .md'
+            className='flex items-center justify-center w-7 h-7 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-all shadow-2xs'
+          >
+            <Download className='w-3.5 h-3.5' />
+          </button>
+
+          {/* Upload file */}
+          <label
+            className='flex items-center justify-center w-7 h-7 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-all shadow-2xs cursor-pointer'
+            title='Upload .md'
+          >
+            <Upload className='w-3.5 h-3.5' />
+            <input type='file' accept='.md,.txt' className='hidden' onChange={handleUpload} />
+          </label>
+        </div>
       </div>
 
       {/* Editor / Preview area */}
@@ -612,42 +684,45 @@ function ContentTab({
 
       {/* Footer */}
       {canEdit && (
-        <div className='border-t border-slate-100 px-4 py-3 flex items-center gap-2 shrink-0'>
-          <button
-            onClick={onGenerate}
-            disabled={generating || isGeneratingFromFile}
-            className='flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors'
-          >
-            {generating ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Sparkles className='w-3.5 h-3.5' />}
-            {generating ? 'Generating...' : lesson.explanation ? 'Regenerate' : 'Generate'}
-          </button>
+        <div className='border-t border-slate-100 px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/50'>
+          <div className='flex items-center gap-1.5 sm:gap-2 flex-wrap'>
+            <button
+              onClick={onGenerate}
+              disabled={generating || isGeneratingFromFile}
+              className='flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors min-h-[34px]'
+            >
+              {generating ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Sparkles className='w-3.5 h-3.5' />}
+              <span>{generating ? 'Generating...' : lesson.explanation ? 'Regenerate' : 'Generate'}</span>
+            </button>
 
-          <input
-            type="file"
-            className="hidden"
-            ref={fileInputRef}
-            onChange={handleAutoGenerate}
-            disabled={isGeneratingFromFile || generating}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isGeneratingFromFile || generating}
-            className='flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-colors'
-          >
-            {isGeneratingFromFile ? <Loader2 className='w-3 h-3 animate-spin' /> : <FileText className='w-3 h-3' />}
-            {isGeneratingFromFile ? 'Working...' : 'Generate from File'}
-          </button>
+            <input
+              type="file"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleAutoGenerate}
+              disabled={isGeneratingFromFile || generating}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isGeneratingFromFile || generating}
+              className='flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors min-h-[34px]'
+            >
+              {isGeneratingFromFile ? <Loader2 className='w-3 h-3 animate-spin' /> : <FileText className='w-3 h-3' />}
+              <span>{isGeneratingFromFile ? 'Working...' : 'Generate from File'}</span>
+            </button>
+          </div>
 
-          <div className='flex-1' />
-          {dirty && <span className='text-[11px] text-amber-500 font-semibold'>Unsaved</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving || !dirty}
-            className='flex items-center gap-1.5 px-4 py-2 text-[12px] font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-40 transition-colors'
-          >
-            {saving ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Save className='w-3.5 h-3.5' />}
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          <div className='flex items-center gap-2 ml-auto'>
+            {dirty && <span className='text-[10px] sm:text-[11px] text-amber-500 font-semibold'>Unsaved</span>}
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className='flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-[13px] font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-40 transition-colors min-h-[34px]'
+            >
+              {saving ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Save className='w-3.5 h-3.5' />}
+              <span>{saving ? 'Saving...' : 'Save'}</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -790,27 +865,26 @@ function ExerciseTab({
 
   return (
     <div className='flex flex-col flex-1 min-h-0'>
-       {/* PREVIEW TOOLBAR */}
-    <div className='flex items-center gap-2 px-4 py-2 border-b border-slate-100'>
-      <div className='flex-1' />
+      {/* PREVIEW TOOLBAR */}
+      <div className='flex items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-slate-100 bg-slate-50/50 shrink-0'>
+        <span className='text-[11px] font-bold text-slate-600 uppercase tracking-wider'>
+          {preview ? 'Exercise Preview' : 'Exercise Editor'}
+        </span>
 
-      <button
-        onClick={() => setPreview((v) => !v)}
-        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border ${
-          preview
-            ? 'bg-blue-50 text-blue-700 border-blue-200'
-            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-        }`}
-      >
-        {preview ? (
-          <Pencil className='w-3 h-3' />
-        ) : (
-          <Eye className='w-3 h-3' />
-        )}
-
-        {preview ? 'Edit' : 'Preview'}
-      </button>
-    </div>
+        <button
+          type='button'
+          onClick={() => setPreview((v) => !v)}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border shadow-2xs ${
+            preview
+              ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+          title={preview ? 'Switch to edit mode' : 'Preview exercise'}
+        >
+          {preview ? <Pencil className='w-3.5 h-3.5 text-indigo-600' /> : <Eye className='w-3.5 h-3.5 text-slate-500' />}
+          <span>{preview ? 'Edit' : 'Preview'}</span>
+        </button>
+      </div>
       <div className='flex-1 overflow-y-auto p-4 space-y-3'>
         {!exercise && !canEdit && (
           <div className='py-12 text-center'>
@@ -1164,77 +1238,76 @@ function ExerciseTab({
       </div>
 
       {canEdit && (
-        <div className='border-t border-slate-100 px-4 py-3 flex items-center gap-2 shrink-0'>
-          <button
-            onClick={onGenerate}
-            disabled={generating || isGeneratingFromFile}
-            className='flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors'
-          >
-            {generating ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Sparkles className='w-3.5 h-3.5' />}
-            {generating ? 'Generating...' : exercise ? 'Regenerate' : 'Generate'}
-          </button>
+        <div className='border-t border-slate-100 px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-slate-50/50'>
+          <div className='flex items-center gap-1.5 sm:gap-2 flex-wrap'>
+            <button
+              onClick={onGenerate}
+              disabled={generating || isGeneratingFromFile}
+              className='flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors min-h-[34px]'
+            >
+              {generating ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Sparkles className='w-3.5 h-3.5' />}
+              <span>{generating ? 'Generating...' : exercise ? 'Regenerate' : 'Generate'}</span>
+            </button>
 
-          <input
-            type="file"
-            className="hidden"
-            ref={fileInputRef}
-            onChange={handleAutoGenerateExercise}
-            disabled={isGeneratingFromFile || generating}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isGeneratingFromFile || generating}
-            className='flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-colors'
-          >
-            {isGeneratingFromFile ? <Loader2 className='w-3 h-3 animate-spin' /> : <FileText className='w-3 h-3' />}
-            {isGeneratingFromFile ? 'Working...' : 'Generate from File'}
-          </button>
+            <input
+              type="file"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleAutoGenerateExercise}
+              disabled={isGeneratingFromFile || generating}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isGeneratingFromFile || generating}
+              className='flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors min-h-[34px]'
+            >
+              {isGeneratingFromFile ? <Loader2 className='w-3 h-3 animate-spin' /> : <FileText className='w-3 h-3' />}
+              <span>{isGeneratingFromFile ? 'Working...' : 'Generate from File'}</span>
+            </button>
 
-        {exercise && (
-  <button
-    onClick={async () => {
-      try {
-        setSaving(true);
+            {exercise && (
+              <button
+                onClick={async () => {
+                  try {
+                    setSaving(true);
+                    await onUpdateLesson({
+                      exercise_data: null,
+                    });
+                    setDraft({
+                      title: '',
+                      description: '',
+                      tasks: '',
+                      starter_code: '',
+                      resource_links: [''],
+                      reference_files: [''],
+                    });
+                    setDirty(false);
+                    toast.success('Exercise removed');
+                  } catch {
+                    toast.error('Failed to remove exercise');
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={saving}
+                className='flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors min-h-[34px]'
+              >
+                Remove
+              </button>
+            )}
+          </div>
 
-        await onUpdateLesson({
-          exercise_data: null,
-        });
-
-        setDraft({
-          title: '',
-          description: '',
-          tasks: '',
-          starter_code: '',
-          resource_links: [''],
-          reference_files: [''],
-        });
-
-        setDirty(false);
-
-        toast.success('Exercise removed');
-      } catch {
-        toast.error('Failed to remove exercise');
-      } finally {
-        setSaving(false);
-      }
-    }}
-    disabled={saving}
-    className='flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors'
-  >
-    Remove
-  </button>
-)}
-
-          <div className='flex-1' />
-          {dirty && <span className='text-[11px] text-amber-500 font-semibold'>Unsaved</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving || !dirty}
-            className='flex items-center gap-1.5 px-4 py-2 text-[12px] font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-40 transition-colors'
-          >
-            {saving ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Save className='w-3.5 h-3.5' />}
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          <div className='flex items-center gap-2 ml-auto'>
+            {dirty && <span className='text-[10px] sm:text-[11px] text-amber-500 font-semibold'>Unsaved</span>}
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className='flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-[13px] font-bold bg-[#1e2653] text-white rounded-lg hover:bg-[#16203f] disabled:opacity-40 transition-colors min-h-[34px]'
+            >
+              {saving ? <Loader2 className='w-3.5 h-3.5 animate-spin' /> : <Save className='w-3.5 h-3.5' />}
+              <span>{saving ? 'Saving...' : 'Save'}</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -1304,7 +1377,21 @@ export function RightSidebar({
     <div className='bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden sticky top-4 max-h-[calc(100vh-120px)]'>
       {/* Subtopic header */}
       <div className='px-4 py-3 border-b border-slate-100 shrink-0'>
-        <p className='text-[13px] font-bold text-slate-800 truncate'>{selectedLesson.title}</p>
+        <div className='flex items-center justify-between gap-2'>
+          <p className='text-[13px] font-bold text-slate-800 truncate'>{selectedLesson.title}</p>
+          {selectedLesson.is_new && (
+            <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
+              <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+              New Subtopic
+            </span>
+          )}
+          {selectedLesson.is_modified && (
+            <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+              <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+              Edited Subtopic
+            </span>
+          )}
+        </div>
         <div className='flex items-center gap-3 mt-0.5'>
           <span className='text-[11px] text-slate-400'>{selectedLesson.duration_mins ?? 20} min</span>
           <span className={`text-[11px] font-semibold ${selectedLesson.video_url ? 'text-green-500' : 'text-slate-300'}`}>
@@ -1318,6 +1405,13 @@ export function RightSidebar({
           </span>
         </div>
       </div>
+
+      {selectedLesson.is_new && (
+        <div className='bg-emerald-50/80 border-b border-emerald-200/80 px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-900'>
+          <Sparkles className='w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse' />
+          <span>This is a <strong>newly added subtopic</strong> not yet published to live students.</span>
+        </div>
+      )}
 
       <TabStrip active={tab} onTab={setTab} />
 

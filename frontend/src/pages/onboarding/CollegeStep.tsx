@@ -5,6 +5,7 @@ import { Stepper } from './Stepper';
 import { useNavigate } from 'react-router';
 import apiClient from '@/services/api';
 import Logo from '@/components/common/Logo';
+import OnboardingExit from '@/components/common/OnboardingExit';
 import { Info } from 'lucide-react';
 import { useAppDispatch } from '@/app/hooks';
 import { loadUser } from '@/features/auth/authThunks';
@@ -102,6 +103,8 @@ export default function CollegeStep() {
       {/* Blue tinted overlay */}
       <div className='absolute inset-0 bg-[#344499]/70 backdrop-blur-[2px]' />
 
+      <OnboardingExit />
+
       <div className='flex flex-col items-center mb-6 relative z-10'>
         <Logo className='h-14 w-14 mb-2' />
         <span className='text-white font-bold text-lg tracking-wider'>
@@ -109,21 +112,21 @@ export default function CollegeStep() {
         </span>
       </div>
 
-      <div className='relative z-10 w-full max-w-120 bg-white p-8 sm:px-12 sm:py-10 rounded-3xl shadow-[0_8px_50px_rgba(0,0,0,0.25)] flex flex-col min-h-125 text-slate-800'>
+      <div className='relative z-10 w-full max-w-[480px] bg-white p-5 sm:p-8 md:px-12 md:py-10 rounded-2xl sm:rounded-3xl shadow-[0_8px_50px_rgba(0,0,0,0.25)] flex flex-col min-h-[460px] text-slate-800'>
         <div className='flex-1'>
           <Stepper current='college' />
 
-          <div className='mb-8 mt-6'>
-            <h2 className='text-2xl font-bold text-[#344499]'>
+          <div className='mb-6 sm:mb-8 mt-4 sm:mt-6'>
+            <h2 className='text-xl sm:text-2xl font-bold text-[#344499]'>
               Select your college
             </h2>
-            <p className='text-[13px] text-slate-400 font-medium mt-1.5 leading-relaxed tracking-wide'>
+            <p className='text-xs sm:text-[13px] text-slate-400 font-medium mt-1 leading-relaxed tracking-wide'>
               Required for mapping batches and cohorts
             </p>
           </div>
 
           <div className='space-y-2 mb-6'>
-            <label className='text-[13px] font-semibold text-[#344499] tracking-wide'>
+            <label className='text-xs sm:text-[13px] font-semibold text-[#344499] tracking-wide'>
               College name
             </label>
             <Select
@@ -131,7 +134,7 @@ export default function CollegeStep() {
               onValueChange={setCollegeId}
               disabled={isLoading || submitting}
             >
-              <SelectTrigger className='w-full h-11 text-[13px] text-slate-500 bg-white border border-slate-200 focus:ring-[#344499] focus:border-[#344499] shadow-sm'>
+              <SelectTrigger className='w-full h-11 text-xs sm:text-[13px] text-slate-500 bg-white border border-slate-200 focus:ring-[#344499] focus:border-[#344499] shadow-sm'>
                 <SelectValue
                   placeholder={
                     isLoading
@@ -149,12 +152,12 @@ export default function CollegeStep() {
                 <SelectItem value='OTHER'>Other</SelectItem>
               </SelectContent>
             </Select>
-            <div className='flex items-center gap-1.5 mt-2.5'>
+            <div className='flex items-center gap-1.5 mt-2'>
               <Info className='h-3.5 w-3.5 text-[#344499]' />
               <button
                 type='button'
                 onClick={() => setCollegeId('OTHER')}
-                className='text-[14px] font-bold tracking-wide text-[#344499] hover:underline'
+                className='text-xs sm:text-[14px] font-bold tracking-wide text-[#344499] hover:underline'
               >
                 My college is not listed
               </button>
@@ -165,7 +168,7 @@ export default function CollegeStep() {
           {isOtherSelected && (
             <div className='space-y-4 mb-6 border-t border-slate-100 pt-6 mt-6'>
               <div className='space-y-1.5'>
-                <label className='text-[13px] font-semibold text-[#344499] tracking-wide'>
+                <label className='text-xs sm:text-[13px] font-semibold text-[#344499] tracking-wide'>
                   Enter college name
                 </label>
                 <Input
@@ -177,7 +180,7 @@ export default function CollegeStep() {
               </div>
 
               <div className='space-y-1.5'>
-                <label className='text-[13px] font-semibold text-[#344499] tracking-wide'>
+                <label className='text-xs sm:text-[13px] font-semibold text-[#344499] tracking-wide'>
                   Enter college address (City)
                 </label>
                 <Input
@@ -192,18 +195,18 @@ export default function CollegeStep() {
         </div>
 
         {/* Footer buttons */}
-        <div className='flex justify-between items-center mt-8 pt-4'>
+        <div className='flex justify-between items-center mt-6 sm:mt-8 pt-4 gap-3'>
           <Button
             variant='ghost'
             onClick={() => navigate(-1)}
             type='button'
-            className='bg-[#f8faff] text-[#344499] hover:bg-[#eff4ff] hover:text-[#2c3983] px-9 h-11 text-[14px] font-semibold tracking-wide rounded-lg transition-colors'
+            className='bg-[#f8faff] text-[#344499] hover:bg-[#eff4ff] hover:text-[#2c3983] px-6 sm:px-9 h-11 text-xs sm:text-[14px] font-semibold tracking-wide rounded-lg transition-colors flex-1 sm:flex-initial min-h-[44px]'
           >
             Back
           </Button>
           <Button
             type='button'
-            className='bg-[#344499] hover:bg-[#2c3983] text-white px-9 h-11 text-[14px] font-semibold tracking-wide rounded-lg shadow-md transition-colors'
+            className='bg-[#344499] hover:bg-[#2c3983] text-white px-6 sm:px-9 h-11 text-xs sm:text-[14px] font-semibold tracking-wide rounded-lg shadow-md transition-colors flex-1 sm:flex-initial min-h-[44px]'
             disabled={
               isLoading ||
               submitting ||

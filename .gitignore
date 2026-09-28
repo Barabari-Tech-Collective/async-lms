@@ -18,9 +18,10 @@ Codeguru Architecture.md
 coding-standard.md
 CodeGuru Requirements Document - June 2026.md
 
-# Testing and Scratch files
-*test*.js
-*check*.js
+# Scratch files.
+# NOTE: these were once the globs `*test*.js` / `*check*.js`, which also
+# silently excluded real test suites (and any file merely containing "test"
+# in its name). Keep this list specific.
 socket-test.js
 test-db.js
 schema_check.js

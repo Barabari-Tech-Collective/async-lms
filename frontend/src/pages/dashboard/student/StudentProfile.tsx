@@ -171,31 +171,31 @@ export default function StudentProfile() {
   });
 
   return (
-    <div className='p-6 max-w-5xl mx-auto space-y-6'>
+    <div className='p-3.5 sm:p-6 max-w-5xl mx-auto space-y-5 sm:space-y-6'>
       {/* ── Hero Card ───────────────────────────────────────────────────────── */}
-      <Card className='p-8'>
-        <div className='flex flex-col sm:flex-row items-start gap-6'>
-          <Avatar className='h-24 w-24 shrink-0 border-4 border-slate-100'>
-            <AvatarFallback className='bg-indigo-100 text-indigo-700 text-2xl font-bold'>
+      <Card className='p-5 sm:p-8'>
+        <div className='flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6'>
+          <Avatar className='h-20 w-20 sm:h-24 sm:w-24 shrink-0 border-4 border-slate-100'>
+            <AvatarFallback className='bg-indigo-100 text-indigo-700 text-xl sm:text-2xl font-bold'>
               {getInitials(profile.full_name)}
             </AvatarFallback>
           </Avatar>
 
           <div className='flex-1 min-w-0'>
-            <h1 className='text-3xl font-bold text-slate-900 truncate'>
+            <h1 className='text-2xl sm:text-3xl font-bold text-slate-900 truncate'>
               {profile.full_name}
             </h1>
             {subtitle && (
-              <p className='text-muted-foreground mt-0.5'>{subtitle}</p>
+              <p className='text-muted-foreground text-sm sm:text-base mt-0.5'>{subtitle}</p>
             )}
             {profile.college_name && (
-              <p className='text-sm text-slate-500'>{profile.college_name}</p>
+              <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>{profile.college_name}</p>
             )}
-            <div className='flex items-center gap-2 mt-2 flex-wrap'>
-              <Badge variant='secondary' className='capitalize'>
+            <div className='flex items-center justify-center sm:justify-start gap-2 mt-2.5 flex-wrap'>
+              <Badge variant='secondary' className='capitalize text-xs'>
                 {profile.role}
               </Badge>
-              <span className='text-xs text-slate-400 flex items-center gap-1'>
+              <span className='text-[11px] sm:text-xs text-slate-400 flex items-center gap-1'>
                 <Calendar className='h-3 w-3' /> Member since {memberSince}
               </span>
             </div>
@@ -204,21 +204,21 @@ export default function StudentProfile() {
       </Card>
 
       {/* ── Stats Strip ─────────────────────────────────────────────────────── */}
-      <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3'>
+      <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3'>
         <StatCard
-          icon={<Star className='h-5 w-5 text-amber-500' />}
+          icon={<Star className='h-4 w-4 sm:h-5 sm:w-5 text-amber-500' />}
           value={profile.total_points.toLocaleString()}
           label='Total XP'
           color='text-amber-600'
         />
         <StatCard
-          icon={<Flame className='h-5 w-5 text-orange-500' />}
+          icon={<Flame className='h-4 w-4 sm:h-5 sm:w-5 text-orange-500' />}
           value={profile.current_streak.toString() || '0'}
           label='Current Streak'
           color='text-orange-600'
         />
         <StatCard
-          icon={<TrendingUp className='h-5 w-5 text-purple-500' />}
+          icon={<TrendingUp className='h-4 w-4 sm:h-5 sm:w-5 text-purple-500' />}
           value={
             profile.longest_streak > 0 ? `${profile.longest_streak}d` : '—'
           }
@@ -226,13 +226,13 @@ export default function StudentProfile() {
           color='text-purple-600'
         />
         <StatCard
-          icon={<Trophy className='h-5 w-5 text-indigo-500' />}
+          icon={<Trophy className='h-4 w-4 sm:h-5 sm:w-5 text-indigo-500' />}
           value={myRank ? `#${myRank.rank}` : '—'}
           label='Global Rank'
           color='text-indigo-600'
         />
         <StatCard
-          icon={<Award className='h-5 w-5 text-rose-500' />}
+          icon={<Award className='h-4 w-4 sm:h-5 sm:w-5 text-rose-500' />}
           value={String(profile.badge_count)}
           label='Badges'
           color='text-rose-600'

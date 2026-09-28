@@ -6,7 +6,7 @@ const getToken = () => {
 
 const apiClient = axios.create({
   // Ensure this matches your Vite/Env variable name
-  baseURL: import.meta.env.VITE_API_URL + "/api/v1",
+  baseURL: (import.meta.env.VITE_API_URL || "") + "/api/v1",
 });
 
 // Request Interceptor: Adds the token to every outgoing request

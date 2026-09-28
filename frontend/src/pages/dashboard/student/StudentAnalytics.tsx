@@ -134,15 +134,15 @@ export default function StudentAnalytics() {
   }, []);
 
   return (
-    <div className='p-6 md:p-8 space-y-8 max-w-7xl mx-auto animate-in fade-in duration-500'>
+    <div className='p-3.5 sm:p-6 md:p-8 space-y-6 sm:space-y-8 max-w-7xl mx-auto'>
       <div>
-        <p className='text-[11px] text-slate-400 font-medium uppercase tracking-wider mb-1'>
+        <p className='text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1'>
           Student Dashboard / Analytics
         </p>
-        <h1 className='text-2xl md:text-3xl font-bold text-slate-900'>
+        <h1 className='text-2xl sm:text-3xl font-bold text-slate-900'>
           Performance Dashboard
         </h1>
-        <p className='text-sm text-slate-500 mt-1'>
+        <p className='text-xs sm:text-sm text-slate-500 mt-1'>
           Viewing analytics for{' '}
           <span className='font-semibold text-slate-700'>
             {user?.full_name || 'Student'}
@@ -157,7 +157,7 @@ export default function StudentAnalytics() {
       ) : (
         <>
           {/* Summary stat cards */}
-          <div className='grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3'>
+          <div className='grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3'>
             <StatCard
               label='Overall Progress'
               value={`${overallProgress}%`}
@@ -227,12 +227,90 @@ export default function StudentAnalytics() {
                 key={subject.subject_id}
                 className='border-none shadow-sm overflow-hidden'
               >
-                <CardHeader className='border-b border-slate-100 bg-white/50 px-6 py-4'>
-                  <CardTitle className='text-lg font-bold text-slate-800'>
+                <CardHeader className='border-b border-slate-100 bg-white/50 px-4 sm:px-6 py-3.5 sm:py-4'>
+                  <CardTitle className='text-base sm:text-lg font-bold text-slate-800'>
                     {subject.subject_name}
                   </CardTitle>
                 </CardHeader>
-                <div className='overflow-x-auto'>
+
+                {/* Mobile View (< md): Clean Card List without horizontal scroll */}
+                <div className='md:hidden divide-y divide-slate-100'>
+                  {subject.topics.map((topic) => (
+                    <div key={topic.topic_id} className='p-4 space-y-3'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='font-semibold text-slate-800 text-sm'>
+                          {topic.topic_title}
+                        </span>
+                        <span className='text-xs font-bold text-indigo-600 shrink-0 bg-indigo-50 px-2.5 py-0.5 rounded-full'>
+                          {topic.progress}%
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className='w-full bg-slate-100 rounded-full h-2 overflow-hidden flex'>
+                        <div
+                          className='bg-indigo-500 h-2 rounded-full transition-all duration-1000'
+                          style={{ width: `${topic.progress}%` }}
+                        />
+                      </div>
+
+                      {/* 3 Metric Pills: Quizzes, Assignment, Project */}
+                      <div className='grid grid-cols-3 gap-2 pt-0.5'>
+                        {/* Quiz Metric */}
+                        <div className='bg-slate-50/80 rounded-xl p-2.5 border border-slate-100 flex flex-col justify-between'>
+                          <span className='text-[10px] uppercase font-bold text-slate-400 tracking-wider'>Quizzes</span>
+                          {topic.quizzes_total === 0 ? (
+                            <span className='text-xs text-slate-400 mt-1 font-medium'>None</span>
+                          ) : topic.quizzes_attempted === 0 ? (
+                            <span className='text-[11px] text-slate-400 mt-1 font-medium'>Not yet</span>
+                          ) : (
+                            <div className='mt-1'>
+                              <p className='text-xs font-bold text-slate-800'>
+                                {Math.round((topic.quiz_score / topic.quiz_max) * 100)}%
+                              </p>
+                              <p className='text-[10px] text-slate-400'>
+                                {topic.quizzes_attempted}/{topic.quizzes_total} done
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Assignment Metric */}
+                        <div className='bg-slate-50/80 rounded-xl p-2.5 border border-slate-100 flex flex-col justify-between'>
+                          <span className='text-[10px] uppercase font-bold text-slate-400 tracking-wider'>Assignment</span>
+                          {topic.assignment_status ? (
+                            <div className='mt-1'>
+                              <StatusBadge status={topic.assignment_status} />
+                              <p className='text-[10px] text-slate-400 mt-1'>
+                                {topic.assignments_submitted}/{topic.assignments_total}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className='text-xs text-slate-400 mt-1 font-medium'>None</span>
+                          )}
+                        </div>
+
+                        {/* Project Metric */}
+                        <div className='bg-slate-50/80 rounded-xl p-2.5 border border-slate-100 flex flex-col justify-between'>
+                          <span className='text-[10px] uppercase font-bold text-slate-400 tracking-wider'>Project</span>
+                          {topic.project_status ? (
+                            <div className='mt-1'>
+                              <StatusBadge status={topic.project_status} />
+                              <p className='text-[10px] text-slate-400 mt-1'>
+                                {topic.projects_approved}/{topic.projects_total}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className='text-xs text-slate-400 mt-1 font-medium'>None</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop View (>= md): Full 5-column Table */}
+                <div className='hidden md:block overflow-x-auto'>
                   <table className='w-full text-sm'>
                     <thead className='bg-slate-50 text-xs text-slate-500 uppercase font-semibold'>
                       <tr>
@@ -328,8 +406,8 @@ export default function StudentAnalytics() {
 
           {/* Recent Quizzes */}
           <Card className='border-none shadow-sm overflow-hidden'>
-            <CardHeader className='border-b border-slate-100 bg-white/50 px-6 py-4'>
-              <CardTitle className='text-lg font-bold text-slate-800'>
+            <CardHeader className='border-b border-slate-100 bg-white/50 px-4 sm:px-6 py-3.5 sm:py-4'>
+              <CardTitle className='text-base sm:text-lg font-bold text-slate-800'>
                 Recent Quizzes
               </CardTitle>
             </CardHeader>
@@ -338,43 +416,67 @@ export default function StudentAnalytics() {
                 No quiz attempts yet
               </div>
             ) : (
-              <div className='overflow-x-auto'>
-                <table className='w-full text-sm'>
-                  <thead className='bg-slate-50 text-xs text-slate-500 uppercase font-semibold'>
-                    <tr>
-                      <th className='text-left px-6 py-4'>Quiz Name</th>
-                      <th className='text-left px-6 py-4'>Score</th>
-                      <th className='text-left px-6 py-4'>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className='divide-y divide-slate-100'>
-                    {recentQuizzes.map((quiz) => (
-                      <tr
-                        key={quiz.id}
-                        className='hover:bg-slate-50 transition-colors'
-                      >
-                        <td className='px-6 py-4 font-semibold text-slate-800'>
-                          {quiz.name}
-                        </td>
-                        <td className='px-6 py-4 font-medium text-slate-600'>
-                          {quiz.score}
-                        </td>
-                        <td className='px-6 py-4'>
-                          {quiz.status === 'Passed' ? (
-                            <Badge className='bg-emerald-50 hover:bg-emerald-50 text-emerald-600 font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit'>
-                              <CheckCircle2 className='w-3.5 h-3.5' /> Passed
-                            </Badge>
-                          ) : (
-                            <Badge className='bg-red-50 hover:bg-red-50 text-red-600 font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit'>
-                              <XCircle className='w-3.5 h-3.5' /> Failed
-                            </Badge>
-                          )}
-                        </td>
+              <>
+                {/* Mobile View (< md) */}
+                <div className='md:hidden divide-y divide-slate-100'>
+                  {recentQuizzes.map((quiz) => (
+                    <div key={quiz.id} className='p-4 flex items-center justify-between gap-3'>
+                      <div className='min-w-0 flex-1'>
+                        <p className='font-semibold text-slate-800 text-sm truncate'>{quiz.name}</p>
+                        <p className='text-xs text-slate-500 font-medium mt-0.5'>Score: {quiz.score}</p>
+                      </div>
+                      {quiz.status === 'Passed' ? (
+                        <Badge className='bg-emerald-50 hover:bg-emerald-50 text-emerald-600 font-medium px-2.5 py-1 rounded-full flex items-center gap-1 text-xs shrink-0'>
+                          <CheckCircle2 className='w-3.5 h-3.5' /> Passed
+                        </Badge>
+                      ) : (
+                        <Badge className='bg-red-50 hover:bg-red-50 text-red-600 font-medium px-2.5 py-1 rounded-full flex items-center gap-1 text-xs shrink-0'>
+                          <XCircle className='w-3.5 h-3.5' /> Failed
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop View (>= md) */}
+                <div className='hidden md:block overflow-x-auto'>
+                  <table className='w-full text-sm'>
+                    <thead className='bg-slate-50 text-xs text-slate-500 uppercase font-semibold'>
+                      <tr>
+                        <th className='text-left px-6 py-4'>Quiz Name</th>
+                        <th className='text-left px-6 py-4'>Score</th>
+                        <th className='text-left px-6 py-4'>Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100'>
+                      {recentQuizzes.map((quiz) => (
+                        <tr
+                          key={quiz.id}
+                          className='hover:bg-slate-50 transition-colors'
+                        >
+                          <td className='px-6 py-4 font-semibold text-slate-800'>
+                            {quiz.name}
+                          </td>
+                          <td className='px-6 py-4 font-medium text-slate-600'>
+                            {quiz.score}
+                          </td>
+                          <td className='px-6 py-4'>
+                            {quiz.status === 'Passed' ? (
+                              <Badge className='bg-emerald-50 hover:bg-emerald-50 text-emerald-600 font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit'>
+                                <CheckCircle2 className='w-3.5 h-3.5' /> Passed
+                              </Badge>
+                            ) : (
+                              <Badge className='bg-red-50 hover:bg-red-50 text-red-600 font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1.5 w-fit'>
+                                <XCircle className='w-3.5 h-3.5' /> Failed
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </Card>
         </>

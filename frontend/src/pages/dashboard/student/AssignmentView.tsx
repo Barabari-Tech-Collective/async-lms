@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
+import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 
 /* =======================
    Course-wide "next item" navigation
@@ -163,7 +164,7 @@ export default function AssignmentView() {
       });
       setAssignment((prev) => (prev ? { ...prev, ...res.data.data } : prev));
       toast.success('Assignment submitted successfully!');
-      window.dispatchEvent(new Event('course-progress-updated'));
+      notifyCourseProgressUpdated();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit assignment'));
     } finally {
@@ -197,31 +198,31 @@ export default function AssignmentView() {
   const isSubmitted = Boolean(assignment.submission_link);
 
   return (
-    <div className='p-8 max-w-4xl mx-auto space-y-8'>
+    <div className='p-4 sm:p-6 md:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8'>
       {/* Header */}
       <header className='space-y-3'>
         <div className='flex items-start gap-3'>
-          <div className='w-11 h-11 rounded-2xl bg-[#333D7C]/10 text-[#333D7C] flex items-center justify-center shrink-0'>
+          <div className='w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#333D7C]/10 text-[#333D7C] flex items-center justify-center shrink-0 mt-0.5'>
             <ClipboardList className='h-5 w-5' />
           </div>
-          <h1 className='text-3xl font-bold text-[#1e293b] leading-tight mt-1'>
+          <h1 className='text-2xl sm:text-3xl font-bold text-[#1e293b] leading-tight'>
             {assignment.title}
           </h1>
         </div>
-        <div className='flex flex-wrap gap-2'>
-          <Badge className='bg-[#333D7C]/10 text-[#333D7C] border-none'>
+        <div className='flex flex-wrap gap-1.5 sm:gap-2'>
+          <Badge className='bg-[#333D7C]/10 text-[#333D7C] border-none text-xs'>
             Assignment
           </Badge>
-          <Badge className='bg-slate-100 text-slate-600 border-none'>
+          <Badge className='bg-slate-100 text-slate-600 border-none text-xs'>
             Max: {assignment.max_score} pts
           </Badge>
           {assignment.unit_title && (
-            <Badge className='bg-slate-100 text-slate-500 border-none'>
+            <Badge className='bg-slate-100 text-slate-500 border-none text-xs'>
               {assignment.unit_title}
             </Badge>
           )}
           {isSubmitted && (
-            <Badge className='bg-emerald-50 text-emerald-700 border-none'>
+            <Badge className='bg-emerald-50 text-emerald-700 border-none text-xs'>
               <CheckCircle2 className='h-3 w-3 mr-1' />
               Submitted
             </Badge>
@@ -230,18 +231,18 @@ export default function AssignmentView() {
       </header>
 
       {/* Instructions */}
-      <Card className='overflow-hidden rounded-[2rem] border border-slate-100 shadow-sm p-0'>
-        <div className='px-8 pt-6'>
+      <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0'>
+        <div className='px-4 sm:px-8 pt-5 sm:pt-6'>
           <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
             Instructions
           </p>
-          <p className='text-sm text-slate-500 mt-0.5'>
+          <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
             Read carefully before submitting
           </p>
         </div>
-        <div className='px-8 py-6'>
+        <div className='px-4 py-5 sm:px-8 sm:py-6'>
           {assignment.instructions ? (
-            <div className='prose prose-slate max-w-none lg:prose-lg'>
+            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
               {/^<[a-z][\s\S]*>/i.test(assignment.instructions.trimStart()) ? (
                 <div
                   dangerouslySetInnerHTML={{ __html: assignment.instructions }}
@@ -253,26 +254,26 @@ export default function AssignmentView() {
               )}
             </div>
           ) : (
-            <p className='italic text-slate-400'>No instructions provided.</p>
+            <p className='italic text-slate-400 text-sm'>No instructions provided.</p>
           )}
         </div>
       </Card>
 
       {/* Submission */}
-      <Card className='overflow-hidden rounded-[2rem] border border-slate-100 shadow-sm p-0'>
-        <div className='px-8 pt-6'>
+      <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0'>
+        <div className='px-4 sm:px-8 pt-5 sm:pt-6'>
           <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
             Your Submission
           </p>
-          <p className='text-sm text-slate-500 mt-0.5'>
+          <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
             {isSubmitted
               ? 'Already submitted — you can update your link below'
               : 'Paste the link to your solution (GitHub, Google Drive, etc.)'}
           </p>
         </div>
-        <div className='px-8 py-6 space-y-4'>
+        <div className='px-4 py-5 sm:px-8 sm:py-6 space-y-4'>
           {isSubmitted && (
-            <div className='flex items-center gap-2 p-3 bg-emerald-50 rounded-xl text-sm'>
+            <div className='flex items-center gap-2 p-3 bg-emerald-50 rounded-xl text-xs sm:text-sm'>
               <CheckCircle2 className='h-4 w-4 text-emerald-600 shrink-0' />
               <span className='text-emerald-700 font-medium'>
                 Submitted on{' '}
@@ -288,7 +289,7 @@ export default function AssignmentView() {
             </div>
           )}
 
-          <div className='flex gap-3'>
+          <div className='flex flex-col sm:flex-row gap-3'>
             <div className='relative flex-1'>
               <Link2 className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400' />
               <Input
@@ -297,14 +298,14 @@ export default function AssignmentView() {
                 placeholder='https://github.com/your-repo'
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
-                className='pl-9'
+                className='pl-9 h-11 text-sm'
               />
             </div>
             <Button
               onClick={handleSubmit}
               loading={submitting}
               disabled={isSubmitted}
-              className='bg-[#333D7C] hover:bg-[#2a3268] shrink-0'
+              className='bg-[#333D7C] hover:bg-[#2a3268] shrink-0 h-11 px-6 font-semibold w-full sm:w-auto'
             >
               Submit
             </Button>
@@ -316,17 +317,17 @@ export default function AssignmentView() {
         <div className='flex justify-end'>
           <Button
             onClick={goToNext}
-            className='bg-emerald-600 hover:bg-emerald-700 gap-2'
+            className='bg-emerald-600 hover:bg-emerald-700 gap-2 h-11 px-6 font-semibold w-full sm:w-auto min-h-[44px]'
           >
             {nextItem ? (
-              <>
-                Next: {nextItem.title}
-                <ArrowRight className='h-4 w-4' />
-              </>
+              <span className='flex items-center gap-1.5 truncate'>
+                <span className='truncate'>Next: {nextItem.title}</span>
+                <ArrowRight className='h-4 w-4 shrink-0' />
+              </span>
             ) : (
               <>
                 Finish Course
-                <PartyPopper className='h-4 w-4' />
+                <PartyPopper className='h-4 w-4 shrink-0' />
               </>
             )}
           </Button>

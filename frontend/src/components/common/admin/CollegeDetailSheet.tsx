@@ -55,7 +55,7 @@ export default function CollegeDetailSheet({ collegeId, onClose }: Props) {
 
   return (
     <Dialog open={!!collegeId} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className='sm:max-w-2xl max-h-[85vh] flex flex-col'>
+      <DialogContent className='w-[95vw] sm:max-w-2xl max-h-[85vh] flex flex-col'>
         {loading || !data ? (
           <div className='flex flex-1 items-center justify-center py-16'>
             <Loader2 className='w-6 h-6 animate-spin text-blue-600' />

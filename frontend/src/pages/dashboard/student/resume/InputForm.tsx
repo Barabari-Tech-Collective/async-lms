@@ -69,26 +69,26 @@ export function InputForm({ initialValues, onSubmit, loading, onClose }: InputFo
 
   return (
     <FormikProvider value={formik}>
-      <div className='fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4'>
-        <div className='bg-white rounded-md shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col'>
+      <div className='fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4'>
+        <div className='bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92dvh] flex flex-col'>
           {/* Header */}
-          <div className='flex items-center justify-between p-6 border-b border-slate-100'>
+          <div className='flex items-center justify-between p-4 sm:p-6 border-b border-slate-100'>
             <div>
-              <h2 className='font-bold text-[#1e2653] text-lg'>Build Your Resume</h2>
-              <p className='text-xs text-slate-400 mt-0.5'>Profile & course data will be auto-fetched</p>
+              <h2 className='font-bold text-[#1e2653] text-base sm:text-lg'>Build Your Resume</h2>
+              <p className='text-[11px] sm:text-xs text-slate-400 mt-0.5'>Profile & course data will be auto-fetched</p>
             </div>
-            <button onClick={onClose} className='text-slate-400 hover:text-slate-600'>
+            <button onClick={onClose} className='p-1 text-slate-400 hover:text-slate-600 rounded-lg'>
               <X size={20} />
             </button>
           </div>
 
           <form onSubmit={formik.handleSubmit} className='flex flex-col flex-1 overflow-hidden'>
-            <div className='overflow-y-auto flex-1 px-6 py-4 space-y-5'>
+            <div className='overflow-y-auto flex-1 px-4 sm:px-6 py-4 space-y-4 sm:space-y-5'>
 
               {/* Personal Details */}
               <section>
                 <h3 className='text-sm font-semibold text-slate-700 mb-3'>Personal Details</h3>
-                <div className='grid grid-cols-2 gap-3'>
+                <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
                   {/* Job Title */}
                   <div>
                     <label className='text-xs text-slate-500 mb-1 block'>
@@ -219,7 +219,7 @@ export function InputForm({ initialValues, onSubmit, loading, onClose }: InputFo
 
                         return (
                           <div key={idx} className='border border-slate-100 rounded-xl p-4 bg-slate-50 space-y-2'>
-                            <div className='grid grid-cols-2 gap-2'>
+                            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
                               <div>
                                 <input
                                   name={`workExperience.${idx}.title`}

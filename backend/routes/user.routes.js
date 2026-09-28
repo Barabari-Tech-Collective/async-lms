@@ -14,8 +14,14 @@ router.put('/password', verifyToken, userController.changePassword);
 router.use(verifyToken, isAdmin);
 
 router.get('/', userController.getAllUsers);
+router.post('/curriculum-developer', require('../controllers/admin.controller').createCurriculumDeveloper);
+router.get('/bin', userController.getRecycleBin);
 router.get('/:id', userController.getUserById);
 router.put('/:id', userController.updateUser);
+router.patch('/:id/verify', userController.verifyUser);
 router.patch('/:id/role', userController.changeUserRole);
+router.delete('/:id', userController.deleteUser);
+router.post('/:id/restore', userController.restoreUser);
+router.delete('/:id/permanent', userController.permanentDeleteUser);
 
 module.exports = router;

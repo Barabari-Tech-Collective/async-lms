@@ -28,7 +28,13 @@ const TITLES: Record<string, string> = {
   '/dashboard/facilitator/ai-curriculum': 'AI Curriculum Builder',
 };
 
-export default function FacilitatorHeader({ toggleSidebar }: { toggleSidebar: () => void }) {
+export default function FacilitatorHeader({
+  toggleSidebar,
+  toggleMobileSidebar,
+}: {
+  toggleSidebar: () => void;
+  toggleMobileSidebar?: () => void;
+}) {
   const user = useAppSelector(selectUser);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -45,34 +51,44 @@ export default function FacilitatorHeader({ toggleSidebar }: { toggleSidebar: ()
     navigate('/login');
   };
 
+  const handleMenuClick = () => {
+    if (window.innerWidth < 1024 && toggleMobileSidebar) {
+      toggleMobileSidebar();
+    } else {
+      toggleSidebar();
+    }
+  };
+
   return (
-    <header className='h-16 bg-white border-b flex items-center justify-between px-6 shrink-0'>
-      <div className='flex items-center gap-4'>
+    <header className='h-16 bg-white border-b flex items-center justify-between px-3 sm:px-6 shrink-0 select-none'>
+      <div className='flex items-center gap-2 sm:gap-4 min-w-0 flex-1 mr-2'>
         <button
-          onClick={toggleSidebar}
-          className='p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-100'
+          onClick={handleMenuClick}
+          className='p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-100 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0'
           aria-label='Toggle Sidebar'
         >
           <Menu className='w-5 h-5' />
         </button>
-        <h2 className='text-xl font-bold text-[#1e2653] capitalize'>{title}</h2>
+        <h2 className='text-base sm:text-xl font-bold text-[#1e2653] capitalize truncate min-w-0'>
+          {title}
+        </h2>
       </div>
 
-      <div className='flex items-center gap-3'>
+      <div className='flex items-center gap-2 sm:gap-3 shrink-0'>
         <NotificationBell />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <div className='flex items-center gap-2 cursor-pointer group p-1 rounded-lg hover:bg-slate-50 transition-all'>
-              <div className='w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden shrink-0'>
+            <button className='flex items-center gap-1.5 sm:gap-2 cursor-pointer group p-1 rounded-lg hover:bg-slate-50 transition-all focus:outline-none min-h-[44px] min-w-[44px]'>
+              <div className='w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-xs'>
                 <img
                   src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.full_name || 'Facilitator'}`}
                   alt='avatar'
                   className='w-full h-full object-cover'
                 />
               </div>
-              <ChevronDown className='w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform group-data-[state=open]:rotate-180' />
-            </div>
+              <ChevronDown className='w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform group-data-[state=open]:rotate-180 hidden sm:block' />
+            </button>
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align='end' className='w-60 p-2 mt-2 shadow-xl border-slate-200'>

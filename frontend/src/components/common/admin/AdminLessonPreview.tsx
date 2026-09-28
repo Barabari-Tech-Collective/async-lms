@@ -2,13 +2,7 @@ import { X, Loader2, AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-
-const getYouTubeEmbedUrl = (url: string): string | null => {
-  const match = url.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([^&?/\s]+)/,
-  );
-  return match ? `https://www.youtube.com/embed/${match[1]}?rel=0` : null;
-};
+import { getYouTubeEmbedUrl } from '@/utils/youtube';
 
 const AdminLessonPreviewModal = ({
   isOpen,
@@ -32,9 +26,9 @@ const AdminLessonPreviewModal = ({
   const embedUrl = videoUrl ? getYouTubeEmbedUrl(videoUrl) : null;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60'>
-      <div className='w-full max-w-195 rounded-xl bg-white shadow-2xl flex flex-col max-h-[90vh]'>
-        <div className='flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs'>
+      <div className='w-[96vw] sm:max-w-3xl rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh] overflow-hidden'>
+        <div className='flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 shrink-0'>
           <h3 className='text-base font-semibold text-slate-900'>
             {videoUrl ? 'Video Preview' : 'Lesson Preview'}
           </h3>

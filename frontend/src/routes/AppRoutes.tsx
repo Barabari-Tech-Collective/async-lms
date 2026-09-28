@@ -31,6 +31,10 @@ const NotFound = lazyWithRetry(() => import('@/pages/NotFound'));
 const PendingVerification = lazyWithRetry(() => import('@/pages/PendingVerification'));
 const CollegeUnderVerification = lazyWithRetry(() => import('@/pages/CollegeUnderVerification'));
 const AuthCallback = lazyWithRetry(() => import('@/pages/AuthCallback'));
+const SelectRole = lazyWithRetry(() => import('@/pages/SelectRole'));
+const VerifyEmail = lazyWithRetry(() => import('@/pages/VerifyEmail'));
+const ForgotPassword = lazyWithRetry(() => import('@/pages/ForgotPassword'));
+const ForceChangePassword = lazyWithRetry(() => import('@/pages/ForceChangePassword'));
 
 // Onboarding
 const CollegeStep = lazyWithRetry(() => import('@/pages/onboarding/CollegeStep'));
@@ -173,13 +177,17 @@ const router = createBrowserRouter([
       { path: 'login', element: <Login /> },
       { path: 'signup', element: <Signup /> },
       { path: 'auth/callback', element: <AuthCallback /> },
+      { path: 'auth/select-role', element: <SelectRole /> },
       { path: 'code-editor', element: <CodeEditor /> },
       { path: 'pending-verification', element: <PendingVerification /> },
       { path: 'college-under-verification', element: <CollegeUnderVerification /> },
+      { path: 'verify-email', element: <VerifyEmail /> },
+      { path: 'forgot-password', element: <ForgotPassword /> },
 
       {
         element: <PrivateRoute />,
         children: [
+          { path: 'force-change-password', element: <ForceChangePassword /> },
           {
             path: 'onboarding',
             children: [
@@ -326,6 +334,7 @@ const router = createBrowserRouter([
               { path: 'ai-curriculum/:id/edit', element: <AiCurriculumEditor /> },
               { path: 'ai-curriculum/:id/preview', element: <AiCurriculumPreview /> },
               { path: 'ai-curriculum/:id/review', element: <AiCurriculumReview /> },
+              { path: 'profile', element: <AdminProfile /> },
             ],
           },
         ],

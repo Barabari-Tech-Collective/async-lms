@@ -53,18 +53,18 @@ export default function Assignments() {
   ];
 
   return (
-    <div className='p-8 max-w-7xl mx-auto space-y-8'>
+    <div className='p-4 sm:p-6 md:p-8 max-w-7xl mx-auto space-y-6 sm:space-y-8'>
       <div>
-        <h1 className='text-3xl font-bold text-[#1e293b]'>Assignments</h1>
-        <p className='text-slate-500 mt-1'>Track and submit your projects</p>
+        <h1 className='text-2xl sm:text-3xl font-bold text-[#1e293b]'>Assignments</h1>
+        <p className='text-slate-500 mt-1 text-sm sm:text-base'>Track and submit your projects</p>
       </div>
 
-      <div className='flex items-center gap-1 border-b border-slate-200'>
+      <div className='flex items-center gap-1 border-b border-slate-200 overflow-x-auto [&::-webkit-scrollbar]:hidden'>
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 -mb-px transition-colors shrink-0 min-h-[40px] ${
               activeTab === tab.id
                 ? 'border-[#333D7C] text-[#333D7C]'
                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -72,7 +72,7 @@ export default function Assignments() {
           >
             {tab.label}
             <span
-              className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+              className={`text-[10px] sm:text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
                 activeTab === tab.id
                   ? 'bg-[#333D7C]/10 text-[#333D7C]'
                   : 'bg-slate-100 text-slate-500'
@@ -85,14 +85,14 @@ export default function Assignments() {
       </div>
 
       {loading ? (
-        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'>
           {[...Array(6)].map((_, i) => (
             <div
               key={i}
-              className='bg-white rounded-[2rem] border border-slate-100 shadow-sm p-8 space-y-5'
+              className='bg-white rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-5 sm:p-8 space-y-4 sm:space-y-5'
             >
               <div className='flex items-start justify-between'>
-                <Skeleton className='h-11 w-11 rounded-2xl' />
+                <Skeleton className='h-10 w-10 sm:h-11 sm:w-11 rounded-2xl' />
                 <Skeleton className='h-5 w-20 rounded-full' />
               </div>
               <Skeleton className='h-6 w-3/4' />
@@ -103,7 +103,7 @@ export default function Assignments() {
           ))}
         </div>
       ) : filteredAssignments.length > 0 ? (
-        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'>
           {filteredAssignments.map((item) => (
             <CollegeAssignmentCard
               key={item.id}

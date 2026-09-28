@@ -156,19 +156,21 @@ export const completeLesson = createAsyncThunk<
 });
 
 export const submitExercise = createAsyncThunk<
-  { exerciseId: string; score: number | null; isPassed: boolean },
-  { exerciseId: string },
+  { exerciseId: string; score: number | null; isPassed: boolean; testResults?: any },
+  { exerciseId: string; files?: any[]; taskId?: string },
   { rejectValue: string }
 >('lesson/submitExercise', async (payload, { rejectWithValue, dispatch }) => {
   try {
-    const res = await apiClient.post<{ data: { score?: number; is_passed?: boolean } }>(
+    const res = await apiClient.post<{ data: { score?: number; is_passed?: boolean; submission?: { score?: number; is_passed?: boolean }; test_results?: any; } }>(
       `/students/exercise/${payload.exerciseId}/submit`,
+      { files: payload.files, taskId: payload.taskId }
     );
     dispatch(loadUser());
     return { 
       exerciseId: payload.exerciseId, 
-      score: res.data.data?.score ?? null,
-      isPassed: res.data.data?.is_passed ?? false,
+      score: res.data.data?.submission?.score ?? res.data.data?.score ?? null,
+      isPassed: res.data.data?.submission?.is_passed ?? res.data.data?.is_passed ?? false,
+      testResults: res.data.data?.test_results,
     };
   } catch (error: any) {
     return rejectWithValue(

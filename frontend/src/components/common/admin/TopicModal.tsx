@@ -34,8 +34,8 @@ const TopicModal: React.FC<TopicModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs'>
+      <div className='w-[94vw] sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 sm:p-6 shadow-xl'>
         <div className='mb-4 flex items-center justify-between'>
           <h3 className='text-lg font-bold text-slate-900'>
             {editData ? 'Edit Topic' : 'Add New Topic'}

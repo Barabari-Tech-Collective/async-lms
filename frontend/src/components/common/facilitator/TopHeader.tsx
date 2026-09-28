@@ -52,11 +52,11 @@ const TopHeader = ({ onFilterChange }: Props) => {
   }, [selectedCollege, selectedDomain, selectedBatch, onFilterChange]);
 
   return (
-    <div className='flex items-center gap-3 my-4'>
+    <div className='flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 my-3 sm:my-4 w-full sm:w-auto'>
       <select
         value={selectedCollege}
         onChange={(e) => setSelectedCollege(e.target.value)}
-        className='border border-slate-200 px-3 py-1.5 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400'
+        className='w-full sm:w-auto flex-1 border border-slate-200 bg-white px-3 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 min-h-[38px]'
       >
         <option value=''>All Colleges</option>
         {colleges.map((c) => (
@@ -69,7 +69,7 @@ const TopHeader = ({ onFilterChange }: Props) => {
       <select
         value={selectedDomain}
         onChange={(e) => setSelectedDomain(e.target.value)}
-        className='border border-slate-200 px-3 py-1.5 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400'
+        className='w-full sm:w-auto flex-1 border border-slate-200 bg-white px-3 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 min-h-[38px]'
       >
         <option value=''>All Domains</option>
         {domains.map((d) => (
@@ -82,7 +82,7 @@ const TopHeader = ({ onFilterChange }: Props) => {
       <select
         value={selectedBatch}
         onChange={(e) => setSelectedBatch(e.target.value)}
-        className='border border-slate-200 px-3 py-1.5 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400'
+        className='w-full sm:w-auto flex-1 border border-slate-200 bg-white px-3 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 min-h-[38px]'
       >
         <option value=''>All Grad Years</option>
         {batches.map((b) => (
