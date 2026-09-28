@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  ArrowLeft, CheckCircle, XCircle, MessageSquare, Loader2,
+  ArrowLeft, CheckCircle, CheckCircle2, XCircle, MessageSquare, Loader2,
   Sparkles, MonitorPlay, BookOpen, ListChecks, FileText, Send,
   ClipboardList, Trophy,
 } from 'lucide-react';
@@ -442,27 +442,58 @@ export default function AiCurriculumReview() {
           )}
 
           {/* Admin: publish approved or republish published course */}
-          {isAdmin && (course.status === 'approved' || (course.status === 'published' && course.subject_id)) && (
-            <button
-              onClick={async () => {
-                setSubmitting(true);
-                try {
-                  await aiCurriculumApi.publish(id!);
-                  toast.success(course.subject_id ? 'Course republished!' : 'Course published!');
-                  navigate(`${base}/ai-curriculum`);
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.message || 'Failed to publish');
-                } finally {
-                  setSubmitting(false);
-                }
-              }}
-              disabled={submitting}
-              className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
-            >
-              {submitting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Sparkles className='w-4 h-4' />}
-              <span>{course.status === 'published' || course.subject_id ? 'Republish Course' : 'Publish Course'}</span>
-            </button>
-          )}
+          {isAdmin &&
+            (course.status === 'approved' ||
+              (course.status === 'published' && course.subject_id)) &&
+            (course.status === 'published' && !course.has_unpublished_changes ? (
+              <button
+                type='button'
+                disabled
+                title='All course content is live and up to date in production'
+                className='flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-xl cursor-default min-h-[36px]'
+              >
+                <CheckCircle2 className='w-4 h-4 text-emerald-600' />
+                <span>Published (Up to date)</span>
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  setSubmitting(true);
+                  try {
+                    const res = await aiCurriculumApi.publish(id!);
+                    if (res.data?.data?.up_to_date) {
+                      toast.success('Course is already published and up to date!');
+                    } else {
+                      toast.success(
+                        course.subject_id
+                          ? 'Course republished!'
+                          : 'Course published!',
+                      );
+                    }
+                    navigate(`${base}/ai-curriculum`);
+                  } catch (err: any) {
+                    toast.error(
+                      err?.response?.data?.message || 'Failed to publish',
+                    );
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                disabled={submitting}
+                className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
+              >
+                {submitting ? (
+                  <Loader2 className='w-4 h-4 animate-spin' />
+                ) : (
+                  <Sparkles className='w-4 h-4' />
+                )}
+                <span>
+                  {course.status === 'published' || course.subject_id
+                    ? 'Republish Course'
+                    : 'Publish Course'}
+                </span>
+              </button>
+            ))}
         </div>
       </div>
     </div>

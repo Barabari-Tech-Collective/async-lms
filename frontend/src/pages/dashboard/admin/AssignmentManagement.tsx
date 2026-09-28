@@ -4,10 +4,9 @@ import {
   Plus,
   Search,
   Play,
-  Eye,
+  FileText,
   Loader2,
   Edit3,
-  BarChart2,
   Trash2,
   X,
   ChevronLeft,
@@ -56,11 +55,14 @@ interface Assignment {
   id: number;
   name: string;
   course: string;
+  rawCourse?: string;
   college: string;
   collegeId: string;
   batch: string;
   submissionsCount: number;
   submissionsTotal: number;
+  pendingCount: number;
+  evaluatedCount: number;
   dueDate: string;
   rawDueDate?: string;
   status: 'Active' | 'Submitted' | 'Completed' | 'Pending' | 'Overdue';
@@ -70,7 +72,7 @@ interface Assignment {
    Static Data
 ====================== */
 
-type Tab = 'Active' | 'Submitted' | 'Completed';
+type Tab = 'Active' | 'Submitted' | 'Completed' | 'Overdue';
 
 /* ======================
    Component
@@ -122,15 +124,18 @@ export default function AssignmentManagement() {
     });
   };
 
-  const handleRunEvaluation = async (assignment: Assignment) => {
+  const handleRunEvaluation = async (assignment: Assignment, isReEvaluate = false) => {
     try {
       setRunningEvalId(assignment.id);
-      const res = await apiClient.post<{
+      await apiClient.post<{
         success: boolean;
         evaluationId: string;
-      }>('/evaluations/run', { assignmentId: assignment.id });
-      toast.success('Evaluation started');
-      navigate(`${basePath}/results/${res.data.evaluationId}`);
+      }>('/evaluations/run', {
+        assignmentId: assignment.id,
+        scope: isReEvaluate ? 'all' : 'pending',
+      });
+      toast.success(isReEvaluate ? 'Re-evaluation started' : 'Evaluation started');
+      navigate(`${basePath}/results/${assignment.id}`);
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to run evaluation'));
     } finally {
@@ -138,16 +143,8 @@ export default function AssignmentManagement() {
     }
   };
 
-  const handleViewResults = async (assignment: Assignment) => {
-    try {
-      const res = await apiClient.get<{
-        success: boolean;
-        evaluationId: string;
-      }>(`/evaluations/by-assignment/${assignment.id}`);
-      navigate(`${basePath}/results/${res.data.evaluationId}`);
-    } catch {
-      toast.error('No evaluation has been run for this assignment yet');
-    }
+  const handleViewResults = (assignment: Assignment) => {
+    navigate(`${basePath}/results/${assignment.id}`);
   };
 
   const handleDelete = async () => {
@@ -199,27 +196,42 @@ export default function AssignmentManagement() {
         const mapped = res.data.data.map((item) => {
           const subsCount = parseInt(item.submissions_count) || 0;
           const subsTotal = parseInt(item.submissions_total) || 0;
-          const isOverdue =
-            item.due_date && new Date(item.due_date) < new Date();
+          const pendingCount = parseInt(item.pending_submissions_count) || 0;
+          const evaluatedCount = Math.max(0, subsCount - pendingCount);
+
+          let isOverdue = false;
+          if (item.due_date) {
+            const due = new Date(item.due_date);
+            due.setHours(23, 59, 59, 999);
+            isOverdue = due < new Date();
+          }
 
           let status: Assignment['status'] = 'Active';
-          if (item.evaluation_status === 'completed') {
-            status = 'Completed';
-          } else if (isOverdue) {
-            status = 'Overdue';
-          } else if (subsCount > 0) {
+          if (subsCount > 0 && pendingCount > 0) {
+            // Un-evaluated submissions exist
             status = 'Submitted';
+          } else if (subsCount > 0 && pendingCount === 0) {
+            // All received submissions evaluated
+            status = 'Completed';
+          } else if (isOverdue && subsCount === 0) {
+            // Overdue with no submissions
+            status = 'Overdue';
+          } else {
+            status = 'Active';
           }
 
           return {
             id: item.id,
             name: item.title,
             course: item.course || 'N/A',
+            rawCourse: item.raw_course || item.course || '',
             college: item.college_name,
             collegeId: item.college_id,
             batch: item.batch || 'N/A',
             submissionsCount: subsCount,
             submissionsTotal: subsTotal,
+            pendingCount,
+            evaluatedCount,
             dueDate: item.due_date
               ? new Date(item.due_date).toLocaleDateString()
               : 'No Due Date',
@@ -244,6 +256,12 @@ export default function AssignmentManagement() {
       dot: 'bg-amber-400',
     },
     { label: 'Completed', shortLabel: 'Completed', value: 'Completed' },
+    {
+      label: 'Overdue',
+      shortLabel: 'Overdue',
+      value: 'Overdue',
+      dot: 'bg-rose-500',
+    },
   ];
 
   // Derive unique colleges
@@ -265,10 +283,12 @@ export default function AssignmentManagement() {
       collegeFilter === 'all' || a.collegeId === collegeFilter;
     const matchesTab =
       activeTab === 'Active'
-        ? a.status === 'Active' || a.status === 'Submitted'
-        : activeTab === 'Completed'
-          ? a.status === 'Overdue' || a.status === 'Completed'
-          : a.status === 'Submitted';
+        ? a.status === 'Active'
+        : activeTab === 'Submitted'
+          ? a.status === 'Submitted'
+          : activeTab === 'Completed'
+            ? a.status === 'Completed'
+            : a.status === 'Overdue';
     return matchesSearch && matchesCollege && matchesTab;
   });
 
@@ -282,8 +302,8 @@ export default function AssignmentManagement() {
     filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
   const someFilteredSelected = filtered.some((a) => selectedIds.has(a.id));
 
-  const getStatusBadge = (status: Assignment['status']) => {
-    switch (status) {
+  const getStatusBadge = (assignment: Assignment) => {
+    switch (assignment.status) {
       case 'Active':
         return (
           <Badge className='bg-emerald-50 text-emerald-600 hover:bg-emerald-50 font-medium text-xs rounded-full px-3'>
@@ -293,24 +313,24 @@ export default function AssignmentManagement() {
       case 'Submitted':
         return (
           <Badge className='bg-amber-50 text-amber-600 hover:bg-amber-50 font-medium text-xs rounded-full px-3'>
-            Submitted
+            Pending Eval ({assignment.pendingCount})
           </Badge>
         );
       case 'Completed':
         return (
           <Badge className='bg-blue-50 text-blue-600 hover:bg-blue-50 font-medium text-xs rounded-full px-3'>
-            Completed
+            Evaluated ({assignment.submissionsCount})
           </Badge>
         );
       case 'Pending':
         return (
-          <Badge className='bg-blue-50 text-blue-600 hover:bg-blue-50 font-medium text-xs'>
+          <Badge className='bg-amber-50 text-amber-600 hover:bg-amber-50 font-medium text-xs rounded-full px-3'>
             Pending
           </Badge>
         );
       case 'Overdue':
         return (
-          <Badge className='bg-red-50 text-red-600 hover:bg-red-50 font-medium text-xs'>
+          <Badge className='bg-red-50 text-red-600 hover:bg-red-50 font-medium text-xs rounded-full px-3'>
             Overdue
           </Badge>
         );
@@ -403,7 +423,7 @@ export default function AssignmentManagement() {
       )}
 
       {/* Tabs */}
-      <div className='grid grid-cols-3 sm:inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1 w-full sm:w-auto shrink-0'>
+      <div className='grid grid-cols-4 sm:inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1 w-full sm:w-auto shrink-0'>
         {tabs.map((tab) => (
           <button
             key={tab.value}
@@ -457,7 +477,7 @@ export default function AssignmentManagement() {
                         </p>
                       </div>
                     </div>
-                    <div className='shrink-0'>{getStatusBadge(assignment.status)}</div>
+                    <div className='shrink-0'>{getStatusBadge(assignment)}</div>
                   </div>
 
                   {/* Academic details box */}
@@ -490,15 +510,16 @@ export default function AssignmentManagement() {
 
                   {/* Action Buttons */}
                   <div className='flex items-center justify-end gap-1.5 pt-1 border-t border-slate-50'>
-                    {activeTab === 'Active' && (
+                    {(activeTab === 'Active' || activeTab === 'Overdue') && (
                       <button
-                        className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
+                        className='p-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold transition'
+                        title='Edit'
                         onClick={() => {
                           navigate(`${basePath}/create-assignment`, {
                             state: {
                               editId: assignment.id,
                               title: assignment.name,
-                              course: assignment.course === 'N/A' ? '' : assignment.course,
+                              course: assignment.rawCourse || assignment.course || '',
                               collegeId: assignment.collegeId,
                               deadline: assignment.rawDueDate || '',
                               description: '',
@@ -506,60 +527,42 @@ export default function AssignmentManagement() {
                           });
                         }}
                       >
-                        <Edit3 className='w-3 h-3' />
-                        Edit
+                        <Edit3 className='w-3.5 h-3.5' />
                       </button>
                     )}
 
                     {activeTab === 'Submitted' && (
-                      <>
-                        <button
-                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-xs text-emerald-700 hover:bg-emerald-100 font-semibold disabled:opacity-50'
-                          disabled={runningEvalId === assignment.id}
-                          onClick={() => handleRunEvaluation(assignment)}
-                        >
-                          {runningEvalId === assignment.id ? (
-                            <Loader2 className='w-3 h-3 animate-spin' />
-                          ) : (
-                            <Play className='w-3 h-3' />
-                          )}
-                          Evaluate
-                        </button>
-                        <button
-                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
-                          onClick={() => handleViewResults(assignment)}
-                        >
-                          <Eye className='w-3 h-3' />
-                          Submissions
-                        </button>
-                      </>
+                      <button
+                        className='flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-xs text-indigo-600 hover:bg-indigo-100 font-semibold transition disabled:opacity-50'
+                        onClick={() => handleRunEvaluation(assignment)}
+                        disabled={runningEvalId === assignment.id}
+                        title='Evaluate pending submissions'
+                      >
+                        {runningEvalId === assignment.id ? (
+                          <Loader2 className='w-3 h-3 animate-spin' />
+                        ) : (
+                          <Play className='w-3 h-3 fill-current' />
+                        )}
+                        {runningEvalId === assignment.id ? 'Evaluating...' : 'Evaluate'}
+                      </button>
                     )}
 
-                    {activeTab === 'Completed' && (
-                      <>
-                        <button
-                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
-                          onClick={() => handleViewResults(assignment)}
-                        >
-                          <Eye className='w-3 h-3' />
-                          View
-                        </button>
-                        <button
-                          className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-xs text-slate-700 hover:bg-slate-200 font-semibold'
-                          onClick={() => handleViewResults(assignment)}
-                        >
-                          <BarChart2 className='w-3 h-3' />
-                          Analytics
-                        </button>
-                      </>
+                    {(activeTab === 'Completed' || (activeTab === 'Overdue' && assignment.submissionsCount > 0)) && (
+                      <button
+                        className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 font-semibold'
+                        onClick={() => handleViewResults(assignment)}
+                      >
+                        <FileText className='w-3 h-3' />
+                        View Results
+                      </button>
                     )}
 
                     <button
-                      className='flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-xs text-red-600 hover:bg-red-100 font-semibold'
+                      className='p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-semibold transition'
+                      title='Delete'
                       onClick={() => setDeleteTarget(assignment)}
                     >
-                      <Trash2 className='w-3 h-3' />
-                      Delete
+                      <Trash2 className='w-3.5 h-3.5' />
                     </button>
                   </div>
                 </div>
@@ -657,21 +660,19 @@ export default function AssignmentManagement() {
                     <TableCell className='text-slate-500 text-sm'>
                       {assignment.dueDate}
                     </TableCell>
-                    <TableCell>{getStatusBadge(assignment.status)}</TableCell>
+                    <TableCell>{getStatusBadge(assignment)}</TableCell>
                     <TableCell className='text-right pr-6'>
                       <div className='flex items-center justify-end gap-3'>
-                        {activeTab === 'Active' && (
+                        {(activeTab === 'Active' || activeTab === 'Overdue') && (
                           <button
-                            className='flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 transition font-medium'
+                            className='p-1.5 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition'
+                            title='Edit'
                             onClick={() => {
                               navigate(`${basePath}/create-assignment`, {
                                 state: {
                                   editId: assignment.id,
                                   title: assignment.name,
-                                  course:
-                                    assignment.course === 'N/A'
-                                      ? ''
-                                      : assignment.course,
+                                  course: assignment.rawCourse || assignment.course || '',
                                   collegeId: assignment.collegeId,
                                   deadline: assignment.rawDueDate || '',
                                   description: '',
@@ -679,58 +680,41 @@ export default function AssignmentManagement() {
                               });
                             }}
                           >
-                            <Edit3 className='w-3.5 h-3.5' />
-                            Edit
+                            <Edit3 className='w-4 h-4' />
                           </button>
                         )}
 
                         {activeTab === 'Submitted' && (
-                          <>
-                            <button
-                              className='flex items-center gap-1.5 text-sm text-emerald-600 hover:text-emerald-700 transition font-medium disabled:opacity-50'
-                              disabled={runningEvalId === assignment.id}
-                              onClick={() => handleRunEvaluation(assignment)}
-                            >
-                              {runningEvalId === assignment.id ? (
-                                <Loader2 className='w-3.5 h-3.5 animate-spin' />
-                              ) : (
-                                <Play className='w-3.5 h-3.5' />
-                              )}
-                              Run Evaluation
-                            </button>
-                            <button
-                              className='flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 transition font-medium'
-                              onClick={() => handleViewResults(assignment)}
-                            >
-                              <Eye className='w-3.5 h-3.5' />
-                              View Submissions
-                            </button>
-                          </>
+                          <button
+                            className='flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-2.5 py-1 rounded-lg transition font-medium disabled:opacity-50'
+                            onClick={() => handleRunEvaluation(assignment)}
+                            disabled={runningEvalId === assignment.id}
+                            title='Evaluate pending submissions'
+                          >
+                            {runningEvalId === assignment.id ? (
+                              <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                            ) : (
+                              <Play className='w-3.5 h-3.5 fill-current' />
+                            )}
+                            {runningEvalId === assignment.id ? 'Evaluating...' : 'Evaluate'}
+                          </button>
                         )}
-                        {activeTab === 'Completed' && (
-                          <>
-                            <button
-                              className='flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 transition font-medium'
-                              onClick={() => handleViewResults(assignment)}
-                            >
-                              <Eye className='w-3.5 h-3.5' />
-                              View
-                            </button>
-                            <button
-                              className='flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-700 transition font-medium'
-                              onClick={() => handleViewResults(assignment)}
-                            >
-                              <BarChart2 className='w-3.5 h-3.5' />
-                              Analytics
-                            </button>
-                          </>
+
+                        {(activeTab === 'Completed' || (activeTab === 'Overdue' && assignment.submissionsCount > 0)) && (
+                          <button
+                            className='flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 transition font-medium'
+                            onClick={() => handleViewResults(assignment)}
+                          >
+                            <FileText className='w-3.5 h-3.5' />
+                            View Results
+                          </button>
                         )}
                         <button
-                          className='flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600 transition font-medium'
+                          className='p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 transition'
+                          title='Delete'
                           onClick={() => setDeleteTarget(assignment)}
                         >
-                          <Trash2 className='w-3.5 h-3.5' />
-                          Delete
+                          <Trash2 className='w-4 h-4' />
                         </button>
                       </div>
                     </TableCell>

@@ -9,11 +9,11 @@ import {
   ArrowUpRight,
   Eye,
   Send,
-  Calendar,
   ChevronLeft,
   ChevronRight,
   BookOpen,
   Layers,
+  Trophy,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,50 +34,75 @@ import type {
 
 interface Props {
   assignments: StudentAssignmentOverviewItem[];
+  projects?: StudentAssignmentOverviewItem[];
   isLoading: boolean;
+  isLoadingProjects?: boolean;
 }
 
-type TabKey = 'all' | 'pending' | 'pending_evaluation' | 'evaluated';
+type MainTabKey = 'assignments' | 'projects';
+type StatusTabKey = 'all' | 'pending' | 'pending_evaluation' | 'evaluated';
 
 export const StudentAssignmentsTable: React.FC<Props> = ({
   assignments,
+  projects = [],
   isLoading,
+  isLoadingProjects = false,
 }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [activeMainTab, setActiveMainTab] = useState<MainTabKey>('assignments');
+  const [activeStatusTab, setActiveStatusTab] = useState<StatusTabKey>('all');
   const [selectedCourse, setSelectedCourse] = useState<string>('all');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [selectedAssignment, setSelectedAssignment] =
+  const [selectedItem, setSelectedItem] =
     useState<StudentAssignmentOverviewItem | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
 
   const pageSize = 10;
 
-  // Extract available courses dynamically
+  // Active dataset based on primary tab
+  const currentItems = useMemo(() => {
+    return activeMainTab === 'assignments' ? assignments : projects;
+  }, [activeMainTab, assignments, projects]);
+
+  const isCurrentLoading =
+    activeMainTab === 'assignments' ? isLoading : isLoadingProjects;
+
+  // Reset filters and pagination whenever the primary tab changes
+  useEffect(() => {
+    setSelectedCourse('all');
+    setSelectedTopic('all');
+    setSearchQuery('');
+    setActiveStatusTab('all');
+    setCurrentPage(1);
+  }, [activeMainTab]);
+
+  // Extract available courses dynamically for the active tab
   const availableCourses = useMemo(() => {
     const map = new Map<string, number>();
-    assignments.forEach((a) => {
+    currentItems.forEach((a) => {
       const key = a.course_name || 'General';
       map.set(key, (map.get(key) || 0) + 1);
     });
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
-  }, [assignments]);
+  }, [currentItems]);
 
   // Base list filtered by selected course
-  const courseFilteredAssignments = useMemo(() => {
-    if (selectedCourse === 'all') return assignments;
-    return assignments.filter((a) => (a.course_name || 'General') === selectedCourse);
-  }, [assignments, selectedCourse]);
+  const courseFilteredItems = useMemo(() => {
+    if (selectedCourse === 'all') return currentItems;
+    return currentItems.filter(
+      (a) => (a.course_name || 'General') === selectedCourse,
+    );
+  }, [currentItems, selectedCourse]);
 
-  // Extract available topics / units for the selected course (only when a course is chosen)
+  // Extract available topics / units for the selected course
   const availableTopics = useMemo(() => {
     if (selectedCourse === 'all') return [];
     const map = new Map<string, number>();
-    courseFilteredAssignments.forEach((a) => {
+    courseFilteredItems.forEach((a) => {
       const topic = a.topic_title || a.unit_title;
       if (topic && topic.trim()) {
         const key = topic.trim();
@@ -87,7 +112,7 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [courseFilteredAssignments, selectedCourse]);
+  }, [courseFilteredItems, selectedCourse]);
 
   // Reset selectedTopic when selectedCourse changes
   useEffect(() => {
@@ -95,31 +120,31 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
   }, [selectedCourse]);
 
   // List filtered by course and topic/unit
-  const scopedAssignments = useMemo(() => {
-    if (selectedTopic === 'all') return courseFilteredAssignments;
-    return courseFilteredAssignments.filter((a) => {
+  const scopedItems = useMemo(() => {
+    if (selectedTopic === 'all') return courseFilteredItems;
+    return courseFilteredItems.filter((a) => {
       const topic = (a.topic_title || a.unit_title || '').trim();
       return topic === selectedTopic;
     });
-  }, [courseFilteredAssignments, selectedTopic]);
+  }, [courseFilteredItems, selectedTopic]);
 
   // Compute status counts for the selected course & topic
   const counts = useMemo(() => {
     return {
-      all: scopedAssignments.length,
-      pending: scopedAssignments.filter((a) => a.status === 'pending').length,
-      pending_evaluation: scopedAssignments.filter(
+      all: scopedItems.length,
+      pending: scopedItems.filter((a) => a.status === 'pending').length,
+      pending_evaluation: scopedItems.filter(
         (a) => a.status === 'pending_evaluation',
       ).length,
-      evaluated: scopedAssignments.filter((a) => a.status === 'evaluated').length,
+      evaluated: scopedItems.filter((a) => a.status === 'evaluated').length,
     };
-  }, [scopedAssignments]);
+  }, [scopedItems]);
 
-  // Filter assignments by activeTab and search query
-  const filteredAssignments = useMemo(() => {
-    return scopedAssignments.filter((item) => {
-      // Tab filter
-      if (activeTab !== 'all' && item.status !== activeTab) {
+  // Filter items by activeStatusTab and search query
+  const filteredItems = useMemo(() => {
+    return scopedItems.filter((item) => {
+      // Status filter
+      if (activeStatusTab !== 'all' && item.status !== activeStatusTab) {
         return false;
       }
       // Search query
@@ -129,30 +154,31 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
         const matchesCourse = (item.course_name || '').toLowerCase().includes(q);
         const matchesTopic = (item.topic_title || '').toLowerCase().includes(q);
         const matchesUnit = (item.unit_title || '').toLowerCase().includes(q);
-        if (!matchesTitle && !matchesCourse && !matchesTopic && !matchesUnit) return false;
+        if (!matchesTitle && !matchesCourse && !matchesTopic && !matchesUnit)
+          return false;
       }
       return true;
     });
-  }, [scopedAssignments, activeTab, searchQuery]);
+  }, [scopedItems, activeStatusTab, searchQuery]);
 
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, selectedCourse, selectedTopic, searchQuery]);
+  }, [activeStatusTab, selectedCourse, selectedTopic, searchQuery]);
 
   // Pagination calculations
-  const totalPages = Math.max(1, Math.ceil(filteredAssignments.length / pageSize));
-  const paginatedAssignments = useMemo(() => {
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const paginatedItems = useMemo(() => {
     const startIdx = (currentPage - 1) * pageSize;
-    return filteredAssignments.slice(startIdx, startIdx + pageSize);
-  }, [filteredAssignments, currentPage, pageSize]);
+    return filteredItems.slice(startIdx, startIdx + pageSize);
+  }, [filteredItems, currentPage, pageSize]);
 
   const startRecord =
-    filteredAssignments.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const endRecord = Math.min(currentPage * pageSize, filteredAssignments.length);
+    filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endRecord = Math.min(currentPage * pageSize, filteredItems.length);
 
   const handleOpenFeedback = (item: StudentAssignmentOverviewItem) => {
-    setSelectedAssignment(item);
+    setSelectedItem(item);
     setFeedbackModalOpen(true);
   };
 
@@ -183,8 +209,8 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
     }
   };
 
-  const tabs: {
-    key: TabKey;
+  const statusTabs: {
+    key: StatusTabKey;
     label: string;
     mobileLabel: string;
     count: number;
@@ -192,8 +218,10 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
   }[] = [
     {
       key: 'all',
-      label: 'All Assignments',
-      mobileLabel: 'All Assignments',
+      label:
+        activeMainTab === 'assignments' ? 'All Assignments' : 'All Projects',
+      mobileLabel:
+        activeMainTab === 'assignments' ? 'All Assignments' : 'All Projects',
       count: counts.all,
     },
     {
@@ -221,22 +249,82 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
 
   return (
     <div className='rounded-2xl sm:rounded-3xl border border-slate-200/80 bg-white shadow-xs overflow-hidden min-w-0'>
-      {/* Header section with title, 2-tier filters (Course, Topic/Unit), and search */}
-      <div className='p-4 sm:p-6 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-4'>
-        <div>
-          <h3 className='text-base sm:text-lg font-bold text-slate-900 tracking-tight'>
-            Assignments & Evaluations
-          </h3>
-          <p className='text-xs text-slate-500 mt-0.5'>
-            Track submissions, view facilitator reviews, and inspect your rubric scores
-          </p>
+      {/* Header section with title, primary segmented tabs, filters, and search */}
+      <div className='p-4 sm:p-6 border-b border-slate-100 flex flex-col gap-4'>
+        {/* Top Header Row: Section Title + Primary Tabs Switcher */}
+        <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+          <div>
+            <h3 className='text-base sm:text-lg font-bold text-slate-900 tracking-tight'>
+              {activeMainTab === 'assignments'
+                ? 'Assignments & Evaluations'
+                : 'Projects & Evaluations'}
+            </h3>
+            <p className='text-xs text-slate-500 mt-0.5'>
+              {activeMainTab === 'assignments'
+                ? 'Track submissions, view facilitator reviews, and inspect your rubric scores'
+                : 'Track capstone projects, automated evaluation scores, and detailed rubric feedback'}
+            </p>
+          </div>
+
+          {/* Primary Tab Switcher: Assignments vs Projects */}
+          <div className='flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-xl w-fit shrink-0'>
+            <button
+              type='button'
+              onClick={() => setActiveMainTab('assignments')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                activeMainTab === 'assignments'
+                  ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+              }`}
+            >
+              <FileText className='w-4 h-4' />
+              <span>Assignments</span>
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  activeMainTab === 'assignments'
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'bg-slate-200/70 text-slate-500'
+                }`}
+              >
+                {assignments.length}
+              </span>
+            </button>
+            <button
+              type='button'
+              onClick={() => setActiveMainTab('projects')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                activeMainTab === 'projects'
+                  ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+              }`}
+            >
+              <Trophy
+                className={`w-4 h-4 ${
+                  activeMainTab === 'projects' ? 'text-amber-500' : 'text-slate-500'
+                }`}
+              />
+              <span>Projects</span>
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  activeMainTab === 'projects'
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'bg-slate-200/70 text-slate-500'
+                }`}
+              >
+                {projects.length}
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* Toolbar: Course Filter, Topic/Unit Filter, and Search */}
-        <div className='flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full xl:w-auto flex-wrap min-w-0'>
+        <div className='flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full flex-wrap min-w-0'>
           {/* 1. Course Dropdown Selector */}
           <div className='w-full sm:w-52 min-w-0'>
-            <Select value={selectedCourse} onValueChange={(val) => setSelectedCourse(val)}>
+            <Select
+              value={selectedCourse}
+              onValueChange={(val) => setSelectedCourse(val)}
+            >
               <SelectTrigger className='w-full h-9 bg-slate-50 hover:bg-slate-100/70 border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800 shadow-2xs cursor-pointer min-w-0'>
                 <div className='flex items-center gap-2 min-w-0 truncate'>
                   <BookOpen className='w-3.5 h-3.5 text-slate-400 shrink-0' />
@@ -244,11 +332,18 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                 </div>
               </SelectTrigger>
               <SelectContent className='max-w-[calc(100vw-2.5rem)] w-full sm:w-64 z-50 bg-white border border-slate-200 rounded-xl shadow-lg'>
-                <SelectItem value='all' className='cursor-pointer text-xs sm:text-sm font-medium'>
-                  All Courses ({assignments.length})
+                <SelectItem
+                  value='all'
+                  className='cursor-pointer text-xs sm:text-sm font-medium'
+                >
+                  All Courses ({currentItems.length})
                 </SelectItem>
                 {availableCourses.map((c) => (
-                  <SelectItem key={c.name} value={c.name} className='cursor-pointer text-xs sm:text-sm font-medium'>
+                  <SelectItem
+                    key={c.name}
+                    value={c.name}
+                    className='cursor-pointer text-xs sm:text-sm font-medium'
+                  >
                     <span className='truncate block max-w-[240px]'>
                       {c.name} ({c.count})
                     </span>
@@ -277,25 +372,41 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                   <Layers
                     className={cn(
                       'w-3.5 h-3.5 shrink-0',
-                      selectedCourse === 'all' ? 'text-slate-300' : 'text-slate-400',
+                      selectedCourse === 'all'
+                        ? 'text-slate-300'
+                        : 'text-slate-400',
                     )}
                   />
                   <SelectValue
                     placeholder={
                       selectedCourse === 'all'
                         ? 'Select Course First'
-                        : `All Topics & Units (${courseFilteredAssignments.length})`
+                        : activeMainTab === 'assignments'
+                          ? `All Topics & Units (${courseFilteredItems.length})`
+                          : `All Topics (${courseFilteredItems.length})`
                     }
                   />
                 </div>
               </SelectTrigger>
               <SelectContent className='max-w-[calc(100vw-2.5rem)] w-full sm:w-64 max-h-60 overflow-y-auto z-50 bg-white border border-slate-200 rounded-xl shadow-lg'>
-                <SelectItem value='all' className='cursor-pointer text-xs sm:text-sm font-medium'>
-                  All Topics & Units ({courseFilteredAssignments.length})
+                <SelectItem
+                  value='all'
+                  className='cursor-pointer text-xs sm:text-sm font-medium'
+                >
+                  {activeMainTab === 'assignments'
+                    ? `All Topics & Units (${courseFilteredItems.length})`
+                    : `All Topics (${courseFilteredItems.length})`}
                 </SelectItem>
                 {availableTopics.map((t) => (
-                  <SelectItem key={t.name} value={t.name} className='cursor-pointer text-xs sm:text-sm font-medium'>
-                    <span className='truncate block max-w-[240px]' title={t.name}>
+                  <SelectItem
+                    key={t.name}
+                    value={t.name}
+                    className='cursor-pointer text-xs sm:text-sm font-medium'
+                  >
+                    <span
+                      className='truncate block max-w-[240px]'
+                      title={t.name}
+                    >
                       {t.name} ({t.count})
                     </span>
                   </SelectItem>
@@ -309,7 +420,11 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 pointer-events-none' />
             <input
               type='text'
-              placeholder='Search assignments...'
+              placeholder={
+                activeMainTab === 'assignments'
+                  ? 'Search assignments...'
+                  : 'Search projects...'
+              }
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className='w-full pl-9 pr-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:bg-white transition-all shadow-2xs h-9 min-w-0'
@@ -318,17 +433,17 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Sub-Tabs: Status Filter Tabs */}
       <div className='border-b border-slate-100'>
-        {/* Mobile: 2x2 Segmented Grid (All 4 states immediately visible, zero horizontal scroll) */}
+        {/* Mobile: 2x2 Segmented Grid */}
         <div className='grid grid-cols-2 sm:hidden gap-1.5 p-2.5 bg-slate-50/70'>
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.key;
+          {statusTabs.map((tab) => {
+            const isActive = activeStatusTab === tab.key;
             return (
               <button
                 key={tab.key}
                 type='button'
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => setActiveStatusTab(tab.key)}
                 className={cn(
                   'flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer min-w-0 border',
                   isActive
@@ -364,13 +479,13 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
 
         {/* Desktop: Standard Horizontal Tab Strip */}
         <div className='hidden sm:flex items-center gap-2 px-6'>
-          {tabs.map((tab) => (
+          {statusTabs.map((tab) => (
             <button
               key={tab.key}
               type='button'
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => setActiveStatusTab(tab.key)}
               className={`flex items-center gap-2 py-3.5 px-4 text-xs sm:text-sm font-semibold border-b-2 -mb-px transition-colors shrink-0 cursor-pointer ${
-                activeTab === tab.key
+                activeStatusTab === tab.key
                   ? 'border-indigo-600 text-indigo-600'
                   : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
               }`}
@@ -383,7 +498,7 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
               {tab.label}
               <span
                 className={`text-[10px] sm:text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
-                  activeTab === tab.key
+                  activeStatusTab === tab.key
                     ? 'bg-indigo-50 text-indigo-600'
                     : 'bg-slate-100 text-slate-500'
                 }`}
@@ -395,8 +510,8 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Content */}
-      {isLoading ? (
+      {/* Table Content */}
+      {isCurrentLoading ? (
         <div className='p-6 space-y-4'>
           {[...Array(4)].map((_, i) => (
             <div
@@ -414,19 +529,31 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
             </div>
           ))}
         </div>
-      ) : filteredAssignments.length === 0 ? (
+      ) : filteredItems.length === 0 ? (
         <div className='p-12 text-center text-slate-400 space-y-2'>
-          <FileText className='w-10 h-10 mx-auto text-slate-300' />
+          {activeMainTab === 'assignments' ? (
+            <FileText className='w-10 h-10 mx-auto text-slate-300' />
+          ) : (
+            <Trophy className='w-10 h-10 mx-auto text-amber-300' />
+          )}
           <p className='text-sm font-medium text-slate-600'>
             {searchQuery
-              ? 'No assignments match your search.'
+              ? `No ${activeMainTab} match your search.`
               : selectedTopic !== 'all'
-                ? `No ${activeTab === 'all' ? '' : activeTab.replace('_', ' ') + ' '}assignments for "${selectedTopic}".`
+                ? `No ${
+                    activeStatusTab === 'all'
+                      ? ''
+                      : activeStatusTab.replace('_', ' ') + ' '
+                  }${activeMainTab} for "${selectedTopic}".`
                 : selectedCourse !== 'all'
-                  ? `No ${activeTab === 'all' ? '' : activeTab.replace('_', ' ') + ' '}assignments for ${selectedCourse}.`
-                  : activeTab === 'all'
-                    ? 'No assignments currently assigned.'
-                    : `No ${activeTab.replace('_', ' ')} assignments found.`}
+                  ? `No ${
+                      activeStatusTab === 'all'
+                        ? ''
+                        : activeStatusTab.replace('_', ' ') + ' '
+                    }${activeMainTab} for ${selectedCourse}.`
+                  : activeStatusTab === 'all'
+                    ? `No ${activeMainTab} currently available.`
+                    : `No ${activeStatusTab.replace('_', ' ')} ${activeMainTab} found.`}
           </p>
           <p className='text-xs text-slate-400'>
             Try selecting a different course, topic, or status filter.
@@ -440,7 +567,11 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
               <thead>
                 <tr className='border-b border-slate-100 bg-slate-50/50 text-[11px] font-bold text-slate-400 uppercase tracking-wider'>
                   <th className='py-3.5 pl-6 pr-3 w-12'>#</th>
-                  <th className='py-3.5 px-4'>Assignment Name</th>
+                  <th className='py-3.5 px-4'>
+                    {activeMainTab === 'assignments'
+                      ? 'Assignment Name'
+                      : 'Project Name'}
+                  </th>
                   <th className='py-3.5 px-4 w-28'>Type</th>
                   <th className='py-3.5 px-4 w-48'>Course / Topic</th>
                   <th className='py-3.5 px-4 w-36'>Status</th>
@@ -449,8 +580,9 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100 text-xs sm:text-sm text-slate-700'>
-                {paginatedAssignments.map((item, index) => {
-                  const absoluteIndex = (currentPage - 1) * pageSize + index + 1;
+                {paginatedItems.map((item, index) => {
+                  const absoluteIndex =
+                    (currentPage - 1) * pageSize + index + 1;
                   const topicOrUnit = item.topic_title || item.unit_title;
                   return (
                     <tr
@@ -461,7 +593,7 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                         {absoluteIndex}
                       </td>
 
-                      {/* Assignment Name */}
+                      {/* Name */}
                       <td className='py-4 px-4'>
                         <div className='min-w-0 max-w-xs sm:max-w-sm'>
                           <p
@@ -471,21 +603,26 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                             {item.title}
                           </p>
                           {topicOrUnit && (
-                            <p className='text-[11px] text-slate-400 mt-0.5 truncate' title={topicOrUnit}>
+                            <p
+                              className='text-[11px] text-slate-400 mt-0.5 truncate'
+                              title={topicOrUnit}
+                            >
                               Topic: {topicOrUnit}
                             </p>
                           )}
                         </div>
                       </td>
 
-                      {/* Type */}
+                      {/* Type Badge */}
                       <td className='py-4 px-4 whitespace-nowrap'>
                         <Badge
                           variant='secondary'
                           className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                            item.type === 'CURRICULUM'
-                              ? 'bg-indigo-50 text-indigo-700 border-none'
-                              : 'bg-purple-50 text-purple-700 border-none'
+                            item.type === 'CAPSTONE' || item.type === 'PROJECT'
+                              ? 'bg-amber-50 text-amber-700 border-none'
+                              : item.type === 'CURRICULUM'
+                                ? 'bg-indigo-50 text-indigo-700 border-none'
+                                : 'bg-purple-50 text-purple-700 border-none'
                           }`}
                         >
                           {item.type}
@@ -501,7 +638,10 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                           </span>
                         </div>
                         {topicOrUnit && (
-                          <span className='text-[10px] text-slate-400 truncate block mt-0.5' title={topicOrUnit}>
+                          <span
+                            className='text-[10px] text-slate-400 truncate block mt-0.5'
+                            title={topicOrUnit}
+                          >
                             {topicOrUnit}
                           </span>
                         )}
@@ -569,7 +709,7 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
 
           {/* Mobile Card View */}
           <div className='md:hidden divide-y divide-slate-100'>
-            {paginatedAssignments.map((item) => {
+            {paginatedItems.map((item) => {
               const topicOrUnit = item.topic_title || item.unit_title;
               return (
                 <div key={item.id} className='p-4 space-y-3'>
@@ -579,9 +719,11 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                         <Badge
                           variant='secondary'
                           className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${
-                            item.type === 'CURRICULUM'
-                              ? 'bg-indigo-50 text-indigo-700'
-                              : 'bg-purple-50 text-purple-700'
+                            item.type === 'CAPSTONE' || item.type === 'PROJECT'
+                              ? 'bg-amber-50 text-amber-700'
+                              : item.type === 'CURRICULUM'
+                                ? 'bg-indigo-50 text-indigo-700'
+                                : 'bg-purple-50 text-purple-700'
                           }`}
                         >
                           {item.type}
@@ -602,21 +744,15 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                     <div className='shrink-0'>{getStatusBadge(item.status)}</div>
                   </div>
 
-                  <div className='flex items-center justify-between text-xs text-slate-500 pt-1'>
-                    <div>
+                  <div className='flex items-center justify-between pt-1 border-t border-slate-50'>
+                    <div className='flex items-center gap-1 text-xs'>
+                      <span className='text-slate-400 font-medium'>Score:</span>
                       {item.status === 'evaluated' && item.marks !== null ? (
                         <span className='font-bold text-slate-900'>
-                          Score: {item.marks} / {item.max_score} pts
-                        </span>
-                      ) : item.due_date ? (
-                        <span className='flex items-center gap-1 text-[11px] text-slate-400'>
-                          <Calendar className='w-3 h-3' />
-                          Due: {new Date(item.due_date).toLocaleDateString()}
+                          {item.marks} / {item.max_score}
                         </span>
                       ) : (
-                        <span className='text-[11px] text-slate-400'>
-                          Max Score: {item.max_score} pts
-                        </span>
+                        <span className='text-slate-300 font-medium'>—</span>
                       )}
                     </div>
 
@@ -655,12 +791,16 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
           </div>
 
           {/* Pagination Controls Footer Bar */}
-          {filteredAssignments.length > 0 && (
+          {filteredItems.length > 0 && (
             <div className='px-4 sm:px-6 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50'>
               <div className='text-xs text-slate-500 font-medium'>
-                Showing <span className='font-bold text-slate-800'>{startRecord}</span> to{' '}
+                Showing{' '}
+                <span className='font-bold text-slate-800'>{startRecord}</span> to{' '}
                 <span className='font-bold text-slate-800'>{endRecord}</span> of{' '}
-                <span className='font-bold text-slate-800'>{filteredAssignments.length}</span> assignments
+                <span className='font-bold text-slate-800'>
+                  {filteredItems.length}
+                </span>{' '}
+                {activeMainTab}
               </div>
 
               {totalPages > 1 && (
@@ -676,28 +816,32 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
                   </Button>
 
                   <div className='flex items-center gap-1'>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-                      <button
-                        type='button'
-                        key={pageNum}
-                        onClick={() => setCurrentPage(pageNum)}
-                        className={cn(
-                          'w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer',
-                          currentPage === pageNum
-                            ? 'bg-indigo-600 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-200/70',
-                        )}
-                      >
-                        {pageNum}
-                      </button>
-                    ))}
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                      (pageNum) => (
+                        <button
+                          type='button'
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={cn(
+                            'w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                            currentPage === pageNum
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:bg-slate-200/70',
+                          )}
+                        >
+                          {pageNum}
+                        </button>
+                      ),
+                    )}
                   </div>
 
                   <Button
                     variant='outline'
                     size='sm'
                     disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
                     className='h-8 px-2.5 rounded-lg text-xs font-semibold text-slate-600 border-slate-200 hover:bg-white disabled:opacity-40 shadow-2xs cursor-pointer'
                   >
                     Next <ChevronRight className='w-4 h-4 ml-0.5' />
@@ -713,7 +857,7 @@ export const StudentAssignmentsTable: React.FC<Props> = ({
       <StudentAssignmentFeedbackModal
         isOpen={feedbackModalOpen}
         onClose={() => setFeedbackModalOpen(false)}
-        assignment={selectedAssignment}
+        assignment={selectedItem}
       />
     </div>
   );
