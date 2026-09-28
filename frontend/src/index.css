@@ -151,10 +151,10 @@ body {
 /* Smooth Cosmic Floats & Flowing Energy Streams */
 @keyframes cosmic-float {
   0%, 100% {
-    transform: translateY(0px) rotate(0deg);
+    transform: translateY(0px);
   }
   50% {
-    transform: translateY(-5px) rotate(1.5deg);
+    transform: translateY(-6px);
   }
 }
 

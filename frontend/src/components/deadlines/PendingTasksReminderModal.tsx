@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Logo from '@/components/common/Logo';
 import { LearningPathwayDiagram } from './LearningPathwayDiagram';
+import { IndigoHexMascot } from '@/components/common/Mascots';
 
 export interface StudentJourney {
   subject_name: string;
@@ -29,6 +30,7 @@ export interface StudentJourney {
   current_unit_topic?: string;
   current_unit_order?: number;
   current_unit_url: string;
+  current_unit_xp?: number;
 }
 
 export interface ActiveMilestoneItem {
@@ -215,46 +217,52 @@ export const PendingTasksReminderModal: React.FC<PendingTasksReminderModalProps>
             </button>
           </div>
 
-          {/* Greeting & XP */}
-          <div className="space-y-1.5">
-            <h2
-              id="milestone-modal-title"
-              className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight flex flex-wrap items-center gap-1.5"
-            >
-              <span>👋 Great progress,</span>
-              {student_first_name && (
-                <span className="text-slate-900">{student_first_name}!</span>
-              )}
-            </h2>
+          {/* Greeting & Mascot (Figma Frame 1) */}
+          <div className="flex items-start gap-3 sm:gap-4 pt-0.5">
+            <div className="p-1 sm:p-1.5 rounded-2xl bg-indigo-50/70 border border-indigo-100/80 shrink-0 mt-0.5 shadow-2xs">
+              <IndigoHexMascot size={44} showBase={false} animate={false} />
+            </div>
 
-            {journey?.completed_unit_xp != null && journey.completed_unit_xp > 0 && (
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-amber-300 bg-linear-to-r from-amber-50 to-orange-50 text-amber-800 text-xs font-bold shadow-2xs">
-                  <span className="text-amber-500">⭐</span>
-                  <span className="font-extrabold text-amber-700">+{journey.completed_unit_xp} XP</span>
-                  <span className="text-amber-600 font-medium">Unlocked</span>
-                </div>
+            <div className="space-y-1 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2
+                  id="milestone-modal-title"
+                  className="text-lg sm:text-xl font-black text-slate-900 tracking-tight leading-tight"
+                >
+                  {student_first_name ? `Welcome back, ${student_first_name}!` : "Welcome back!"}
+                </h2>
+
+                {journey?.completed_unit_xp != null && journey.completed_unit_xp > 0 && (
+                  <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-amber-300 bg-linear-to-r from-amber-50 to-orange-50 text-amber-800 text-[11px] font-bold shadow-2xs">
+                    <span className="text-amber-500">⭐</span>
+                    <span className="font-extrabold text-amber-700">+{journey.completed_unit_xp} XP</span>
+                  </div>
+                )}
               </div>
-            )}
 
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed pt-1">
-              {journey?.completed_unit_title ? (
-                <>
-                  You completed the reading lessons in{' '}
-                  <strong className="text-slate-900 font-bold">
-                    {journey.completed_unit_title}
-                  </strong>
-                  .{' '}
-                  {milestones.length > 0
-                    ? 'Complete your milestone tasks to lock in your learnings and unlock your full completion XP! 🚀'
-                    : 'All your milestone tasks are completed! Ready to continue your journey into the next unit? 🚀'}
-                </>
-              ) : (
-                <>
-                  You completed your recent reading lessons. Complete your milestone tasks to lock in your learnings and unlock your full completion XP! 🚀
-                </>
-              )}
-            </p>
+              <p className="text-[11px] sm:text-xs font-semibold text-indigo-600 uppercase tracking-wide">
+                Let's Check Your Progress
+              </p>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {journey?.completed_unit_title ? (
+                  <>
+                    You completed lessons in{' '}
+                    <strong className="text-slate-900 font-bold">
+                      {journey.completed_unit_title}
+                    </strong>
+                    .{' '}
+                    {milestones.length > 0
+                      ? 'Complete your milestones to lock in your learnings and unlock your full completion XP!'
+                      : 'All milestone tasks completed! Ready to continue into the next unit? 🚀'}
+                  </>
+                ) : (
+                  <>
+                    Complete your milestone tasks to lock in your learnings and unlock your full completion XP! 🚀
+                  </>
+                )}
+              </p>
+            </div>
           </div>
 
 

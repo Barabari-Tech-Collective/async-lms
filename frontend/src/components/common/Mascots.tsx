@@ -4,50 +4,54 @@ interface MascotProps {
   className?: string;
   size?: number; // width in pixels, default 56
   animate?: boolean;
+  showBase?: boolean; // whether to show the glowing halo / pedestal underneath
 }
 
 /**
- * GoldenHexMascot - Completed Stage Companion
- * Pixel-perfect recreation from Figma:
- * - 3D Golden-Yellow Hexagon Prism
- * - Cute Navy Dot Eyes & Cheerful Smile
- * - Floating Ethereal White Glowing Halo Ring at base
+ * GoldenHexMascot - Completed Stage Companion (Figma Exact)
+ * - Golden-yellow hexagon prism with soft warm aura
+ * - Navy oval dot eyes & cheerful curved smile
+ * - Luminous white glowing halo ring at base
  */
 export const GoldenHexMascot: React.FC<MascotProps> = ({
   className = '',
   size = 56,
   animate = true,
+  showBase = true,
 }) => {
   return (
     <div
       className={`relative flex flex-col items-center justify-center shrink-0 ${className}`}
       style={{
         width: size,
-        height: size * 1.15,
-        animation: animate ? 'cosmic-float 3.2s ease-in-out infinite' : undefined,
+        height: showBase ? size * 1.25 : size,
+        animation: animate ? 'cosmic-float 3.5s ease-in-out infinite' : undefined,
       }}
     >
       <svg
-        viewBox="0 0 100 115"
-        className="w-full h-full overflow-visible drop-shadow-md"
+        viewBox={showBase ? '0 0 100 120' : '0 0 100 100'}
+        className="w-full h-full overflow-visible"
       >
         <defs>
-          {/* Golden Yellow 3D Gradient */}
-          <linearGradient id="goldMascotGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#FFD84D" />
-            <stop offset="45%" stopColor="#FFBA1A" />
+          {/* Golden Yellow Hexagon Gradient */}
+          <linearGradient id="figmaGoldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#FFC837" />
+            <stop offset="50%" stopColor="#FFBA1A" />
             <stop offset="100%" stopColor="#F59E0B" />
           </linearGradient>
 
-          {/* Subtle Top-Vertex Light Sheen */}
-          <linearGradient id="goldSheenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
-            <stop offset="60%" stopColor="rgba(255,255,255,0)" />
-          </linearGradient>
+          {/* Yellow Mascot Outer Glow */}
+          <filter id="goldAuraGlow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="4.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
 
-          {/* White Glow Filter for the Base Halo Ring */}
-          <filter id="haloGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3.5" result="blur" />
+          {/* White Glow for Base Halo Ring */}
+          <filter id="haloRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
@@ -55,70 +59,72 @@ export const GoldenHexMascot: React.FC<MascotProps> = ({
           </filter>
         </defs>
 
-        {/* ─── Glowing Base Halo / Portal Ring ─── */}
-        <g transform="translate(0, 15)">
-          {/* Diffuse Outer Glow */}
-          <ellipse
-            cx="50"
-            cy="84"
-            rx="36"
-            ry="11"
-            fill="rgba(255, 255, 255, 0.28)"
-            filter="url(#haloGlow)"
-          />
-          {/* Inner Light Cloud */}
-          <ellipse
-            cx="50"
-            cy="84"
-            rx="30"
-            ry="8"
-            fill="rgba(255, 255, 255, 0.45)"
-            filter="url(#haloGlow)"
-          />
-          {/* Sharp Bright Halo Ring */}
-          <ellipse
-            cx="50"
-            cy="84"
-            rx="32"
-            ry="9"
-            fill="none"
-            stroke="#FFFFFF"
-            strokeWidth="3.2"
-            filter="url(#haloGlow)"
-          />
-        </g>
+        {/* ─── Glowing Base Halo Ring (under mascot) ─── */}
+        {showBase && (
+          <g>
+            {/* Soft Ambient Light Disk */}
+            <ellipse
+              cx="50"
+              cy="96"
+              rx="36"
+              ry="10"
+              fill="rgba(255, 255, 255, 0.18)"
+              filter="url(#haloRingGlow)"
+            />
+            {/* Luminous Core Cloud */}
+            <ellipse
+              cx="50"
+              cy="96"
+              rx="28"
+              ry="7.5"
+              fill="rgba(255, 255, 255, 0.4)"
+              filter="url(#haloRingGlow)"
+            />
+            {/* Crisp Glowing White Ring */}
+            <ellipse
+              cx="50"
+              cy="96"
+              rx="32"
+              ry="8.5"
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth="2.8"
+              filter="url(#haloRingGlow)"
+            />
+          </g>
+        )}
 
         {/* ─── Golden Hexagon Body ─── */}
-        <g>
-          {/* Main Hexagon with smoothly rounded vertices */}
+        <g filter="url(#goldAuraGlow)">
+          {/* Main Regular Hexagon */}
           <polygon
-            points="50,6 88,27 88,71 50,92 12,71 12,27"
-            fill="url(#goldMascotGrad)"
-            stroke="url(#goldMascotGrad)"
-            strokeWidth="6"
+            points="50,8 86,28 86,72 50,92 14,72 14,28"
+            fill="url(#figmaGoldGrad)"
+            stroke="#FFB814"
+            strokeWidth="5"
             strokeLinejoin="round"
           />
 
-          {/* Top-Edge Highlight Rim */}
+          {/* Top Subtle Vertex Highlight */}
           <path
-            d="M 17 28 L 50 9 L 83 28"
+            d="M 19 29 L 50 11 L 81 29"
             fill="none"
-            stroke="rgba(255, 255, 255, 0.45)"
+            stroke="rgba(255, 255, 255, 0.5)"
             strokeWidth="2.5"
             strokeLinecap="round"
           />
 
-          {/* ─── Cute Face Features (Figma exact) ─── */}
+          {/* ─── Face: Dark Navy Oval Eyes & Curved Smile ─── */}
           {/* Left Eye */}
-          <circle cx="36" cy="46" r="3.4" fill="#0F172A" />
+          <ellipse cx="38" cy="47" rx="3.2" ry="4.2" fill="#1B357F" />
 
           {/* Right Eye */}
-          <circle cx="64" cy="46" r="3.4" fill="#0F172A" />
+          <ellipse cx="62" cy="47" rx="3.2" ry="4.2" fill="#1B357F" />
 
           {/* Cheerful Smile */}
           <path
-            d="M 37 57 Q 50 68 63 57"
-            stroke="#0F172A"
+            d="M 39 57 Q 50 67 61 57"
+            stroke="#1B357F"
             strokeWidth="3.4"
             strokeLinecap="round"
             fill="none"
@@ -130,56 +136,61 @@ export const GoldenHexMascot: React.FC<MascotProps> = ({
 };
 
 /**
- * IndigoHexMascot - Next Up Stage Companion
- * Pixel-perfect recreation from Figma:
- * - Electric Indigo/Periwinkle Hexagon
- * - Horizontal Capsule Eyes ("- -") & Sweet White Smile
- * - Dual Glowing Stepping-Stone Pedestals (Blue-Pink disc + Magenta Neon-Rim disc)
+ * IndigoHexMascot - Next Up Stage Companion (Figma Exact)
+ * - Slate-indigo/periwinkle hexagon
+ * - Horizontal rounded capsule eyes & white smile
+ * - Dual floating stepping-stone pedestals (blurred gradient + glowing rim)
  */
 export const IndigoHexMascot: React.FC<MascotProps> = ({
   className = '',
   size = 56,
   animate = true,
+  showBase = true,
 }) => {
   return (
     <div
       className={`relative flex flex-col items-center justify-center shrink-0 ${className}`}
       style={{
         width: size,
-        height: size * 1.15,
-        animation: animate ? 'cosmic-float 3.2s ease-in-out infinite' : undefined,
-        animationDelay: '600ms',
+        height: showBase ? size * 1.25 : size,
+        animation: animate ? 'cosmic-float 3.5s ease-in-out infinite' : undefined,
+        animationDelay: '700ms',
       }}
     >
       <svg
-        viewBox="0 0 120 120"
-        className="w-full h-full overflow-visible drop-shadow-md"
+        viewBox={showBase ? '0 0 100 120' : '0 0 100 100'}
+        className="w-full h-full overflow-visible"
       >
         <defs>
-          {/* Indigo/Periwinkle Hexagon Gradient */}
-          <linearGradient id="indigoMascotGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#707EEA" />
-            <stop offset="50%" stopColor="#5E6DE2" />
-            <stop offset="100%" stopColor="#4E5CD4" />
+          {/* Indigo/Periwinkle Solid/Gradient */}
+          <linearGradient id="figmaIndigoGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#5B6DC9" />
+            <stop offset="50%" stopColor="#5061B4" />
+            <stop offset="100%" stopColor="#4554A4" />
           </linearGradient>
 
-          {/* Left Pedestal: Blue-Pink Gradient */}
-          <linearGradient id="pedestalBluePink" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#60A5FA" />
-            <stop offset="50%" stopColor="#A855F7" />
-            <stop offset="100%" stopColor="#EC4899" />
+          {/* Left Pedestal: Blue-to-Magenta Blurred Gradient */}
+          <linearGradient id="leftPedestalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#5D7CE2" />
+            <stop offset="50%" stopColor="#7E47B0" />
+            <stop offset="100%" stopColor="#98388B" />
           </linearGradient>
 
-          {/* Right Pedestal: Dark Magenta to Purple */}
-          <linearGradient id="pedestalMagenta" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#831843" />
-            <stop offset="60%" stopColor="#581C87" />
-            <stop offset="100%" stopColor="#3B0764" />
+          {/* Right Pedestal: Dark Indigo to Deep Magenta */}
+          <linearGradient id="rightPedestalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#45186A" />
+            <stop offset="60%" stopColor="#6C1E62" />
+            <stop offset="100%" stopColor="#8C2068" />
           </linearGradient>
 
-          {/* Neon Rim Glow Filter */}
-          <filter id="neonPinkGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="2.5" result="blur" />
+          {/* Pedestal Blur Filter */}
+          <filter id="pedestalBlur" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.5" />
+          </filter>
+
+          {/* Neon Ring Glow Filter */}
+          <filter id="neonRingGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
@@ -187,67 +198,71 @@ export const IndigoHexMascot: React.FC<MascotProps> = ({
           </filter>
         </defs>
 
-        {/* ─── Dual Floating Stepping-Stone Pedestals (Figma exact) ─── */}
-        <g transform="translate(10, 16)">
-          {/* Platform 1: Glowing Blue-to-Pink Stepping Stone (Bottom-Left) */}
-          <ellipse
-            cx="32"
-            cy="78"
-            rx="20"
-            ry="7.5"
-            fill="url(#pedestalBluePink)"
-            className="opacity-90"
-            style={{ filter: 'drop-shadow(0 0 8px rgba(168, 85, 247, 0.45))' }}
-          />
+        {/* ─── Dual Floating Stepping-Stone Pedestals (Symmetrically balanced around x=50) ─── */}
+        {showBase && (
+          <g>
+            {/* Pedestal 1 (Left): Blurred Blue-Pink Gradient Oval (Ellipse 4) */}
+            <ellipse
+              cx="35"
+              cy="94"
+              rx="20"
+              ry="8.5"
+              fill="url(#leftPedestalGrad)"
+              filter="url(#pedestalBlur)"
+              opacity="0.95"
+            />
 
-          {/* Platform 2: Tilted Deep-Magenta Stepping Stone with Glowing Neon Rim (Bottom-Right) */}
-          <g transform="translate(56, 70) rotate(-4)">
-            <ellipse
-              cx="0"
-              cy="0"
-              rx="23"
-              ry="8.5"
-              fill="url(#pedestalMagenta)"
-            />
-            {/* Outer Glowing Neon-Pink/White Rim */}
-            <ellipse
-              cx="0"
-              cy="0"
-              rx="23"
-              ry="8.5"
-              fill="none"
-              stroke="#F472B6"
-              strokeWidth="2.2"
-              filter="url(#neonPinkGlow)"
-            />
-            <ellipse
-              cx="0"
-              cy="0"
-              rx="22.5"
-              ry="8"
-              fill="none"
-              stroke="#FFFFFF"
-              strokeWidth="1.2"
-              className="opacity-90"
-            />
+            {/* Pedestal 2 (Right): Dark Magenta Oval with Glowing Ring (Ellipse 7) */}
+            <g transform="translate(65, 94)">
+              <ellipse
+                cx="0"
+                cy="0"
+                rx="21"
+                ry="8.5"
+                fill="url(#rightPedestalGrad)"
+              />
+              {/* Glowing Outer Pink Halo */}
+              <ellipse
+                cx="0"
+                cy="0"
+                rx="21"
+                ry="8.5"
+                fill="none"
+                stroke="#F472B6"
+                strokeWidth="2"
+                filter="url(#neonRingGlow)"
+                opacity="0.8"
+              />
+              {/* Crisp Inner White Ring */}
+              <ellipse
+                cx="0"
+                cy="0"
+                rx="20.5"
+                ry="8"
+                fill="none"
+                stroke="#FFFFFF"
+                strokeWidth="1.2"
+                opacity="0.95"
+              />
+            </g>
           </g>
-        </g>
+        )}
 
-        {/* ─── Indigo Hexagon Body ─── */}
-        <g transform="translate(10, 0)">
-          {/* Main Hexagon with smoothly rounded vertices and crisp outline */}
+        {/* ─── Indigo Hexagon Body (Symmetrically centered at x=50) ─── */}
+        <g>
+          {/* Main Regular Hexagon */}
           <polygon
-            points="50,6 88,27 88,71 50,92 12,71 12,27"
-            fill="url(#indigoMascotGrad)"
-            stroke="rgba(255, 255, 255, 0.45)"
+            points="50,8 86,28 86,72 50,92 14,72 14,28"
+            fill="url(#figmaIndigoGrad)"
+            stroke="rgba(255, 255, 255, 0.3)"
             strokeWidth="3.5"
             strokeLinejoin="round"
           />
 
-          {/* ─── Face Features (Figma exact) ─── */}
-          {/* Left Eye: Horizontal White Pill/Capsule */}
+          {/* ─── Face: Horizontal Capsule Eyes & Friendly White Smile ─── */}
+          {/* Left Eye: Horizontal White Capsule */}
           <rect
-            x="30"
+            x="32"
             y="43"
             width="12"
             height="5.5"
@@ -255,9 +270,9 @@ export const IndigoHexMascot: React.FC<MascotProps> = ({
             fill="#FFFFFF"
           />
 
-          {/* Right Eye: Horizontal White Pill/Capsule */}
+          {/* Right Eye: Horizontal White Capsule */}
           <rect
-            x="58"
+            x="56"
             y="43"
             width="12"
             height="5.5"
@@ -267,9 +282,9 @@ export const IndigoHexMascot: React.FC<MascotProps> = ({
 
           {/* Sweet White Smile */}
           <path
-            d="M 39 57 Q 50 66 61 57"
+            d="M 39 57 Q 50 67 61 57"
             stroke="#FFFFFF"
-            strokeWidth="3.2"
+            strokeWidth="3.5"
             strokeLinecap="round"
             fill="none"
           />
@@ -278,3 +293,5 @@ export const IndigoHexMascot: React.FC<MascotProps> = ({
     </div>
   );
 };
+
+
