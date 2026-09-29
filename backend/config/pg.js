@@ -1,16 +1,45 @@
 const { Pool } = require('pg');
-const pool = new Pool({
-  host: (process.env.PGHOST || '').trim(),
-  database: (process.env.PGDATABASE || '').trim(),
-  user: (process.env.PGUSER || '').trim(),
-  password: (process.env.PGPASSWORD || '').trim(),
-  port: process.env.PGPORT,
-  ssl: { rejectUnauthorized: false },
-  family: 4,
-  connectionTimeoutMillis: 30000, // Increased to 30s so sleeping Neon DBs have time to wake up!
-  idleTimeoutMillis: 10000, // Close idle connections after 10s to prevent Neon pooler disconnects
-  keepAlive: true,
-});
+
+let dbHost = (process.env.PGHOST || '').trim();
+// Use Neon's connection pooler endpoint if using Neon to prevent cold-start ETIMEDOUT
+if (dbHost.includes('.neon.tech') && !dbHost.includes('-pooler')) {
+  const parts = dbHost.split('.');
+  parts[0] = parts[0] + '-pooler';
+  dbHost = parts.join('.');
+}
+
+let connectionString = (process.env.DATABASE_URL || '').trim();
+if (connectionString && connectionString.includes('.neon.tech') && !connectionString.includes('-pooler')) {
+  connectionString = connectionString.replace(/(@[a-zA-Z0-9_-]+)(\.c-[^/:]+)/, '$1-pooler$2');
+}
+
+const poolConfig = connectionString
+  ? {
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
+      keepAlive: true,
+    }
+  : {
+      host: dbHost,
+      database: (process.env.PGDATABASE || '').trim(),
+      user: (process.env.PGUSER || '').trim(),
+      password: (process.env.PGPASSWORD || '').trim(),
+      port: process.env.PGPORT || 5432,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000, // Allow 60s for Neon cold starts / wake-ups
+      idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
+      keepAlive: true,
+    };
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
@@ -51,6 +80,30 @@ pool.on('error', (err, client) => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_active_unique 
       ON users(email) 
       WHERE deleted_at IS NULL;
+    `);
+
+    // 30-Day College Recycle Bin Migration
+    await client.query(`
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_colleges_deleted_at ON colleges(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_colleges_is_deleted ON colleges(is_deleted);
+
+      -- Drop unconditional unique constraints
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_short_code_key;
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_name_key;
+
+      -- Create partial unique indexes active only for non-deleted colleges
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_name_active_unique 
+      ON colleges(LOWER(TRIM(name))) 
+      WHERE deleted_at IS NULL AND is_deleted = false;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_short_code_active_unique 
+      ON colleges(LOWER(TRIM(short_code))) 
+      WHERE short_code IS NOT NULL AND deleted_at IS NULL AND is_deleted = false;
+
+      -- Backfill legacy soft-deleted rows
+      UPDATE colleges SET deleted_at = NOW() WHERE is_deleted = true AND deleted_at IS NULL;
     `);
 
     // Add verification and token_version columns to users, and create otp_codes table
@@ -587,6 +640,29 @@ pool.on('error', (err, client) => {
         WHEN others THEN
           RAISE NOTICE '[Migration] Skipping evaluation_results constraint: %', SQLERRM;
       END $$;
+    `);
+
+    // ── Capstone Projects: Evaluation attributes & Central Evaluator support ──
+    await client.query(`
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS evaluator_type TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_cases JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS rubric JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_score INTEGER DEFAULT 100;
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'evaluations') THEN
+          ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS score NUMERIC;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS rubric_breakdown JSONB;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS execution_logs TEXT;
     `);
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);

@@ -76,7 +76,7 @@ router.get(
   isAdminOrFacilitator,
   manageAssignments,
 );
-router.get('/:id', verifyToken, isStudent, getCollegeAssignmentById);
+router.get('/:id', verifyToken, getCollegeAssignmentById);
 router.post(
   '/:id/submit',
   verifyToken,

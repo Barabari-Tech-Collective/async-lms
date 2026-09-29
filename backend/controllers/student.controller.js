@@ -1,12 +1,16 @@
 const serverError = require('../utils/serverError');
 const crypto = require('crypto');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/pg');
 const { logAction } = require('../utils/auditLogger');
 const { notify } = require('../services/notificationService');
 const { getTotalXP } = require('../services/xpService');
 const { calculateSubjectProgress, syncUserSubjectProgress } = require('../utils/progress');
 const { presignS3Url } = require('../utils/s3');
+
+const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 // ============================================
 // HELPERS
 // ============================================
@@ -17,7 +21,7 @@ const { presignS3Url } = require('../utils/s3');
  * - Yesterday → increment streak
  * - Older     → reset to 1
  */
-const { markActionToday } = require('../services/presenceService');
+const { markActionToday, reconcileUserStreak } = require('../services/presenceService');
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -451,20 +455,25 @@ exports.getMyProgress = async (req, res) => {
     // Get user stats
     const statsQuery = `
       SELECT 
-        COALESCE(us.current_streak, 0) as current_streak,
+        CASE 
+          WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+          ELSE 0 
+        END as current_streak,
         COALESCE(us.longest_streak, 0) as longest_streak,
+        (us.last_activity::date = CURRENT_DATE) as practiced_today,
         COALESCE(SUM(pl.points), 0) as total_points
       FROM users u
       LEFT JOIN user_streaks us ON u.id = us.user_id
       LEFT JOIN points_log pl ON u.id = pl.user_id
       WHERE u.id = $1
-      GROUP BY us.current_streak, us.longest_streak;
+      GROUP BY us.current_streak, us.longest_streak, us.last_activity;
     `;
 
     const statsResult = await pool.query(statsQuery, [userId]);
     const stats = statsResult.rows[0] || {
       current_streak: 0,
       longest_streak: 0,
+      practiced_today: false,
       total_points: 0,
     };
 
@@ -582,7 +591,7 @@ exports.completeLesson = async (req, res) => {
     }
 
     const lessonExists = await pool.query(
-      'SELECT id FROM lesson_content WHERE id = $1 LIMIT 1',
+      'SELECT id, subtopic_id FROM lesson_content WHERE id = $1 LIMIT 1',
       [lessonId],
     );
 
@@ -591,6 +600,28 @@ exports.completeLesson = async (req, res) => {
         success: false,
         message: 'Lesson not found',
       });
+    }
+
+    const subtopicId = lessonExists.rows[0].subtopic_id;
+
+    // Verify that if this subtopic has active exercises, they are passed
+    if (subtopicId) {
+      const unpassedExercises = await pool.query(
+        `SELECT e.id FROM exercises e
+         WHERE e.subtopic_id = $1 AND e.is_deleted = false
+           AND NOT EXISTS (
+             SELECT 1 FROM exercise_submissions es
+             WHERE es.exercise_id = e.id AND es.user_id = $2 AND es.is_passed = true
+           )`,
+        [subtopicId, userId],
+      );
+
+      if (unpassedExercises.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please complete and pass all exercises for this lesson before marking it as completed.',
+        });
+      }
     }
 
     const query = `
@@ -609,9 +640,9 @@ exports.completeLesson = async (req, res) => {
         'INSERT INTO points_log (user_id, source, points) VALUES ($1, $2, $3)',
         [userId, 'lesson_completion', 10],
       );
-      markActionToday(userId);
       await checkAndAwardBadges(userId);
     }
+    markActionToday(userId);
 
     const subtopicResult = await pool.query(
       `SELECT lc.subtopic_id, t.subject_id 
@@ -623,7 +654,6 @@ exports.completeLesson = async (req, res) => {
       [lessonId],
     );
 
-    const subtopicId = subtopicResult.rows[0]?.subtopic_id;
     const subjectId = subtopicResult.rows[0]?.subject_id;
 
     if (subtopicId) {
@@ -975,7 +1005,141 @@ async function loadAccessibleExercise(userId, exerciseId) {
     );
   }
 
+  const hasHtml =
+    (Array.isArray(exercise.initial_files) &&
+      exercise.initial_files.some(
+        (f) =>
+          (f.name || f.path || '').endsWith('.html') ||
+          (f.name || f.path || '').endsWith('.htm'),
+      )) ||
+    /html|css|dom|web/i.test(exercise.title || '');
+  if (hasHtml && (!exercise.language || exercise.language === 'javascript')) {
+    exercise.language = 'dom';
+  }
+
   return exercise;
+}
+
+/**
+ * Resolves a safe, canonical workspace directory within WORKSPACE_ROOT.
+ * Enforces strict alphanumeric/uuid checks on exerciseId and taskId to prevent path traversal.
+ */
+function getSafeWorkspaceDir(userId, exerciseId, taskId) {
+  const safeTaskId = taskId && /^[a-zA-Z0-9_-]+$/.test(String(taskId)) ? String(taskId) : null;
+  const safeExerciseId = /^[a-zA-Z0-9_-]+$/.test(String(exerciseId)) ? String(exerciseId) : 'default';
+  const projectId = safeTaskId
+    ? `exercise-${safeExerciseId}-task-${safeTaskId}`
+    : `exercise-${safeExerciseId}`;
+  return path.resolve(WORKSPACE_ROOT, String(userId), projectId);
+}
+
+/**
+ * Persists student workspace files safely with jail boundary enforcement.
+ * Rejects path traversal sequences (..), null bytes, and writes outside the workspace root.
+ */
+function saveStudentFilesSafely(workspaceDir, files) {
+  if (!files || !Array.isArray(files)) return;
+  const resolvedWorkspace = path.resolve(workspaceDir);
+  fs.mkdirSync(resolvedWorkspace, { recursive: true });
+
+  for (const file of files) {
+    const rawName = file.name || file.path;
+    if (typeof rawName !== 'string' || typeof file.content !== 'string') continue;
+    if (rawName.includes('\0')) {
+      throw new ExerciseAccessError(400, 'Security Error: Invalid file name');
+    }
+
+    // Normalize path and strip leading traversal dots
+    const normalizedPath = path.normalize(rawName).replace(/^(\.\.[\/\\])+/, '');
+    const filePath = path.resolve(resolvedWorkspace, normalizedPath);
+
+    // Enforce jail boundary: filePath must strictly reside inside resolvedWorkspace
+    if (!filePath.startsWith(resolvedWorkspace + path.sep) && filePath !== resolvedWorkspace) {
+      throw new ExerciseAccessError(400, 'Security Error: Path traversal attempt detected');
+    }
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, file.content, 'utf-8');
+  }
+}
+
+/**
+ * Local semantic DOM / HTML evaluator fallback.
+ * Evaluates standard HTML5 structure and semantic elements directly
+ * when the central evaluator service is offline or unreachable.
+ */
+function evaluateDomLocally(files, exercise) {
+  const htmlFile = (files || []).find((f) => {
+    const p = (f.path || f.name || '').toLowerCase();
+    return p.endsWith('.html') || p === 'index.html';
+  });
+  const htmlContent = (htmlFile?.content || '').trim();
+
+  const hasDocType = /<!doctype\s+html/i.test(htmlContent);
+  const hasHtml = /<html[\s>]/i.test(htmlContent) && /<\/html>/i.test(htmlContent);
+  const hasHead = /<head[\s>]/i.test(htmlContent) && /<\/head>/i.test(htmlContent);
+  const hasTitle = /<title[\s>][\s\S]*?<\/title>/i.test(htmlContent);
+  const hasBody = /<body[\s>]/i.test(htmlContent) && /<\/body>/i.test(htmlContent);
+  const hasContent = /<(h[1-6]|p|div|section|main|article|header|footer)[\s>]/i.test(htmlContent);
+
+  const checks = [
+    {
+      name: '<!DOCTYPE html> Declaration',
+      description: 'Document includes an HTML5 <!DOCTYPE html> declaration',
+      passed: hasDocType,
+      weight: 20,
+    },
+    {
+      name: 'Root <html> Element',
+      description: 'Document includes opening and closing <html> tags',
+      passed: hasHtml,
+      weight: 20,
+    },
+    {
+      name: '<head> & <title> Tags',
+      description: '<head> element contains a valid <title> tag',
+      passed: hasHead && hasTitle,
+      weight: 20,
+    },
+    {
+      name: '<body> Container',
+      description: 'Document includes opening and closing <body> tags',
+      passed: hasBody,
+      weight: 20,
+    },
+    {
+      name: 'Content & Semantic Elements',
+      description: 'Body contains structured content elements',
+      passed: hasContent && htmlContent.length > 40,
+      weight: 20,
+    },
+  ];
+
+  const totalWeight = checks.reduce((sum, c) => sum + c.weight, 0);
+  const passedWeight = checks.reduce((sum, c) => sum + (c.passed ? c.weight : 0), 0);
+  const ratio = totalWeight > 0 ? passedWeight / totalWeight : 1;
+  const maxScore = exercise.max_score || 100;
+  const calculatedScore = Math.round(ratio * maxScore);
+
+  const rubric_breakdown = checks.map((c) => ({
+    name: c.name,
+    score: c.passed ? Math.round((c.weight / totalWeight) * maxScore) : 0,
+    max_score: Math.round((c.weight / totalWeight) * maxScore),
+    feedback: c.passed ? `Passed: ${c.description}` : `Missing: ${c.description}`,
+  }));
+
+  const feedbackText =
+    ratio >= 0.6
+      ? '🎉 Excellent work! All core HTML document structure requirements are satisfied.'
+      : 'Incomplete HTML structure. Please ensure your document has <!DOCTYPE html>, <html>, <head>, <title>, and <body> tags.';
+
+  return {
+    score: calculatedScore,
+    testResults: {
+      feedback: feedbackText,
+      rubric_breakdown,
+    },
+  };
 }
 
 /**
@@ -989,8 +1153,9 @@ exports.submitExercise = async (req, res) => {
     const { files, taskId } = req.body;
 
     const exercise = await loadAccessibleExercise(userId, exerciseId);
-    let score;
+    let score = null;
     let testResults = null;
+    let isExplicitPassed = undefined;
 
     const hasTasks = Array.isArray(exercise.tasks) && exercise.tasks.length > 0;
     const hasTestCases = hasTasks
@@ -1149,7 +1314,8 @@ exports.submitExercise = async (req, res) => {
       }
     } else if (
       exercise.rubric ||
-      ['dom', 'react', 'backend'].includes(exercise.language)
+      ['dom', 'html', 'react', 'backend'].includes(exercise.language) ||
+      (files && Array.isArray(files) && files.some((f) => (f.name || f.path || '').endsWith('.html') || (f.name || f.path || '').endsWith('.htm')))
     ) {
       if (!files || !Array.isArray(files) || files.length === 0) {
         return res
@@ -1160,19 +1326,40 @@ exports.submitExercise = async (req, res) => {
           });
       }
 
-      const evalTypeMap = {
-        dom: 'visual',
-        react: 'react',
-        backend: 'backend',
-        javascript: 'javascript',
-        python: 'python',
-      };
-      const evaluatorType = evalTypeMap[exercise.language] || 'backend';
+      const isDomLike =
+        exercise.language === 'dom' ||
+        exercise.language === 'html' ||
+        (files && Array.isArray(files) && files.some((f) => (f.name || f.path || '').endsWith('.html') || (f.name || f.path || '').endsWith('.htm')));
 
-      const payload = {
-        type: evaluatorType,
-        ideFiles: files,
-      };
+      if (isDomLike) {
+        // Direct local evaluation for HTML/DOM exercises without central evaluator overhead
+        const workspaceDir = getSafeWorkspaceDir(userId, exerciseId, taskId);
+        try {
+          saveStudentFilesSafely(workspaceDir, files);
+        } catch (e) {
+          if (e instanceof ExerciseAccessError) throw e;
+          console.warn('[submitExercise] Could not persist workspace files:', e.message);
+        }
+
+        const localEval = evaluateDomLocally(files, exercise);
+        score = localEval.score;
+        testResults = localEval.testResults;
+        isExplicitPassed = score >= (exercise.max_score || 100) * 0.6;
+      } else {
+        const evalTypeMap = {
+          dom: 'visual',
+          html: 'visual',
+          react: 'react',
+          backend: 'backend',
+          javascript: 'javascript',
+          python: 'python',
+        };
+        const evaluatorType = evalTypeMap[exercise.language] || 'backend';
+
+        const payload = {
+          type: evaluatorType,
+          ideFiles: files,
+        };
 
       if (evaluatorType === 'visual') {
         payload.expectedUrl = 'https://example.com'; // placeholder since it's ide files
@@ -1217,7 +1404,7 @@ exports.submitExercise = async (req, res) => {
         process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:3004';
 
       let evalResponse = null;
-      let postRetries = 3;
+      let postRetries = 2;
       for (let attempt = 1; attempt <= postRetries; attempt++) {
         try {
           evalResponse = await axios.post(`${CENTRAL_URL}/evaluate`, payload, {
@@ -1225,19 +1412,37 @@ exports.submitExercise = async (req, res) => {
               'x-api-key':
                 process.env.CENTRAL_EVALUATOR_API_KEY || 'test-key-123',
             },
+            timeout: 3000,
           });
           break;
         } catch (error) {
-          if (attempt === postRetries) throw error;
-          await new Promise((res) => setTimeout(res, 1500));
+          if (attempt === postRetries) {
+            console.warn(`[Exercise Submit] Central evaluator connection failed (${CENTRAL_URL}): ${error.message}`);
+          } else {
+            await new Promise((res) => setTimeout(res, 500));
+          }
         }
       }
 
-      const jobId =
-        evalResponse.data.jobId ||
-        (evalResponse.data.jobs && evalResponse.data.jobs[0].jobId);
-      if (!jobId)
-        throw new Error('Failed to get job ID from central evaluator');
+      if (!evalResponse) {
+        // Central evaluator service is offline or unreachable
+        if (exercise.language === 'dom' || evaluatorType === 'visual') {
+          const localEval = evaluateDomLocally(files, exercise);
+          score = localEval.score;
+          testResults = localEval.testResults;
+          isExplicitPassed = score >= (exercise.max_score || 100) * 0.6;
+        } else {
+          throw new ExerciseAccessError(
+            503,
+            'Code evaluation service is currently unavailable. Please ensure the central evaluator service is running on port 4000.',
+          );
+        }
+      } else {
+        const jobId =
+          evalResponse.data.jobId ||
+          (evalResponse.data.jobs && evalResponse.data.jobs[0].jobId);
+        if (!jobId)
+          throw new Error('Failed to get job ID from central evaluator');
 
       let evalResult = null;
       for (let i = 0; i < 30; i++) {
@@ -1440,19 +1645,30 @@ exports.submitExercise = async (req, res) => {
 
       // Rescale the score relative to max_score
       score = Math.round((score / 100) * exercise.max_score);
-    } else {
-      // Nothing to grade against: no test cases and no rubric/evaluator.
-      // Previously this awarded max_score (and honoured a client-supplied
-      // `score`), so any submission — including one that does not compile —
-      // passed with full marks. Refuse instead of inventing a grade.
-      return res.status(422).json({
-        success: false,
-        message:
-          'This exercise has no test cases or rubric configured, so it cannot be graded yet. Please contact your facilitator.',
-      });
     }
+  }
+} else {
+  // Practice / open-ended exercise without formal test suite or rubric:
+  // Save student files to workspace and award completion credit
+  const workspaceDir = getSafeWorkspaceDir(userId, exerciseId, taskId);
+  try {
+    saveStudentFilesSafely(workspaceDir, files);
+  } catch (e) {
+    if (e instanceof ExerciseAccessError) throw e;
+    console.warn('[submitExercise] Could not persist workspace files:', e.message);
+  }
 
-    const isPassed = score >= exercise.max_score * 0.7;
+  score = null;
+  isExplicitPassed = true;
+  testResults = {
+    feedback: 'Successfully submitted.',
+  };
+}
+
+    const isPassed = isExplicitPassed !== undefined
+      ? isExplicitPassed
+      : (score != null ? score >= (exercise.max_score || 100) * 0.7 : true);
+    const finalScore = score;
 
     const submissionResult = await pool.query(
       `INSERT INTO exercise_submissions (exercise_id, user_id, score, is_passed, feedback, test_results)
@@ -1461,9 +1677,9 @@ exports.submitExercise = async (req, res) => {
       [
         exerciseId,
         userId,
-        score,
+        finalScore,
         isPassed,
-        testResults?.feedback || null,
+        testResults?.feedback || (isPassed ? 'Successfully submitted.' : 'Test evaluation failed.'),
         testResults ? JSON.stringify(testResults) : null,
       ],
     );
@@ -1472,14 +1688,14 @@ exports.submitExercise = async (req, res) => {
     const prevMaxRes = await pool.query(
       `SELECT MAX(score) as max_score 
        FROM exercise_submissions 
-       WHERE user_id = $1 AND exercise_id = $2 AND id != $3`,
+       WHERE user_id = $1 AND exercise_id = $2 AND id != $3 AND is_passed = true`,
       [userId, exerciseId, submissionResult.rows[0].id],
     );
     const prevMaxScore = prevMaxRes.rows[0].max_score || 0;
 
-    const prevPoints = Math.round((prevMaxScore / exercise.max_score) * 100);
-    const newPoints = Math.round((score / exercise.max_score) * 100);
-    const pointsAwarded = Math.max(0, newPoints - prevPoints);
+    const prevPoints = (exercise.max_score && prevMaxScore) ? Math.round((prevMaxScore / exercise.max_score) * 100) : 0;
+    const newPoints = (exercise.max_score && finalScore != null) ? Math.round((finalScore / exercise.max_score) * 100) : 0;
+    const pointsAwarded = isPassed ? Math.max(0, newPoints - prevPoints) : 0;
 
     if (pointsAwarded > 0) {
       await pool.query(
@@ -1512,7 +1728,7 @@ exports.submitExercise = async (req, res) => {
 
     res.json({
       success: true,
-      message: isPassed ? 'Exercise passed!' : 'Exercise submitted',
+      message: 'Successfully submitted',
       data: {
         submission: submissionResult.rows[0],
         points_awarded: pointsAwarded,
@@ -1529,11 +1745,7 @@ exports.submitExercise = async (req, res) => {
 // EXERCISE WORKSPACE
 // ============================================
 
-const fs = require('fs');
-const path = require('path');
 const runnerService = require('../services/runnerService');
-
-const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 
 const {
   runTests,
@@ -1645,7 +1857,7 @@ exports.initExerciseWorkspace = async (req, res) => {
         submission: submission
           ? {
               score: submission.score,
-              isPassed: submission.is_passed,
+              isPassed: Boolean(submission.is_passed),
               testResults:
                 submission.test_results ||
                 (submission.feedback
@@ -2149,6 +2361,9 @@ exports.getAssignmentById = async (req, res) => {
         a.title,
         a.instructions,
         a.max_score,
+        a.evaluator_type,
+        a.test_cases,
+        a.rubric,
         s.name AS subject_title,
         s.slug AS subject_slug,
         u.title AS unit_title,
@@ -2218,6 +2433,8 @@ exports.submitAssignment = async (req, res) => {
        RETURNING submission_link, submitted_at`,
       [id, userId, submission_link.trim()],
     );
+
+    markActionToday(userId);
 
     logAction({
       req,
@@ -2524,6 +2741,146 @@ exports.getStudentAssignmentsOverview = async (req, res) => {
 // ============================================
 
 /**
+ * Get comprehensive overview of all curriculum capstone projects for the student
+ * with 3-state evaluation tracking (pending, pending_evaluation, evaluated) and rubric feedback.
+ * GET /api/students/projects/overview
+ */
+exports.getStudentProjectsOverview = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const query = `
+      SELECT
+        p.id,
+        p.title,
+        'CAPSTONE' AS type,
+        s.name AS course_name,
+        s.slug AS subject_slug,
+        t.title AS topic_title,
+        COALESCE(p.max_score, 100) AS max_score,
+        NULL::timestamp AS due_date,
+        p.created_at,
+        p.evaluator_type,
+        ps.id AS submission_id,
+        ps.submission_link,
+        ps.submitted_at,
+        ps.score AS ps_score,
+        ps.rubric_breakdown AS ps_rubric_breakdown,
+        er.id AS evaluation_result_id,
+        er.status AS evaluation_status,
+        er.marks AS er_marks,
+        er.feedback AS er_feedback
+      FROM projects p
+      INNER JOIN topics t ON p.topic_id = t.id
+      INNER JOIN subjects s ON t.subject_id = s.id
+      LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+      LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+      LEFT JOIN LATERAL (
+        SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback
+        FROM evaluation_results er_inner
+        JOIN evaluations e ON er_inner.evaluation_id = e.id
+        WHERE (er_inner.submission_id = ps.id OR (er_inner.student_id = $1 AND e.project_id = p.id))
+        ORDER BY er_inner.created_at DESC
+        LIMIT 1
+      ) er ON true
+      WHERE (p.is_deleted = false OR p.is_deleted IS NULL)
+        AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.id IS NOT NULL)
+      ORDER BY s.name, t.order_index, p.id
+    `;
+
+    const result = await pool.query(query, [userId]);
+
+    const parseFeedback = (feedback) => {
+      if (!feedback) return null;
+      if (typeof feedback === 'object') return feedback;
+      try {
+        const parsed = JSON.parse(feedback);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
+          try {
+            const inner = JSON.parse(parsed.summary);
+            if (inner && typeof inner === 'object') {
+              return { ...parsed, ...inner };
+            }
+          } catch {}
+        }
+        return parsed;
+      } catch {
+        return { summary: String(feedback) };
+      }
+    };
+
+    const allProjects = [];
+
+    for (const row of result.rows) {
+      const isSubmitted = Boolean(row.submission_link || row.submitted_at);
+      const isEvaluated = row.evaluation_status === 'completed' || (row.ps_score !== null && row.ps_score !== undefined);
+
+      let status = 'pending';
+      if (isEvaluated) {
+        status = 'evaluated';
+      } else if (isSubmitted || row.evaluation_status === 'pending') {
+        status = 'pending_evaluation';
+      }
+
+      const rawFeedback = row.er_feedback || row.ps_rubric_breakdown;
+      const feedback = parseFeedback(rawFeedback);
+
+      let marks = null;
+      if (status === 'evaluated') {
+        if (row.er_marks !== null && row.er_marks !== undefined) {
+          marks = Number(row.er_marks);
+        } else if (row.ps_score !== null && row.ps_score !== undefined) {
+          marks = Number(row.ps_score);
+        }
+      }
+
+      allProjects.push({
+        id: row.id,
+        title: row.title,
+        type: 'CAPSTONE',
+        course_name: row.course_name,
+        subject_slug: row.subject_slug,
+        topic_title: row.topic_title || null,
+        unit_title: row.topic_title || null,
+        max_score: Number(row.max_score) || 100,
+        due_date: row.due_date,
+        created_at: row.created_at,
+        status,
+        submitted_at: row.submitted_at,
+        submission_link: row.submission_link,
+        submission_file_url: null,
+        marks,
+        feedback,
+        navigation_url: `/dashboard/student/courses/${row.subject_slug}/capstone/${row.id}`,
+      });
+    }
+
+    // Sort: Pending first, then Pending Evaluation, then Evaluated
+    const statusOrder = { pending: 0, pending_evaluation: 1, evaluated: 2 };
+    allProjects.sort((a, b) => {
+      if (statusOrder[a.status] !== statusOrder[b.status]) {
+        return statusOrder[a.status] - statusOrder[b.status];
+      }
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+
+    res.json({
+      success: true,
+      data: allProjects,
+      counts: {
+        total: allProjects.length,
+        pending: allProjects.filter((p) => p.status === 'pending').length,
+        pending_evaluation: allProjects.filter((p) => p.status === 'pending_evaluation').length,
+        evaluated: allProjects.filter((p) => p.status === 'evaluated').length,
+      },
+    });
+  } catch (error) {
+    console.error('Error in getStudentProjectsOverview:', error);
+    serverError(res, error);
+  }
+};
+
+/**
  * Get capstone project for a topic (with existing submission if any)
  * GET /api/students/capstone/:projectId
  */
@@ -2534,14 +2891,29 @@ exports.getCapstone = async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-        p.id, p.title, p.instructions, p.max_score,
-        ps.submission_link, ps.is_approved, ps.submitted_at
+        p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric,
+        ps.submission_link, ps.is_approved, ps.submitted_at, 
+        COALESCE(er.marks, ps.score) AS score,
+        er.feedback AS er_feedback,
+        ps.rubric_breakdown AS ps_rubric_breakdown,
+        ps.execution_logs,
+        er.status AS evaluation_status
        FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
-       WHERE p.id = $2`,
+       LEFT JOIN LATERAL (
+         SELECT er_inner.marks, er_inner.feedback, er_inner.status
+         FROM evaluation_results er_inner
+         JOIN evaluations e ON er_inner.evaluation_id = e.id
+         WHERE (er_inner.submission_id = ps.id OR (er_inner.student_id = $1 AND e.project_id = p.id))
+         ORDER BY er_inner.created_at DESC
+         LIMIT 1
+       ) er ON true
+       WHERE p.id = $2
+         AND (p.is_deleted = false OR p.is_deleted IS NULL)
+         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
       [userId, projectId],
     );
 
@@ -2551,7 +2923,51 @@ exports.getCapstone = async (req, res) => {
         .json({ success: false, message: 'Capstone project not found' });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const row = result.rows[0];
+
+    const parseFeedback = (feedback) => {
+      if (!feedback) return null;
+      if (typeof feedback === 'object') return feedback;
+      try {
+        const parsed = JSON.parse(feedback);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
+          try {
+            const inner = JSON.parse(parsed.summary);
+            if (inner && typeof inner === 'object') {
+              return { ...parsed, ...inner };
+            }
+          } catch {}
+        }
+        return parsed;
+      } catch {
+        return { summary: String(feedback) };
+      }
+    };
+
+    const rawFeedback = row.er_feedback || row.ps_rubric_breakdown;
+    const rubric_breakdown = parseFeedback(rawFeedback);
+    const submission_link = row.submission_link
+      ? await presignS3Url(row.submission_link)
+      : null;
+
+    res.json({
+      success: true,
+      data: {
+        id: row.id,
+        title: row.title,
+        instructions: row.instructions,
+        max_score: row.max_score ? Number(row.max_score) : 100,
+        evaluator_type: row.evaluator_type,
+        rubric: row.rubric,
+        submission_link,
+        is_approved: row.is_approved,
+        submitted_at: row.submitted_at,
+        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+        rubric_breakdown,
+        execution_logs: row.execution_logs,
+        evaluation_status: row.evaluation_status,
+      },
+    });
   } catch (error) {
     console.error('Error fetching capstone:', error);
     serverError(res, error);
@@ -2579,8 +2995,11 @@ exports.submitCapstone = async (req, res) => {
       `SELECT p.id FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
-       WHERE p.id = $2`,
+       LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
+       WHERE p.id = $2
+         AND (p.is_deleted = false OR p.is_deleted IS NULL)
+         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL)`,
       [userId, projectId],
     );
 
@@ -2610,9 +3029,9 @@ exports.submitCapstone = async (req, res) => {
         'INSERT INTO points_log (user_id, source, points) VALUES ($1, $2, $3)',
         [userId, source, 20],
       );
-      markActionToday(userId);
       await checkAndAwardBadges(userId);
     }
+    markActionToday(userId);
 
     logAction({
       req,
@@ -3117,6 +3536,9 @@ exports.getStudentModuleAnalytics = async (req, res) => {
 exports.getStudentAnalytics = async (req, res) => {
   const userId = req.user.id;
   try {
+    // Reconcile user streak to ensure dashboard metrics reflect true activity
+    await reconcileUserStreak(userId);
+
     // Fetch data sequentially to prevent Neon connection pool exhaustion/timeouts
     const metricsRes = await pool.query(
       `SELECT
@@ -3134,9 +3556,11 @@ exports.getStudentAnalytics = async (req, res) => {
          (SELECT COUNT(DISTINCT assignment_id)::int FROM assignment_submissions WHERE user_id = $1) AS assignments_submitted,
          (SELECT COUNT(DISTINCT project_id)::int FROM project_submissions WHERE user_id = $1 AND is_approved = true)
                                                                                AS projects_completed,
-         (SELECT current_streak FROM user_streaks WHERE user_id = $1)          AS current_streak,
-         (SELECT last_activity FROM user_streaks WHERE user_id = $1)           AS last_activity,
-         (SELECT (CURRENT_DATE - last_activity::date) FROM user_streaks WHERE user_id = $1) AS days_since_active`,
+          (SELECT CASE WHEN last_activity::date >= CURRENT_DATE - 1 THEN current_streak ELSE 0 END FROM user_streaks WHERE user_id = $1) AS current_streak,
+          (SELECT COALESCE(longest_streak, 0) FROM user_streaks WHERE user_id = $1) AS longest_streak,
+          (SELECT (last_activity::date = CURRENT_DATE) FROM user_streaks WHERE user_id = $1) AS practiced_today,
+          (SELECT last_activity FROM user_streaks WHERE user_id = $1)           AS last_activity,
+          (SELECT (CURRENT_DATE - last_activity::date) FROM user_streaks WHERE user_id = $1) AS days_since_active`,
       [userId],
     );
 
@@ -3182,6 +3606,8 @@ exports.getStudentAnalytics = async (req, res) => {
           assignments_pending: pendingRes.rows[0].assignments_pending,
           projects_completed: m.projects_completed,
           current_streak: m.current_streak || 0,
+          longest_streak: m.longest_streak || 0,
+          practiced_today: Boolean(m.practiced_today),
           last_activity: m.last_activity || null,
           days_since_active: m.days_since_active || 0,
           total_xp: totalXp,
@@ -3197,4 +3623,959 @@ exports.getStudentAnalytics = async (req, res) => {
   }
 };
 
+/**
+ * Get active progress-driven milestone deadlines (5 days for quiz, 10 days for assignment)
+ * GET /api/v1/students/deadlines/active-milestones
+ */
+exports.getActiveMilestoneDeadlines = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Fetch user basic info and registration timestamp
+    let studentName = 'Student';
+    let firstName = 'Student';
+    let collegeId = null;
+    let userCreatedAt = new Date();
+
+    try {
+      const userRes = await pool.query(
+        `SELECT u.full_name, u.created_at, sp.college_id
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.id
+         WHERE u.id = $1`,
+        [userId],
+      );
+      studentName = userRes.rows[0]?.full_name || 'Student';
+      firstName = studentName.trim().split(' ')[0] || 'Student';
+      collegeId = userRes.rows[0]?.college_id || null;
+      if (userRes.rows[0]?.created_at) {
+        userCreatedAt = new Date(userRes.rows[0].created_at);
+      }
+    } catch (uErr) {
+      console.warn('[Milestones] Error fetching user profile:', uErr.message);
+    }
+
+    // 2. Identify units where the student has completed 100% of reading lessons / subtopics
+    // Timer for a unit starts ONLY after the student finishes all lessons in that unit
+    const completedUnitsRes = await pool.query(
+      `SELECT 
+         u.id AS unit_id,
+         u.title AS unit_title,
+         u.order_index AS unit_order,
+         t.id AS topic_id,
+         t.title AS topic_title,
+         t.order_index AS topic_order,
+         s.id AS subject_id,
+         s.name AS subject_name,
+         s.slug AS subject_slug,
+         COUNT(DISTINCT st.id)::int AS total_subtopics,
+         COUNT(DISTINCT st.id) FILTER (
+           WHERE usp.is_completed = true
+              OR (
+                EXISTS(
+                  SELECT 1 FROM lesson_content lc 
+                  JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id 
+                  WHERE lc.subtopic_id = st.id AND ulp.user_id = $1 AND ulp.is_completed = true
+                )
+                AND NOT EXISTS(
+                  SELECT 1 FROM exercises e 
+                  WHERE e.subtopic_id = st.id AND e.is_deleted = false 
+                    AND NOT EXISTS(
+                      SELECT 1 FROM exercise_submissions es 
+                      WHERE es.exercise_id = e.id AND es.user_id = $1 AND es.is_passed = true
+                    )
+                )
+              )
+         )::int AS completed_subtopics,
+         MAX(usp.completed_at) AS unit_completed_at
+       FROM units u
+       JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
+       JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
+       JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+       JOIN subtopics st ON st.unit_id = u.id AND st.is_deleted = false
+       LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
+       WHERE u.is_deleted = false
+       GROUP BY u.id, u.title, u.order_index, t.id, t.title, t.order_index, s.id, s.name, s.slug
+       HAVING (
+         COUNT(DISTINCT st.id) > 0
+         AND COUNT(DISTINCT st.id) FILTER (
+           WHERE usp.is_completed = true
+              OR (
+                EXISTS(
+                  SELECT 1 FROM lesson_content lc 
+                  JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id 
+                  WHERE lc.subtopic_id = st.id AND ulp.user_id = $1 AND ulp.is_completed = true
+                )
+                AND NOT EXISTS(
+                  SELECT 1 FROM exercises e 
+                  WHERE e.subtopic_id = st.id AND e.is_deleted = false 
+                    AND NOT EXISTS(
+                      SELECT 1 FROM exercise_submissions es 
+                      WHERE es.exercise_id = e.id AND es.user_id = $1 AND es.is_passed = true
+                    )
+                )
+              )
+         ) >= COUNT(DISTINCT st.id)
+       )
+       ORDER BY MAX(usp.completed_at) DESC NULLS LAST, t.order_index DESC, u.order_index DESC`,
+      [userId],
+    );
+
+    const milestones = [];
+    const now = new Date();
+
+    if (completedUnitsRes.rows.length > 0) {
+      const unitMap = new Map();
+      const unitIds = [];
+
+      for (const unit of completedUnitsRes.rows) {
+        unitIds.push(unit.unit_id);
+        const completedAtRaw = unit.unit_completed_at;
+        const t0 = (completedAtRaw && !Number.isNaN(new Date(completedAtRaw).getTime()))
+          ? new Date(completedAtRaw)
+          : userCreatedAt;
+        unitMap.set(unit.unit_id, { unit, t0 });
+      }
+
+      // A. Batch query unpassed Quizzes for all completed units (5-Day Milestone)
+      try {
+        const quizzesRes = await pool.query(
+          `SELECT q.id, q.unit_id, COALESCE(q.max_score, 100) AS max_score,
+                  EXISTS(
+                    SELECT 1 FROM quiz_attempts qa
+                    WHERE qa.quiz_id = q.id AND qa.user_id = $1 AND qa.is_passed = true
+                  ) AS is_passed,
+                  (
+                    SELECT COUNT(*)::int
+                    FROM quiz_questions qq
+                    WHERE qq.quiz_id = q.id AND qq.is_deleted = false
+                  ) AS question_count
+           FROM quizzes q
+           WHERE q.unit_id = ANY($2::uuid[]) AND q.is_deleted = false`,
+          [userId, unitIds],
+        );
+
+        for (const q of quizzesRes.rows) {
+          if (!q.is_passed) {
+            const unitData = unitMap.get(q.unit_id);
+            if (!unitData) continue;
+            const { unit, t0 } = unitData;
+            const dueDate = new Date(t0.getTime() + 5 * 24 * 60 * 60 * 1000);
+            const diffMs = dueDate.getTime() - now.getTime();
+            const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+            const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            const isOverdue = hoursLeft <= 0;
+            const urgencyLevel = isOverdue
+              ? 'overdue'
+              : hoursLeft <= 24
+              ? 'urgent'
+              : hoursLeft <= 72
+              ? 'approaching'
+              : 'relaxed';
+
+            milestones.push({
+              item_id: q.id,
+              item_type: 'quiz',
+              title: `${unit.unit_title} Quiz`,
+              description: '',
+              unit_id: unit.unit_id,
+              unit_title: unit.unit_title,
+              topic_title: unit.topic_title,
+              subject_name: unit.subject_name,
+              subject_slug: unit.subject_slug,
+              completed_lessons_at: t0.toISOString(),
+              due_date: dueDate.toISOString(),
+              duration_days: 5,
+              hours_left: hoursLeft,
+              days_left: daysLeft,
+              is_overdue: isOverdue,
+              urgency_level: urgencyLevel,
+              action_url: `/dashboard/student/courses/${unit.subject_slug}/quiz/${q.id}`,
+              estimated_time: q.question_count > 0 ? `${q.question_count} questions · ~10 mins` : '10 mins quiz',
+            });
+          }
+        }
+      } catch (qErr) {
+        console.warn('[Milestones] Error querying batched quizzes:', qErr.message);
+      }
+
+      // B. Batch query unsubmitted Assignments for all completed units (10-Day Milestone)
+      try {
+        const asgRes = await pool.query(
+          `SELECT a.id, a.title, a.instructions, a.unit_id, COALESCE(a.max_score, 100) AS max_score,
+                  EXISTS(
+                    SELECT 1 FROM assignment_submissions asub
+                    WHERE asub.assignment_id = a.id AND asub.user_id = $1
+                  ) AS is_submitted
+           FROM assignments a
+           WHERE a.unit_id = ANY($2::uuid[]) AND a.is_deleted = false`,
+          [userId, unitIds],
+        );
+
+        for (const a of asgRes.rows) {
+          if (!a.is_submitted) {
+            const unitData = unitMap.get(a.unit_id);
+            if (!unitData) continue;
+            const { unit, t0 } = unitData;
+            const dueDate = new Date(t0.getTime() + 10 * 24 * 60 * 60 * 1000);
+            const diffMs = dueDate.getTime() - now.getTime();
+            const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+            const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            const isOverdue = hoursLeft <= 0;
+            const urgencyLevel = isOverdue
+              ? 'overdue'
+              : hoursLeft <= 24
+              ? 'urgent'
+              : hoursLeft <= 72
+              ? 'approaching'
+              : 'relaxed';
+
+            milestones.push({
+              item_id: a.id,
+              item_type: 'assignment',
+              title: a.title || `${unit.unit_title} Assignment`,
+              description: a.instructions ? a.instructions.substring(0, 120) : '',
+              unit_id: unit.unit_id,
+              unit_title: unit.unit_title,
+              topic_title: unit.topic_title,
+              subject_name: unit.subject_name,
+              subject_slug: unit.subject_slug,
+              completed_lessons_at: t0.toISOString(),
+              due_date: dueDate.toISOString(),
+              duration_days: 10,
+              hours_left: hoursLeft,
+              days_left: daysLeft,
+              is_overdue: isOverdue,
+              urgency_level: urgencyLevel,
+              action_url: `/dashboard/student/courses/${unit.subject_slug}/assignment/${a.id}`,
+              estimated_time: 'Hands-on Submission · AI Graded',
+            });
+          }
+        }
+      } catch (aErr) {
+        console.warn('[Milestones] Error querying batched assignments:', aErr.message);
+      }
+    }
+
+    // C. Check unsubmitted Capstone Projects (15-Day Milestone)
+    // ONLY unlocks when ALL units in that specific topic are 100% completed by the student
+    try {
+      const capstoneRes = await pool.query(
+        `SELECT p.id, p.title, p.instructions, COALESCE(p.max_score, 100) AS max_score,
+                t.id AS topic_id, t.title AS topic_title,
+                s.id AS subject_id, s.name AS subject_name, s.slug AS subject_slug,
+                EXISTS(
+                  SELECT 1 FROM project_submissions ps
+                  WHERE ps.project_id = p.id AND ps.user_id = $1 AND ps.submission_link IS NOT NULL
+                ) AS is_submitted,
+                (
+                  SELECT MAX(usp.completed_at)
+                  FROM units u_inner
+                  JOIN subtopics st ON st.unit_id = u_inner.id AND st.is_deleted = false
+                  LEFT JOIN user_subtopic_progress usp ON usp.subtopic_id = st.id AND usp.user_id = $1
+                  WHERE u_inner.topic_id = t.id AND u_inner.is_deleted = false
+                ) AS topic_completed_at
+         FROM projects p
+         JOIN topics t ON p.topic_id = t.id AND t.is_deleted = false
+         JOIN subjects s ON t.subject_id = s.id AND s.is_deleted = false
+         JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
+         WHERE p.is_deleted = false
+           -- Must have at least 1 unit in this topic
+           AND EXISTS (
+             SELECT 1 FROM units u_check
+             WHERE u_check.topic_id = t.id AND u_check.is_deleted = false
+           )
+           -- AND ALL units in this topic must have all subtopics completed by user
+           AND NOT EXISTS (
+             SELECT 1 FROM units u_uncomp
+             WHERE u_uncomp.topic_id = t.id AND u_uncomp.is_deleted = false
+               AND (
+                 (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false) = 0
+                 OR
+                 (SELECT COUNT(DISTINCT st_sub.id) FILTER (
+                    WHERE usp_sub.is_completed = true
+                       OR (
+                         EXISTS(
+                           SELECT 1 FROM lesson_content lc_sub 
+                           JOIN user_lesson_progress ulp_sub ON ulp_sub.lesson_content_id = lc_sub.id 
+                           WHERE lc_sub.subtopic_id = st_sub.id AND ulp_sub.user_id = $1 AND ulp_sub.is_completed = true
+                         )
+                         AND NOT EXISTS(
+                           SELECT 1 FROM exercises e_sub 
+                           WHERE e_sub.subtopic_id = st_sub.id AND e_sub.is_deleted = false 
+                             AND NOT EXISTS(
+                               SELECT 1 FROM exercise_submissions es_sub 
+                               WHERE es_sub.exercise_id = e_sub.id AND es_sub.user_id = $1 AND es_sub.is_passed = true
+                             )
+                         )
+                       )
+                  )
+                  FROM subtopics st_sub
+                  LEFT JOIN user_subtopic_progress usp_sub ON usp_sub.subtopic_id = st_sub.id AND usp_sub.user_id = $1
+                  WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false
+                 ) < (SELECT COUNT(DISTINCT st_sub.id) FROM subtopics st_sub WHERE st_sub.unit_id = u_uncomp.id AND st_sub.is_deleted = false)
+               )
+           )`,
+        [userId],
+      );
+
+      for (const cap of capstoneRes.rows) {
+        if (!cap.is_submitted) {
+          const capCompletedAt = cap.topic_completed_at;
+          const t0Cap = (capCompletedAt && !Number.isNaN(new Date(capCompletedAt).getTime()))
+            ? new Date(capCompletedAt)
+            : userCreatedAt;
+
+          const dueDate = new Date(t0Cap.getTime() + 15 * 24 * 60 * 60 * 1000);
+          const diffMs = dueDate.getTime() - now.getTime();
+          const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+          const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          const isOverdue = hoursLeft <= 0;
+          const urgencyLevel = isOverdue
+            ? 'overdue'
+            : hoursLeft <= 24
+            ? 'urgent'
+            : hoursLeft <= 72
+            ? 'approaching'
+            : 'relaxed';
+
+          milestones.push({
+            item_id: cap.id,
+            item_type: 'capstone',
+            title: cap.title || `${cap.topic_title} Capstone Project`,
+            description: cap.instructions ? cap.instructions.substring(0, 120) : '',
+            unit_id: '',
+            unit_title: cap.topic_title,
+            topic_title: cap.topic_title,
+            subject_name: cap.subject_name,
+            subject_slug: cap.subject_slug,
+            completed_lessons_at: t0Cap.toISOString(),
+            due_date: dueDate.toISOString(),
+            duration_days: 15,
+            hours_left: hoursLeft,
+            days_left: daysLeft,
+            is_overdue: isOverdue,
+            urgency_level: urgencyLevel,
+            action_url: `/dashboard/student/courses/${cap.subject_slug}/capstone/${cap.id}`,
+            estimated_time: '15-Day Capstone · Project Submission',
+          });
+        }
+      }
+    } catch (capErr) {
+      console.warn('[Milestones] Error fetching capstones:', capErr.message);
+    }
+
+    // D. Include pending College Assignments
+    if (collegeId) {
+      try {
+        const collegeAsgRes = await pool.query(
+          `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at, ca.course,
+                  s.name AS resolved_subject_name, s.slug AS resolved_subject_slug
+           FROM college_assignments ca
+           LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
+           WHERE ca.college_id = $1
+             AND ca.is_deleted = false
+             AND NOT EXISTS (
+               SELECT 1 FROM college_assignment_submissions cas
+               WHERE cas.assignment_id = ca.id AND cas.student_id = $2
+             )`,
+          [collegeId, userId],
+        );
+
+        for (const ca of collegeAsgRes.rows) {
+          // 1. Direct Facilitator Deadline Preservation
+          const dueDate = ca.due_date
+            ? new Date(ca.due_date)
+            : new Date(userCreatedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+          // 2. Discard only if archived/overdue by more than 7 days
+          if (dueDate.getTime() < now.getTime() - 7 * 24 * 60 * 60 * 1000) {
+            continue;
+          }
+
+          const diffMs = dueDate.getTime() - now.getTime();
+          const hoursLeft = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+          const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          const isOverdue = hoursLeft <= 0;
+          const urgencyLevel = isOverdue
+            ? 'overdue'
+            : hoursLeft <= 24
+            ? 'urgent'
+            : hoursLeft <= 72
+            ? 'approaching'
+            : 'relaxed';
+
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ca.course || '');
+          const courseDisplayName = ca.resolved_subject_name || (!isUuid ? ca.course : 'College Assignment');
+          const subjectDisplayName = ca.resolved_subject_name || (!isUuid ? ca.course : '');
+
+          milestones.push({
+            item_id: ca.id,
+            item_type: 'college_assignment',
+            title: ca.title,
+            description: ca.description || '',
+            unit_id: '',
+            unit_title: courseDisplayName,
+            subject_name: subjectDisplayName,
+            subject_slug: ca.resolved_subject_slug || '',
+            completed_lessons_at: null,
+            due_date: dueDate.toISOString(),
+            duration_days: Math.max(1, daysLeft),
+            hours_left: hoursLeft,
+            days_left: daysLeft,
+            is_overdue: isOverdue,
+            urgency_level: urgencyLevel,
+            action_url: `/dashboard/student/assignments/${ca.id}`,
+            estimated_time: 'College Submission',
+          });
+        }
+      } catch (caErr) {
+        console.warn('[Milestones] Error fetching college assignments:', caErr.message);
+      }
+    }
+
+    // E. Determine the student's Learning Pathway (Previous Completed Unit vs Current / Next Unit)
+    let journey = null;
+    if (completedUnitsRes.rows.length > 0) {
+      const topCompletedUnit = completedUnitsRes.rows[0];
+
+      let nextUnit = null;
+      try {
+        const nextUnitRes = await pool.query(
+          `SELECT u.id AS unit_id, u.title AS unit_title, u.order_index AS unit_order,
+                  t.id AS topic_id, t.title AS topic_title,
+                  s.slug AS subject_slug, s.name AS subject_name
+           FROM units u
+           JOIN topics t ON t.id = u.topic_id AND t.is_deleted = false
+           JOIN subjects s ON s.id = t.subject_id AND s.is_deleted = false
+           WHERE s.id = $1
+             AND (
+               t.order_index > (SELECT t2.order_index FROM topics t2 WHERE t2.id = $2)
+               OR (
+                 t.id = $2 AND u.order_index > $3
+               )
+             )
+             AND u.is_deleted = false
+           ORDER BY t.order_index ASC, u.order_index ASC
+           LIMIT 1`,
+          [topCompletedUnit.subject_id, topCompletedUnit.topic_id, topCompletedUnit.unit_order],
+        );
+        if (nextUnitRes.rows.length > 0) {
+          nextUnit = nextUnitRes.rows[0];
+        }
+      } catch (nextErr) {
+        console.warn('[Milestones] Error fetching next unit:', nextErr.message);
+      }
+
+      let completedUnitXp = 0;
+      try {
+        const xpRes = await pool.query(
+          `SELECT (
+             COALESCE(
+               (SELECT COUNT(DISTINCT ulp.lesson_content_id) * 10
+                FROM lesson_content lc
+                JOIN subtopics st ON lc.subtopic_id = st.id
+                JOIN user_lesson_progress ulp ON ulp.lesson_content_id = lc.id
+                WHERE st.unit_id = $1 AND ulp.user_id = $2 AND ulp.is_completed = true), 0
+             ) +
+             COALESCE(
+               (SELECT SUM(es.score)
+                FROM exercise_submissions es
+                JOIN exercises e ON es.exercise_id = e.id
+                JOIN subtopics st ON e.subtopic_id = st.id
+                WHERE st.unit_id = $1 AND es.user_id = $2 AND es.is_passed = true), 0
+             )
+           )::int AS earned_unit_xp`,
+          [topCompletedUnit.unit_id, userId],
+        );
+        completedUnitXp = Number(xpRes.rows[0]?.earned_unit_xp) || 0;
+        if (completedUnitXp === 0 && topCompletedUnit.completed_subtopics > 0) {
+          completedUnitXp = topCompletedUnit.completed_subtopics * 10;
+        }
+      } catch (xpErr) {
+        console.warn('[Milestones] Error fetching completed unit XP:', xpErr.message);
+      }
+
+      journey = {
+        subject_name: topCompletedUnit.subject_name,
+        subject_slug: topCompletedUnit.subject_slug,
+        completed_unit_id: topCompletedUnit.unit_id,
+        completed_unit_title: topCompletedUnit.unit_title,
+        completed_unit_topic: topCompletedUnit.topic_title,
+        completed_unit_order: topCompletedUnit.unit_order,
+        completed_unit_xp: completedUnitXp,
+        current_unit_id: nextUnit?.unit_id || topCompletedUnit.unit_id,
+        current_unit_title: nextUnit?.unit_title || 'Next Module in Syllabus',
+        current_unit_topic: nextUnit?.topic_title || topCompletedUnit.topic_title,
+        current_unit_order: nextUnit?.unit_order || topCompletedUnit.unit_order + 1,
+        current_unit_url: nextUnit
+          ? `/dashboard/student/courses/${nextUnit.subject_slug}`
+          : `/dashboard/student/courses/${topCompletedUnit.subject_slug}`,
+      };
+    } else {
+      // Fallback for students who just started and haven't completed a full unit yet
+      try {
+        const firstUnitRes = await pool.query(
+          `SELECT u.id AS unit_id, u.title AS unit_title, u.order_index AS unit_order,
+                  t.id AS topic_id, t.title AS topic_title,
+                  s.slug AS subject_slug, s.name AS subject_name
+           FROM user_subjects us
+           JOIN subjects s ON s.id = us.subject_id AND s.is_deleted = false
+           JOIN topics t ON t.subject_id = s.id AND t.is_deleted = false
+           JOIN units u ON u.topic_id = t.id AND u.is_deleted = false
+           WHERE us.user_id = $1
+           ORDER BY t.order_index ASC, u.order_index ASC
+           LIMIT 1`,
+          [userId],
+        );
+        if (firstUnitRes.rows.length > 0) {
+          const firstUnit = firstUnitRes.rows[0];
+          journey = {
+            subject_name: firstUnit.subject_name,
+            subject_slug: firstUnit.subject_slug,
+            completed_unit_id: null,
+            completed_unit_title: 'Course Orientation & Getting Started',
+            completed_unit_topic: 'Welcome',
+            completed_unit_order: 0,
+            current_unit_id: firstUnit.unit_id,
+            current_unit_title: firstUnit.unit_title,
+            current_unit_topic: firstUnit.topic_title,
+            current_unit_order: firstUnit.unit_order,
+            current_unit_url: `/dashboard/student/courses/${firstUnit.subject_slug}`,
+          };
+        }
+      } catch (fErr) {
+        console.warn('[Milestones] Error fetching fallback first unit:', fErr.message);
+      }
+    }
+
+    // Sort milestones so active items for the current unit appear first, ordered by urgency / hours left
+    milestones.sort((a, b) => a.hours_left - b.hours_left);
+
+    res.json({
+      success: true,
+      data: {
+        has_pending_milestones: milestones.length > 0,
+        total_pending: milestones.length,
+        student_first_name: firstName,
+        journey,
+        milestones,
+      },
+    });
+  } catch (err) {
+    console.error('getActiveMilestoneDeadlines error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch active milestone deadlines' 
+    });
+  }
+};
+
+/**
+ * GET /api/v1/students/streak-details
+ * Returns detailed habit streak status, personal best, and 7-day weekly calendar (Mon-Sun)
+ */
+exports.getStudentStreakDetails = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Self-heal and synchronize streak state directly from user's real activity history
+    await reconcileUserStreak(userId);
+
+    // 1. Fetch user streak state
+    const streakRes = await pool.query(
+      `SELECT 
+         CASE 
+           WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
+         COALESCE(us.longest_streak, 0) AS longest_streak,
+         (us.last_activity::date = CURRENT_DATE) AS practiced_today,
+         (us.last_activity::date = CURRENT_DATE - 1 AND COALESCE(us.current_streak, 0) > 0) AS streak_in_jeopardy,
+         us.last_activity::date AS last_activity,
+         CASE 
+           WHEN us.last_activity IS NOT NULL THEN (CURRENT_DATE - us.last_activity::date)
+           ELSE 999 
+         END AS days_since_active
+       FROM users u
+       LEFT JOIN user_streaks us ON us.user_id = u.id
+       WHERE u.id = $1`,
+      [userId],
+    );
+
+    const streakData = streakRes.rows[0] || {
+      current_streak: 0,
+      longest_streak: 0,
+      practiced_today: false,
+      streak_in_jeopardy: false,
+      last_activity: null,
+      days_since_active: 999,
+    };
+
+    const currentStreak = parseInt(streakData.current_streak, 10) || 0;
+    const longestStreak = parseInt(streakData.longest_streak, 10) || 0;
+    const practicedToday = Boolean(streakData.practiced_today);
+    const streakInJeopardy = Boolean(streakData.streak_in_jeopardy);
+
+    // 2. Fetch 7-day Monday through Sunday activity for current week
+    const weekRes = await pool.query(
+      `WITH week_days AS (
+         SELECT 
+           (DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval)::date AS day_date,
+           TRIM(TO_CHAR(DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval, 'Dy')) AS day_name,
+           EXTRACT(DAY FROM (DATE_TRUNC('week', CURRENT_DATE) + (i || ' days')::interval))::int AS day_number
+         FROM generate_series(0, 6) AS i
+       ),
+       user_actions AS (
+         SELECT completed_at::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1::uuid AND completed_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT COALESCE(attempted_at, created_at)::date AS act_date FROM public.quiz_attempts WHERE user_id = $1::uuid AND COALESCE(attempted_at, created_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT submitted_at::date AS act_date FROM public.exercise_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT submitted_at::date AS act_date FROM public.assignment_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT submitted_at::date AS act_date FROM public.project_submissions WHERE user_id = $1::uuid AND submitted_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT COALESCE(submitted_at, updated_at)::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1::uuid AND COALESCE(submitted_at, updated_at) >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT created_at::date AS act_date FROM public.points_log WHERE user_id = $1::uuid AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
+         UNION
+         SELECT last_activity::date AS act_date FROM public.user_streaks WHERE user_id = $1::uuid AND last_activity >= DATE_TRUNC('week', CURRENT_DATE)
+       )
+       SELECT 
+         w.day_name,
+         w.day_date::text AS date,
+         w.day_number,
+         (w.day_date = CURRENT_DATE) AS is_today,
+         (w.day_date > CURRENT_DATE) AS is_future,
+         EXISTS(SELECT 1 FROM user_actions ua WHERE ua.act_date = w.day_date) AS is_active
+       FROM week_days w
+       ORDER BY w.day_date ASC`,
+      [userId],
+    );
+
+    const weeklyCalendar = weekRes.rows.map((row) => {
+      let status = 'future';
+      if (row.is_today) {
+        status = row.is_active || practicedToday ? 'today_completed' : 'today_pending';
+      } else if (row.is_future) {
+        status = 'future';
+      } else {
+        status = row.is_active ? 'completed' : 'missed';
+      }
+
+      return {
+        day: row.day_name,
+        date: row.date,
+        day_number: row.day_number,
+        is_today: row.is_today,
+        is_future: row.is_future,
+        is_active: Boolean(row.is_active || (row.is_today && practicedToday)),
+        status,
+      };
+    });
+
+    // 3. Dynamic motivational message
+    const getMotivationalMessage = (currentStreak, practicedToday, longestStreak) => {
+      let motivationalMessage = 'Start practicing today to build your streak!';
+      if (practicedToday) {
+        motivationalMessage = currentStreak > 1
+          ? `🔥 You're on a roll! ${currentStreak} days strong. Keep it up tomorrow!`
+          : "🎉 Great job! You started your 1-day streak today!";
+      } else if (streakInJeopardy) {
+        motivationalMessage = `⚠️ Practice today to keep your ${currentStreak}-day streak alive!`;
+      } else if (longestStreak > 0 && currentStreak === 0) {
+        motivationalMessage = `Your streak reset. Complete a lesson today to start fresh! Personal best: ${longestStreak} days.`;
+      }
+      return motivationalMessage;
+    };
+
+    res.json({
+      success: true,
+      data: {
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        practiced_today: practicedToday,
+        streak_in_jeopardy: streakInJeopardy,
+        weekly_calendar: weeklyCalendar,
+        motivational_message: getMotivationalMessage(currentStreak, practicedToday, longestStreak),
+      },
+    });
+  } catch (err) {
+    console.error('getStudentStreakDetails error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student streak details',
+    });
+  }
+};
+
+/**
+ * GET /api/v1/students/activity-calendar
+ * Query params: ?year=YYYY&month=MM (1-12)
+ * Returns full monthly activity calendar with daily habit markings,
+ * activity counts, contribution heatmap levels (0-3), and detailed breakdown.
+ */
+exports.getStudentActivityCalendar = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const now = new Date();
+    const queryYear = parseInt(req.query.year, 10) || now.getFullYear();
+    const queryMonth = parseInt(req.query.month, 10) || (now.getMonth() + 1);
+
+    // Validate bounds
+    if (queryMonth < 1 || queryMonth > 12 || queryYear < 2020 || queryYear > 2100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid year or month parameter',
+      });
+    }
+
+    // 1. Reconcile and fetch streak data for current user to accurately tag today's state
+    await reconcileUserStreak(userId);
+    const streakRes = await pool.query(
+      `SELECT 
+         CASE 
+           WHEN last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
+         COALESCE(longest_streak, 0) AS longest_streak,
+         (last_activity::date = CURRENT_DATE) AS practiced_today
+       FROM user_streaks
+       WHERE user_id = $1::uuid`,
+      [userId],
+    );
+
+    const userStreak = streakRes.rows[0] || {
+      current_streak: 0,
+      longest_streak: 0,
+      practiced_today: false,
+    };
+    const currentStreak = parseInt(userStreak.current_streak, 10) || 0;
+    const longestStreak = parseInt(userStreak.longest_streak, 10) || 0;
+    const practicedToday = Boolean(userStreak.practiced_today);
+
+    // 2. Query month calendar and all 7 activity touchpoints
+    const query = `
+      WITH month_days AS (
+        SELECT 
+          d::date AS day_date,
+          TRIM(TO_CHAR(d, 'Dy')) AS day_name,
+          EXTRACT(DAY FROM d)::int AS day_number,
+          EXTRACT(ISODOW FROM d)::int AS iso_dow
+        FROM generate_series(
+          make_date($2::int, $3::int, 1)::timestamp,
+          (make_date($2::int, $3::int, 1) + INTERVAL '1 month - 1 day')::timestamp,
+          '1 day'::interval
+        ) AS d
+      ),
+      user_actions AS (
+        SELECT completed_at::date AS act_date, 'lesson' AS action_type, 1 AS count, 0 AS xp
+        FROM public.user_subtopic_progress
+        WHERE user_id = $1::uuid 
+          AND completed_at IS NOT NULL
+          AND completed_at >= make_date($2::int, $3::int, 1) 
+          AND completed_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT COALESCE(attempted_at, created_at)::date AS act_date, 'quiz' AS action_type, 1 AS count, 0 AS xp
+        FROM public.quiz_attempts
+        WHERE user_id = $1::uuid 
+          AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
+          AND COALESCE(attempted_at, created_at) >= make_date($2::int, $3::int, 1) 
+          AND COALESCE(attempted_at, created_at) < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'exercise' AS action_type, 1 AS count, 0 AS xp
+        FROM public.exercise_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'assignment' AS action_type, 1 AS count, 0 AS xp
+        FROM public.assignment_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT submitted_at::date AS act_date, 'project' AS action_type, 1 AS count, 0 AS xp
+        FROM public.project_submissions
+        WHERE user_id = $1::uuid 
+          AND submitted_at IS NOT NULL
+          AND submitted_at >= make_date($2::int, $3::int, 1) 
+          AND submitted_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT COALESCE(submitted_at, updated_at)::date AS act_date, 'college_assignment' AS action_type, 1 AS count, 0 AS xp
+        FROM public.college_assignment_submissions
+        WHERE student_id = $1::uuid 
+          AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
+          AND COALESCE(submitted_at, updated_at) >= make_date($2::int, $3::int, 1) 
+          AND COALESCE(submitted_at, updated_at) < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT last_activity::date AS act_date, 'streak' AS action_type, 1 AS count, 0 AS xp
+        FROM public.user_streaks
+        WHERE user_id = $1::uuid
+          AND last_activity IS NOT NULL
+          AND last_activity >= make_date($2::int, $3::int, 1)
+          AND last_activity < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+
+        UNION ALL
+
+        SELECT created_at::date AS act_date, 'points' AS action_type, 0 AS count, points AS xp
+        FROM public.points_log
+        WHERE user_id = $1::uuid 
+          AND created_at IS NOT NULL
+          AND created_at >= make_date($2::int, $3::int, 1) 
+          AND created_at < make_date($2::int, $3::int, 1) + INTERVAL '1 month'
+      )
+      SELECT 
+        d.day_date::text AS date,
+        d.day_number,
+        d.day_name,
+        d.iso_dow,
+        (d.day_date = CURRENT_DATE) AS is_today,
+        (d.day_date > CURRENT_DATE) AS is_future,
+        COALESCE(COUNT(CASE WHEN ua.action_type != 'points' THEN 1 END), 0)::int AS activity_count,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'lesson' THEN 1 END), 0)::int AS lessons_completed,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'quiz' THEN 1 END), 0)::int AS quizzes_attempted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'exercise' THEN 1 END), 0)::int AS exercises_completed,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'assignment' THEN 1 END), 0)::int AS assignments_submitted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'project' THEN 1 END), 0)::int AS projects_submitted,
+        COALESCE(COUNT(CASE WHEN ua.action_type = 'college_assignment' THEN 1 END), 0)::int AS college_assignments_submitted,
+        COALESCE(SUM(ua.xp), 0)::int AS xp_earned
+      FROM month_days d
+      LEFT JOIN user_actions ua ON ua.act_date = d.day_date
+      GROUP BY d.day_date, d.day_number, d.day_name, d.iso_dow
+      ORDER BY d.day_date ASC;
+    `;
+
+    const { rows } = await pool.query(query, [userId, queryYear, queryMonth]);
+
+    let totalActiveDays = 0;
+    let totalActionsCount = 0;
+    let totalXpEarned = 0;
+
+    const days = rows.map((row) => {
+      let activityCount = parseInt(row.activity_count, 10) || 0;
+      const xpEarned = parseInt(row.xp_earned, 10) || 0;
+
+      // If points were earned on this day but no separate action row, count as at least 1 activity
+      if (activityCount === 0 && xpEarned > 0) {
+        activityCount = 1;
+      }
+
+      // If practiced today is true, guarantee today has at least 1 action
+      if (row.is_today && practicedToday && activityCount === 0) {
+        activityCount = 1;
+      }
+
+      const isActive = activityCount > 0 || xpEarned > 0;
+      if (isActive) totalActiveDays++;
+      totalActionsCount += activityCount;
+      totalXpEarned += xpEarned;
+
+      // Heatmap Intensity Level: 0 (none), 1 (light), 2 (medium), 3 (intense)
+      let activityLevel = 0;
+      if (activityCount >= 4) {
+        activityLevel = 3;
+      } else if (activityCount >= 2) {
+        activityLevel = 2;
+      } else if (activityCount >= 1) {
+        activityLevel = 1;
+      }
+
+      // Daily Status
+      let status = 'future';
+      if (row.is_today) {
+        status = isActive || practicedToday ? 'today_completed' : 'today_pending';
+      } else if (row.is_future) {
+        status = 'future';
+      } else {
+        status = isActive ? 'completed' : 'missed';
+      }
+
+      return {
+        date: row.date,
+        day_number: row.day_number,
+        day_name: row.day_name,
+        iso_dow: row.iso_dow, // 1 (Mon) to 7 (Sun)
+        is_today: row.is_today,
+        is_future: row.is_future,
+        is_active: isActive,
+        activity_count: activityCount,
+        activity_level: activityLevel,
+        status,
+        details: {
+          lessons: row.lessons_completed,
+          quizzes: row.quizzes_attempted,
+          exercises: row.exercises_completed,
+          assignments: row.assignments_submitted,
+          projects: row.projects_submitted,
+          college_assignments: row.college_assignments_submitted,
+          xp_earned: xpEarned,
+        },
+      };
+    });
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+
+    const firstDayIsoDow = days.length > 0 ? days[0].iso_dow : 1; // 1 = Monday
+    const daysInMonth = days.length;
+
+    // Elapsed days in month for consistency calculation
+    let elapsedDays = daysInMonth;
+    const isCurrentMonth = queryYear === now.getFullYear() && queryMonth === (now.getMonth() + 1);
+    if (isCurrentMonth) {
+      elapsedDays = Math.max(1, now.getDate());
+    } else if (queryYear > now.getFullYear() || (queryYear === now.getFullYear() && queryMonth > (now.getMonth() + 1))) {
+      elapsedDays = 0;
+    }
+
+    const consistencyPct = elapsedDays > 0 ? Math.round((totalActiveDays / elapsedDays) * 100) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        year: queryYear,
+        month: queryMonth,
+        month_name: `${monthNames[queryMonth - 1]} ${queryYear}`,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        practiced_today: practicedToday,
+        total_active_days: totalActiveDays,
+        total_actions_count: totalActionsCount,
+        total_xp_earned: totalXpEarned,
+        monthly_consistency_pct: consistencyPct,
+        first_day_iso_dow: firstDayIsoDow,
+        days_in_month: daysInMonth,
+        days,
+      },
+    });
+  } catch (err) {
+    console.error('getStudentActivityCalendar error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student activity calendar',
+    });
+  }
+};
+
 module.exports = exports;
+

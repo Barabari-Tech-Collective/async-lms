@@ -70,8 +70,12 @@ exports.getUserProfile = async (req, res) => {
          COALESCE(c.id, fc_c.id) AS college_id,
          COALESCE(c.name, fc_c.name) AS college_name,
          COALESCE((SELECT SUM(points) FROM public.points_log WHERE user_id = u.id), 0)::integer AS total_points,
-         COALESCE(us.current_streak, 0) AS current_streak,
+         CASE 
+           WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
          COALESCE(us.longest_streak, 0) AS longest_streak,
+         (us.last_activity::date = CURRENT_DATE) AS practiced_today,
          (SELECT COUNT(*) FROM public.user_badges WHERE user_id = u.id)::integer AS badge_count
        FROM public.users u
        LEFT JOIN public.roles r ON r.id = u.role_id
@@ -83,7 +87,7 @@ exports.getUserProfile = async (req, res) => {
        WHERE u.id = $1
        GROUP BY u.id, u.full_name, u.email, r.role_key, u.domain, u.role_focus, u.created_at,
          sp.degree, sp.year, sp.current_academic_year, c.id, c.name, fc_c.id, fc_c.name,
-         us.current_streak, us.longest_streak`,
+         us.current_streak, us.longest_streak, us.last_activity`,
       [userId],
     );
 

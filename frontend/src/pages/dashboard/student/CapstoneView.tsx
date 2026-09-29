@@ -8,7 +8,11 @@ import {
   Link2,
   ArrowRight,
   PartyPopper,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
+import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
+import type { StudentAssignmentOverviewItem } from '@/utils/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
@@ -67,9 +71,14 @@ interface CapstoneDetail {
   title: string;
   instructions?: string | null;
   max_score: number;
+  evaluator_type?: string | null;
   submission_link?: string | null;
   submitted_at?: string | null;
   is_approved?: boolean | null;
+  score?: number | null;
+  rubric_breakdown?: any;
+  execution_logs?: string | null;
+  evaluation_status?: string | null;
 }
 
 export default function CapstoneView() {
@@ -82,6 +91,31 @@ export default function CapstoneView() {
 
   const [link, setLink] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+
+  const overviewItem: StudentAssignmentOverviewItem | null = useMemo(() => {
+    if (!capstone || capstone.score === null || capstone.score === undefined) return null;
+    let parsedFeedback = null;
+    if (typeof capstone.rubric_breakdown === 'object') {
+      parsedFeedback = capstone.rubric_breakdown;
+    } else if (typeof capstone.rubric_breakdown === 'string') {
+      try {
+        parsedFeedback = JSON.parse(capstone.rubric_breakdown);
+      } catch {}
+    }
+    return {
+      id: capstone.id,
+      title: capstone.title,
+      type: 'CAPSTONE',
+      course_name: slug ? slug.replace(/-/g, ' ').toUpperCase() : 'Capstone Course',
+      max_score: capstone.max_score || 100,
+      status: 'evaluated',
+      marks: capstone.score,
+      submission_link: capstone.submission_link,
+      feedback: parsedFeedback,
+      navigation_url: window.location.pathname,
+    };
+  }, [capstone, slug]);
 
   useEffect(() => {
     if (!slug) return;
@@ -179,14 +213,29 @@ export default function CapstoneView() {
 
   if (error || !capstone) {
     return (
-      <div className='flex h-[60vh] flex-col items-center justify-center gap-3 p-10 text-center'>
+      <div className='flex h-[60vh] flex-col items-center justify-center gap-3 p-6 sm:p-10 text-center'>
         <XCircle className='h-12 w-12 text-red-400' />
         <p className='text-lg font-semibold text-slate-700'>
           Failed to load capstone project
         </p>
-        <p className='text-sm text-slate-500'>
-          Please try refreshing the page.
+        <p className='text-sm text-slate-500 max-w-sm'>
+          Unable to fetch project details. Please try again or return to your dashboard.
         </p>
+        <div className='flex items-center gap-3 mt-2'>
+          <Button
+            variant='outline'
+            onClick={() => navigate('/dashboard/student')}
+            className='rounded-xl text-xs'
+          >
+            Dashboard
+          </Button>
+          <Button
+            onClick={() => window.location.reload()}
+            className='bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs'
+          >
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }
@@ -252,6 +301,42 @@ export default function CapstoneView() {
           )}
         </div>
       </Card>
+
+      {/* Evaluation Results Card (when project is scored/evaluated) */}
+      {overviewItem && (
+        <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-emerald-200/80 shadow-sm'>
+          <div className='bg-gradient-to-r from-emerald-500 to-teal-600 px-4 sm:px-6 py-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+            <div className='flex items-center gap-3'>
+              <div className='p-2 bg-white/15 backdrop-blur-sm rounded-xl'>
+                <Sparkles className='w-5 h-5 text-yellow-300' />
+              </div>
+              <div>
+                <p className='text-xs font-bold uppercase tracking-wider text-emerald-100'>
+                  Evaluation Complete
+                </p>
+                <h3 className='text-lg font-extrabold text-white'>
+                  Score: {overviewItem.marks} / {overviewItem.max_score}
+                </h3>
+              </div>
+            </div>
+            <Button
+              size='sm'
+              onClick={() => setFeedbackModalOpen(true)}
+              className='bg-white text-emerald-800 hover:bg-emerald-50 font-bold rounded-xl text-xs h-9 px-4 shadow-sm cursor-pointer'
+            >
+              <Eye className='w-4 h-4 mr-1.5' /> View Detailed Rubric Results
+            </Button>
+          </div>
+          {overviewItem.feedback?.summary && (
+            <div className='p-4 sm:p-6 bg-emerald-50/40 text-xs sm:text-sm text-slate-700 leading-relaxed border-t border-emerald-100'>
+              <p className='font-bold text-slate-900 mb-1 text-xs uppercase tracking-wider'>
+                Evaluator Feedback:
+              </p>
+              <p>{overviewItem.feedback.summary}</p>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Submission */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm'>
@@ -322,6 +407,13 @@ export default function CapstoneView() {
           </Button>
         </div>
       )}
+
+      {/* Detailed Feedback Modal */}
+      <StudentAssignmentFeedbackModal
+        isOpen={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        assignment={overviewItem}
+      />
     </div>
   );
 }

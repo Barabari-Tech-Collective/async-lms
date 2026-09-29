@@ -1,9 +1,10 @@
 import { Button } from '@/components/ui/button';
-import { Save, X, Wand2, Loader2 } from 'lucide-react';
+import { Save, X, Wand2, Loader2, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import toast from 'react-hot-toast';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 
 interface AssignmentModalProps {
   isOpen: boolean;
@@ -77,6 +78,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>('rich');
   const [generating, setGenerating] = useState(false);
   const [generatingRubric, setGeneratingRubric] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -357,23 +359,50 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
         </div>
         </div>
 
-        <div className='flex gap-3 border-t border-slate-100 p-6 pt-4'>
+        <div className='flex items-center gap-3 border-t border-slate-100 p-6 pt-4'>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => setPreviewOpen(true)}
+            className='border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center gap-1.5'
+          >
+            <Eye className='h-4 w-4 text-indigo-600' />
+            <span>Preview Student View</span>
+          </Button>
+          <div className='flex-1' />
           <Button
             onClick={onClose}
-            className='flex-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            className='border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
           >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             loading={loading}
-            className='flex-1 bg-indigo-600 text-white hover:bg-indigo-700'
+            className='bg-indigo-600 text-white hover:bg-indigo-700'
           >
             {!loading && <Save className='mr-2 h-4 w-4' />}
             {editData ? 'Update' : 'Create'} Assignment
           </Button>
         </div>
       </div>
+
+      {previewOpen && (
+        <AdminAssignmentPreviewModal
+          isOpen={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          assignmentData={{
+            title: title.trim() || 'Untitled Assignment',
+            instructions,
+            max_score: maxScore,
+            evaluator_type: evaluatorType || null,
+            test_cases: testCases,
+            rubric: rubric,
+            unit_title: unitTitle,
+          }}
+          unitTitle={unitTitle}
+        />
+      )}
     </div>
   );
 };

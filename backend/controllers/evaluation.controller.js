@@ -45,52 +45,84 @@ function isAllowedGitUrl(urlStr) {
   }
 }
 exports.runEvaluation = async (req, res) => {
-  const { assignmentId, evaluatorType: reqEvaluatorType, scope = 'pending' } = req.body;
+  const { assignmentId, projectId, evaluatorType: reqEvaluatorType, scope = 'pending' } = req.body;
+  const targetId = projectId || assignmentId;
 
-  if (!assignmentId) {
-    return res.status(400).json({ success: false, message: 'Assignment ID is required' });
+  if (!targetId) {
+    return res.status(400).json({ success: false, message: 'Assignment or Project ID is required' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Try fetching from curriculum assignments first
-    let assignmentRes = await client.query(
-      `SELECT a.id, a.title, a.evaluator_type, a.test_cases, a.rubric, 'unit' as type, t.subject_id
-       FROM assignments a
-       JOIN units u ON a.unit_id = u.id
-       JOIN topics t ON u.topic_id = t.id
-       WHERE a.id = $1`,
-      [assignmentId],
-    );
-
-    let assignment = assignmentRes.rows[0];
+    let assignment = null;
     let isCollegeAssignment = false;
+    let isProject = false;
 
-    // 2. If not found, try facilitator-created college assignments
-    if (!assignment) {
-      assignmentRes = await client.query(
-        `SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type, college_id, created_by, course
-         FROM college_assignments
-         WHERE id = $1`,
+    // 0. If projectId is explicitly provided, fetch project
+    if (projectId) {
+      const projRes = await client.query(
+        `SELECT p.id, p.title, p.evaluator_type, p.test_cases, p.rubric, p.max_score, 'project' as type, t.subject_id
+         FROM projects p
+         JOIN topics t ON p.topic_id = t.id
+         WHERE p.id = $1`,
+        [projectId],
+      );
+      assignment = projRes.rows[0];
+      if (assignment) isProject = true;
+    }
+
+    if (!assignment && assignmentId) {
+      // 1. Try fetching from curriculum assignments first
+      let assignmentRes = await client.query(
+        `SELECT a.id, a.title, a.evaluator_type, a.test_cases, a.rubric, 'unit' as type, t.subject_id
+         FROM assignments a
+         JOIN units u ON a.unit_id = u.id
+         JOIN topics t ON u.topic_id = t.id
+         WHERE a.id = $1`,
         [assignmentId],
       );
+
       assignment = assignmentRes.rows[0];
-      isCollegeAssignment = true;
+
+      // 2. If not found, try facilitator-created college assignments
+      if (!assignment) {
+        assignmentRes = await client.query(
+          `SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type, college_id, created_by, course
+           FROM college_assignments
+           WHERE id = $1`,
+          [assignmentId],
+        );
+        assignment = assignmentRes.rows[0];
+        isCollegeAssignment = !!assignment;
+      }
+
+      // 3. Fallback: check if assignmentId was actually a projectId
+      if (!assignment) {
+        const projRes = await client.query(
+          `SELECT p.id, p.title, p.evaluator_type, p.test_cases, p.rubric, p.max_score, 'project' as type, t.subject_id
+           FROM projects p
+           JOIN topics t ON p.topic_id = t.id
+           WHERE p.id = $1`,
+          [assignmentId],
+        );
+        assignment = projRes.rows[0];
+        if (assignment) isProject = true;
+      }
     }
 
     if (!assignment) {
-      throw new Error('Assignment not found');
+      throw new Error('Assignment or Project not found');
     }
 
     // Guard facilitator access
     if (req.user.role === 'facilitator') {
       const subjectIds = req.user.subject_ids || [];
       const collegeIds = req.user.college_ids || [];
-      if (!isCollegeAssignment) {
+      if (isProject || !isCollegeAssignment) {
         if (!subjectIds.includes(assignment.subject_id)) {
-          throw new Error('Access denied: Assignment does not belong to your assigned subjects');
+          throw new Error('Access denied: Item does not belong to your assigned subjects');
         }
       } else {
         if (!collegeIds.includes(assignment.college_id)) {
@@ -121,18 +153,28 @@ exports.runEvaluation = async (req, res) => {
         ? ` AND s.id NOT IN (
               SELECT r.submission_id FROM evaluation_results r
               JOIN evaluations e ON r.evaluation_id = e.id
-              WHERE (e.assignment_id = $1 OR e.college_assignment_id = $1) AND r.status = 'completed'
+              WHERE (e.assignment_id = $1 OR e.college_assignment_id = $1 OR e.project_id = $1) AND r.status = 'completed'
             )`
         : '';
 
-    const subParams = [assignmentId];
+    const subParams = [targetId];
     let facSubFilter = '';
     if (req.user.role === 'facilitator') {
       subParams.push(req.user.college_ids || []);
       facSubFilter = ` AND sp.college_id = ANY($${subParams.length}::uuid[])`;
     }
 
-    const queryStr = isCollegeAssignment
+    const queryStr = isProject
+      ? `SELECT
+          s.id as submission_id,
+          s.submission_link,
+          s.user_id,
+          u.full_name as student_name
+         FROM project_submissions s
+         JOIN users u ON s.user_id = u.id
+         JOIN student_profiles sp ON sp.user_id = u.id
+         WHERE s.project_id = $1${scopeFilter}${facSubFilter}`
+      : isCollegeAssignment
       ? `SELECT
           s.id as submission_id,
           s.submission_link,
@@ -165,9 +207,13 @@ exports.runEvaluation = async (req, res) => {
     const evaluatorType = reqEvaluatorType || assignment.evaluator_type || 'AI';
 
     //  Create evaluation
-    // college assignments use a separate FK column to avoid violating assignments FK
     const evalRes = await client.query(
-      isCollegeAssignment
+      isProject
+        ? `INSERT INTO evaluations
+           (project_id, evaluator_type, status, total_submissions)
+           VALUES ($1, $2, 'running', $3)
+           RETURNING *`
+        : isCollegeAssignment
         ? `INSERT INTO evaluations
            (college_assignment_id, evaluator_type, status, total_submissions)
            VALUES ($1, $2, 'running', $3)
@@ -176,10 +222,59 @@ exports.runEvaluation = async (req, res) => {
            (assignment_id, evaluator_type, status, total_submissions)
            VALUES ($1, $2, 'running', $3)
            RETURNING *`,
-      [assignmentId, evaluatorType, submissions.length],
+      [targetId, evaluatorType, submissions.length],
     );
 
     const evaluation = evalRes.rows[0];
+
+    // Tier 1 Carry-Forward: If scope is 'pending', copy forward prior completed/failed results
+    if (scope === 'pending') {
+      const currentSubIds = submissions.map((s) => s.submission_id || s.id).filter(Boolean);
+      const currentStudentIds = submissions.map((s) => s.user_id || s.student_id).filter(Boolean);
+      const targetCol = isProject
+        ? 'e.project_id'
+        : isCollegeAssignment
+        ? 'e.college_assignment_id'
+        : 'e.assignment_id';
+      const carryForwardRes = await client.query(
+        `INSERT INTO evaluation_results (
+          evaluation_id, submission_id, student_id, student_name, job_id, status, marks, feedback, status_url, created_at
+        )
+        SELECT 
+          $1, 
+          prev.submission_id, 
+          prev.student_id, 
+          prev.student_name, 
+          prev.job_id, 
+          prev.status, 
+          prev.marks, 
+          prev.feedback, 
+          prev.status_url, 
+          prev.created_at
+        FROM (
+          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          FROM evaluation_results r
+          JOIN evaluations e ON r.evaluation_id = e.id
+          WHERE ${targetCol}::text = $2::text
+            AND r.status IN ('completed', 'failed')
+            AND r.submission_id != ALL($3::uuid[])
+            AND r.student_id != ALL($4::uuid[])
+          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+        ) prev
+        ON CONFLICT (evaluation_id, submission_id) DO NOTHING
+        RETURNING id`,
+        [evaluation.id, targetId, currentSubIds, currentStudentIds]
+      );
+      const carriedOverCount = carryForwardRes.rowCount || 0;
+      if (carriedOverCount > 0) {
+        const totalCohortCount = submissions.length + carriedOverCount;
+        await client.query(
+          `UPDATE evaluations SET total_submissions = $1 WHERE id = $2`,
+          [totalCohortCount, evaluation.id]
+        );
+        evaluation.total_submissions = totalCohortCount;
+      }
+    }
 
     //validation
     if (evaluatorType === 'JS' && !assignment.test_cases) {
@@ -499,6 +594,7 @@ exports.syncEvaluationStatus = async (req, res) => {
           console.log(`Job ${job.id} state: ${jobState}`);
           let marks = 0;
           let feedback = '';
+          let rowStatus = 'completed';
 
           if (jobState === 'completed' && jobData.result) {
             const resData =
@@ -508,38 +604,62 @@ exports.syncEvaluationStatus = async (req, res) => {
               jobData.result;
             const finalData = Array.isArray(resData) ? resData[0] : resData;
 
-            marks = finalData?.score ?? finalData?.marks ?? 0;
-            if (marks !== null && typeof marks === 'object' && marks.score !== undefined) {
-              marks = marks.score;
-            }
-            feedback =
-              finalData?.rubricFeedback ||
-              finalData?.feedback ||
-              finalData?.error ||
-              'Evaluation completed successfully.';
-            if (typeof feedback === 'string') {
-              try {
-                const parsedFb = JSON.parse(feedback);
-                if (parsedFb && typeof parsedFb === 'object') {
-                  feedback = parsedFb;
-                } else {
+            if (!finalData || (typeof finalData === 'object' && Object.keys(finalData).length === 0)) {
+              rowStatus = 'failed';
+              feedback = {
+                summary: 'Evaluation completed without scoring output from grader. Please re-evaluate.',
+                strengths: [],
+                issues: ['Grader returned empty evaluation result'],
+                breakdown: [],
+              };
+            } else {
+              marks = finalData?.score ?? finalData?.marks ?? 0;
+              if (marks !== null && typeof marks === 'object' && marks.score !== undefined) {
+                marks = marks.score;
+              }
+              feedback =
+                finalData?.rubricFeedback ||
+                finalData?.feedback ||
+                finalData?.error ||
+                'Evaluation completed.';
+              if (typeof feedback === 'string') {
+                try {
+                  const parsedFb = JSON.parse(feedback);
+                  if (parsedFb && typeof parsedFb === 'object') {
+                    feedback = parsedFb;
+                  } else {
+                    const s = String(feedback || '').trim();
+                    feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
+                  }
+                } catch {
                   const s = String(feedback || '').trim();
                   feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
                 }
-              } catch {
-                const s = String(feedback || '').trim();
-                feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
               }
             }
-          } else if (jobState === 'failed') {
-            feedback = { summary: `Evaluation Failed: ${jobData.failedReason || 'Unknown error'}`, strengths: [], issues: [], breakdown: [] };
+          } else {
+            rowStatus = 'failed';
+            const failureReason =
+              jobData.failedReason ||
+              (jobData.stacktrace && jobData.stacktrace[0] ? jobData.stacktrace[0].split('\n')[0] : null) ||
+              jobData.error ||
+              'Evaluation worker was interrupted or encountered an unexpected error. Please retry evaluation.';
+            feedback = { summary: `Evaluation Failed: ${failureReason}`, strengths: [], issues: [failureReason], breakdown: [] };
           }
 
           await pool.query(
-            `UPDATE evaluation_results SET status = 'completed', marks = $1, feedback = $2::jsonb WHERE id = $3`,
-            [marks, JSON.stringify(feedback), job.id],
+            `UPDATE evaluation_results SET status = $1, marks = $2, feedback = $3::jsonb WHERE id = $4`,
+            [rowStatus, marks, JSON.stringify(feedback), job.id],
           );
           newlyCompleted++;
+
+          // Also sync score and feedback into project_submissions if this was a project submission
+          await pool.query(
+            `UPDATE project_submissions
+             SET score = $1, rubric_breakdown = $2::jsonb, is_approved = CASE WHEN $1 > 0 THEN true ELSE is_approved END, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [marks, JSON.stringify(feedback), job.submission_id],
+          ).catch(() => {});
 
           if (job.student_id && jobState === 'completed') {
             notify({
@@ -590,7 +710,7 @@ exports.getLatestEvaluationByAssignment = async (req, res) => {
     const { assignmentId } = req.params;
     const { rows } = await pool.query(
       `SELECT id FROM evaluations
-       WHERE assignment_id = $1 OR college_assignment_id = $1
+       WHERE assignment_id = $1 OR college_assignment_id = $1 OR project_id = $1
        ORDER BY created_at DESC LIMIT 1`,
       [assignmentId],
     );
@@ -599,7 +719,7 @@ exports.getLatestEvaluationByAssignment = async (req, res) => {
         .status(404)
         .json({
           success: false,
-          message: 'No evaluation found for this assignment',
+          message: 'No evaluation found for this assignment or project',
         });
     }
     res.json({ success: true, evaluationId: rows[0].id });
@@ -657,34 +777,54 @@ exports.getResultsByAssignment = async (req, res) => {
           if (!isAuthor && !isSubjectAssigned) {
             return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
           }
+        } else {
+          // Check capstone project
+          const projSubj = await pool.query(
+            `SELECT t.subject_id FROM projects p
+             JOIN topics t ON p.topic_id = t.id
+             WHERE p.id = $1`,
+            [assignmentId],
+          );
+          if (projSubj.rows.length > 0) {
+            if (!facilitatorSubjectIds.includes(projSubj.rows[0].subject_id)) {
+              return res.status(403).json({ success: false, message: 'Access denied: Project does not belong to your assigned subjects' });
+            }
+          }
         }
       }
     }
 
     // Check if evaluation exists
     const evalRes = await pool.query(
-      `SELECT e.*, COALESCE(a.title, c.title) as assignment_name
+      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name
        FROM evaluations e
        LEFT JOIN assignments a ON e.assignment_id = a.id
        LEFT JOIN college_assignments c ON e.college_assignment_id = c.id
-       WHERE e.assignment_id = $1 OR e.college_assignment_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
+       LEFT JOIN projects p ON e.project_id = p.id
+       WHERE e.id::text = $1 OR e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1
+       ORDER BY e.created_at DESC LIMIT 1`,
       [assignmentId],
     );
 
     if (evalRes.rows.length > 0) {
       // Evaluation exists, fetch results just like getEvaluationResults
       const evaluation = evalRes.rows[0];
-      const values = [evaluation.id];
+      const resolvedAssignmentId =
+        evaluation.college_assignment_id ||
+        evaluation.project_id ||
+        evaluation.assignment_id ||
+        assignmentId;
+      const values = [resolvedAssignmentId];
       let collegeFilter = '';
       if (isFacilitator) {
         values.push(facilitatorCollegeIds);
-        collegeFilter = ' AND col.id = ANY($2)';
+        collegeFilter = ' AND col.id = ANY($2::uuid[])';
       }
 
       const resultsRes = await pool.query(
-        `SELECT r.*,
-                COALESCE(s.submission_link, cs.submission_link) as submission_link,
+        `SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id))
+                r.*,
+                COALESCE(s.submission_link, cs.submission_link, ps.submission_link) as submission_link,
                 cs.submission_file_url as submission_file_url,
                 sp.expected_graduation_year,
                 col.name as college_name,
@@ -693,9 +833,14 @@ exports.getResultsByAssignment = async (req, res) => {
          JOIN evaluations e ON r.evaluation_id = e.id
          LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
          LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
+         LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
          LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
          LEFT JOIN colleges col ON sp.college_id = col.id
-         WHERE r.evaluation_id = $1${collegeFilter}`,
+         WHERE (e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1 OR e.id::text = $1)
+           ${collegeFilter}
+         ORDER BY COALESCE(r.student_id, r.submission_id),
+                  e.created_at DESC,
+                  r.created_at DESC`,
         values,
       );
 
@@ -710,13 +855,14 @@ exports.getResultsByAssignment = async (req, res) => {
       // Also fetch any NEW submissions that arrived after the evaluation was triggered
       // (they will have no evaluation_results row yet — show them as pending)
       const isCollege = !!evaluation.college_assignment_id;
+      const isProj = !!evaluation.project_id;
       const evaluatedSubmissionIds = resultsRes.rows.map((r) => r.submission_id).filter(Boolean);
 
-      let newSubValues = [assignmentId];
+      let newSubValues = [resolvedAssignmentId];
       let newSubCollegeFilter = '';
       if (isFacilitator) {
         newSubValues.push(facilitatorCollegeIds);
-        newSubCollegeFilter = ' AND col.id = ANY($2)';
+        newSubCollegeFilter = ' AND col.id = ANY($2::uuid[])';
       }
 
       let newSubQuery = '';
@@ -735,6 +881,22 @@ exports.getResultsByAssignment = async (req, res) => {
           LEFT JOIN student_profiles sp ON u.id = sp.user_id
           LEFT JOIN colleges col ON sp.college_id = col.id
           WHERE s.assignment_id = $1${newSubCollegeFilter}
+        `;
+      } else if (isProj) {
+        newSubQuery = `
+          SELECT s.id as submission_id,
+                 s.submission_link,
+                 null as submission_file_url,
+                 s.user_id as student_id,
+                 u.full_name as student_name,
+                 sp.expected_graduation_year,
+                 col.name as college_name,
+                 col.id as college_id
+          FROM project_submissions s
+          JOIN users u ON s.user_id = u.id
+          LEFT JOIN student_profiles sp ON u.id = sp.user_id
+          LEFT JOIN colleges col ON sp.college_id = col.id
+          WHERE s.project_id = $1${newSubCollegeFilter}
         `;
       } else {
         newSubQuery = `
@@ -785,8 +947,11 @@ exports.getResultsByAssignment = async (req, res) => {
     }
 
     // No evaluation exists, fetch all submissions and generate pending results
-    const isCollegeAssignment = await pool.query(`SELECT id FROM college_assignments WHERE id = $1`, [assignmentId]);
+    const isCollegeAssignment = await pool.query(`SELECT id FROM college_assignments WHERE id::text = $1`, [assignmentId]);
     const isCollege = isCollegeAssignment.rows.length > 0;
+
+    const isProjectAssignment = await pool.query(`SELECT id FROM projects WHERE id::text = $1`, [assignmentId]);
+    const isProject = isProjectAssignment.rows.length > 0;
 
     let submissionQuery = '';
     let values = [assignmentId];
@@ -805,7 +970,23 @@ exports.getResultsByAssignment = async (req, res) => {
         JOIN users u ON s.student_id = u.id
         LEFT JOIN student_profiles sp ON u.id = sp.user_id
         LEFT JOIN colleges col ON sp.college_id = col.id
-        WHERE s.assignment_id = $1
+        WHERE s.assignment_id::text = $1
+      `;
+    } else if (isProject) {
+      submissionQuery = `
+        SELECT s.id as submission_id,
+               s.submission_link,
+               null as submission_file_url,
+               s.user_id as student_id,
+               u.full_name as student_name,
+               sp.expected_graduation_year,
+               col.name as college_name,
+               col.id as college_id
+        FROM project_submissions s
+        JOIN users u ON s.user_id = u.id
+        LEFT JOIN student_profiles sp ON u.id = sp.user_id
+        LEFT JOIN colleges col ON sp.college_id = col.id
+        WHERE s.project_id = $1
       `;
     } else {
       submissionQuery = `
@@ -827,7 +1008,7 @@ exports.getResultsByAssignment = async (req, res) => {
 
     if (isFacilitator) {
       values.push(facilitatorCollegeIds);
-      submissionQuery += ` AND col.id = ANY($2)`;
+      submissionQuery += ` AND col.id = ANY($2::uuid[])`;
     }
 
     const submissionsRes = await pool.query(submissionQuery, values);
@@ -843,19 +1024,33 @@ exports.getResultsByAssignment = async (req, res) => {
       }))
     );
 
-    const assignmentInfo = await pool.query(
-      `SELECT title, evaluator_type FROM ${isCollege ? 'college_assignments' : 'assignments'} WHERE id = $1`,
-      [assignmentId]
-    );
+    let assignmentInfo;
+    if (isCollege) {
+      assignmentInfo = await pool.query(
+        `SELECT title, evaluator_type FROM college_assignments WHERE id = $1`,
+        [assignmentId]
+      );
+    } else if (isProject) {
+      assignmentInfo = await pool.query(
+        `SELECT title, evaluator_type FROM projects WHERE id = $1`,
+        [assignmentId]
+      );
+    } else {
+      assignmentInfo = await pool.query(
+        `SELECT title, evaluator_type FROM assignments WHERE id = $1`,
+        [assignmentId]
+      );
+    }
 
     return res.json({
       success: true,
       evaluation: {
         id: null,
         assignment_id: assignmentId,
-        assignment_name: assignmentInfo.rows[0]?.title,
+        assignment_name: assignmentInfo.rows[0]?.title || 'Capstone Project',
         evaluator_type: assignmentInfo.rows[0]?.evaluator_type || 'REACT',
         status: 'pending',
+        is_project: isProject,
       },
       results: pendingResults,
     });
@@ -870,8 +1065,8 @@ exports.getEvaluationResults = async (req, res) => {
     const { id } = req.params;
 
     const evalRes = await pool.query(
-      `SELECT e.*, COALESCE(a.title, c.title) as assignment_name,
-              t.subject_id as curriculum_subject_id,
+      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name,
+              COALESCE(t.subject_id, pt.subject_id) as curriculum_subject_id,
               c.college_id as college_assignment_college_id,
               c.course as college_assignment_course,
               c.created_by as college_assignment_created_by
@@ -879,6 +1074,8 @@ exports.getEvaluationResults = async (req, res) => {
        LEFT JOIN assignments a ON e.assignment_id = a.id
        LEFT JOIN units u ON a.unit_id = u.id
        LEFT JOIN topics t ON u.topic_id = t.id
+       LEFT JOIN projects p ON e.project_id = p.id
+       LEFT JOIN topics pt ON p.topic_id = pt.id
        LEFT JOIN college_assignments c ON e.college_assignment_id = c.id
        WHERE e.id = $1`,
       [id],
@@ -897,9 +1094,9 @@ exports.getEvaluationResults = async (req, res) => {
       if (facilitatorCollegeIds.length === 0 || facilitatorSubjectIds.length === 0) {
         return res.status(403).json({ success: false, message: 'Access denied: No colleges or subjects assigned' });
       }
-      if (evaluation.assignment_id && evaluation.curriculum_subject_id) {
+      if ((evaluation.assignment_id || evaluation.project_id) && evaluation.curriculum_subject_id) {
         if (!facilitatorSubjectIds.includes(evaluation.curriculum_subject_id)) {
-          return res.status(403).json({ success: false, message: 'Access denied: Assignment does not belong to your assigned subjects' });
+          return res.status(403).json({ success: false, message: 'Access denied: Item does not belong to your assigned subjects' });
         }
       }
       if (evaluation.college_assignment_id && evaluation.college_assignment_college_id) {
@@ -932,7 +1129,7 @@ exports.getEvaluationResults = async (req, res) => {
 
     const resultsRes = await pool.query(
       `SELECT r.*,
-              COALESCE(s.submission_link, cs.submission_link) as submission_link,
+              COALESCE(s.submission_link, cs.submission_link, ps.submission_link) as submission_link,
               cs.submission_file_url as submission_file_url,
               sp.expected_graduation_year,
               col.name as college_name,
@@ -941,6 +1138,7 @@ exports.getEvaluationResults = async (req, res) => {
        JOIN evaluations e ON r.evaluation_id = e.id
        LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
        LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
+       LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
        LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
        LEFT JOIN colleges col ON sp.college_id = col.id
        WHERE r.evaluation_id = $1${collegeFilter}`,
@@ -1169,6 +1367,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     await client.query('BEGIN');
 
     let isCollegeAssignment = false;
+    let isProject = false;
 
     // Auto-create evaluation if evaluationId is missing
     if (!evaluationId) {
@@ -1176,11 +1375,20 @@ exports.reEvaluateSubmission = async (req, res) => {
 
       const isCollegeAssignmentRes = await client.query(`SELECT id FROM college_assignments WHERE id = $1`, [assignmentId]);
       isCollegeAssignment = isCollegeAssignmentRes.rows.length > 0;
+
+      const isProjectRes = await client.query(`SELECT id FROM projects WHERE id = $1`, [assignmentId]);
+      isProject = isProjectRes.rows.length > 0;
       
       const newEval = await client.query(
-        `INSERT INTO evaluations (assignment_id, college_assignment_id, evaluator_type, status, total_submissions)
-         VALUES ($1, $2, $3, 'running', $4) RETURNING id`,
-        [isCollegeAssignment ? null : assignmentId, isCollegeAssignment ? assignmentId : null, evaluatorType, submissionIds.length]
+        `INSERT INTO evaluations (assignment_id, college_assignment_id, project_id, evaluator_type, status, total_submissions)
+         VALUES ($1, $2, $3, $4, 'running', $5) RETURNING id`,
+        [
+          (!isCollegeAssignment && !isProject) ? assignmentId : null,
+          isCollegeAssignment ? assignmentId : null,
+          isProject ? assignmentId : null,
+          evaluatorType,
+          submissionIds.length
+        ]
       );
       evaluationId = newEval.rows[0].id;
       
@@ -1190,11 +1398,16 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           WHERE s.id = ANY($1)`
+           WHERE s.id = ANY($1::uuid[])`
+        : isProject
+        ? `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
+           FROM project_submissions s
+           JOIN users u ON s.user_id = u.id
+           WHERE s.id = ANY($1::uuid[])`
         : `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id = ANY($1)`,
+           WHERE s.id = ANY($1::uuid[])`,
         [submissionIds]
       );
       
@@ -1207,10 +1420,55 @@ exports.reEvaluateSubmission = async (req, res) => {
           [evaluationId, s.submission_id, s.user_id, s.student_name]
         );
       }
+
+      // Carry forward sibling submissions from prior evaluations of this assignment
+      const targetCol = isProject
+        ? 'e.project_id'
+        : isCollegeAssignment
+        ? 'e.college_assignment_id'
+        : 'e.assignment_id';
+      const currentSubIds = submissionIds;
+      const currentStudentIds = initialSubmissionsRes.rows.map((s) => s.user_id).filter(Boolean);
+      const siblingCarryRes = await client.query(
+        `INSERT INTO evaluation_results (
+          evaluation_id, submission_id, student_id, student_name, job_id, status, marks, feedback, status_url, created_at
+        )
+        SELECT 
+          $1, 
+          prev.submission_id, 
+          prev.student_id, 
+          prev.student_name, 
+          prev.job_id, 
+          prev.status, 
+          prev.marks, 
+          prev.feedback, 
+          prev.status_url, 
+          prev.created_at
+        FROM (
+          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          FROM evaluation_results r
+          JOIN evaluations e ON r.evaluation_id = e.id
+          WHERE ${targetCol}::text = $2::text
+            AND r.status IN ('completed', 'failed')
+            AND r.submission_id != ALL($3::uuid[])
+            AND r.student_id != ALL($4::uuid[])
+          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+        ) prev
+        ON CONFLICT (evaluation_id, submission_id) DO NOTHING
+        RETURNING id`,
+        [evaluationId, assignmentId, currentSubIds, currentStudentIds]
+      );
+      const siblingCount = siblingCarryRes.rowCount || 0;
+      if (siblingCount > 0) {
+        await client.query(
+          `UPDATE evaluations SET total_submissions = total_submissions + $1 WHERE id = $2`,
+          [siblingCount, evaluationId]
+        );
+      }
     } else {
-      // Fetch the evaluation to get assignmentId or collegeAssignmentId
+      // Fetch the evaluation to get assignmentId or collegeAssignmentId or project_id
       const evalRes = await client.query(
-        `SELECT assignment_id, college_assignment_id FROM evaluations WHERE id = $1`,
+        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id = $1`,
         [evaluationId]
       );
 
@@ -1220,18 +1478,25 @@ exports.reEvaluateSubmission = async (req, res) => {
 
       const evaluation = evalRes.rows[0];
       isCollegeAssignment = !!evaluation.college_assignment_id;
-      assignmentId = isCollegeAssignment ? evaluation.college_assignment_id : evaluation.assignment_id;
+      isProject = !!evaluation.project_id;
+      assignmentId = isCollegeAssignment
+        ? evaluation.college_assignment_id
+        : isProject
+        ? evaluation.project_id
+        : evaluation.assignment_id;
     }
 
-    // Fetch assignment for rubric/test_cases
+    // Fetch assignment or project for rubric/test_cases
     let assignmentRes;
     if (isCollegeAssignment) {
       assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type FROM college_assignments WHERE id = $1`, [assignmentId]);
+    } else if (isProject) {
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'project' as type FROM projects WHERE id = $1`, [assignmentId]);
     } else {
       assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'unit' as type FROM assignments WHERE id = $1`, [assignmentId]);
     }
     const assignment = assignmentRes.rows[0];
-    if (!assignment) throw new Error("Assignment not found");
+    if (!assignment) throw new Error("Assignment or Project not found");
 
     // Fetch the specific submissions (support either submission_id or evaluation_results.id)
     const queryStr = isCollegeAssignment
@@ -1241,6 +1506,13 @@ exports.reEvaluateSubmission = async (req, res) => {
          WHERE s.id = ANY($1)
             OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
             OR s.student_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
+      : isProject
+      ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+         FROM project_submissions s
+         JOIN users u ON s.user_id = u.id
+         WHERE s.id = ANY($1)
+            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
+            OR s.user_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
       : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
          FROM assignment_submissions s
          JOIN users u ON s.user_id = u.id
@@ -1258,6 +1530,12 @@ exports.reEvaluateSubmission = async (req, res) => {
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
            JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.student_id
+           WHERE er.evaluation_id = $1`
+        : isProject
+        ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+           FROM project_submissions s
+           JOIN users u ON s.user_id = u.id
+           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.user_id
            WHERE er.evaluation_id = $1`
         : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
@@ -1470,7 +1748,7 @@ exports.stopEvaluation = async (req, res) => {
     if (!targetEvalId && assignmentId) {
       const evalRes = await client.query(
         `SELECT id FROM evaluations 
-         WHERE assignment_id = $1 OR college_assignment_id = $1 
+         WHERE assignment_id = $1 OR college_assignment_id = $1 OR project_id = $1 
          ORDER BY created_at DESC LIMIT 1`,
         [assignmentId]
       );

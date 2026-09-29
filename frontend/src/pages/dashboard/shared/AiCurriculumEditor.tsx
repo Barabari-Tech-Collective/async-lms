@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
   Eye,
   Loader2,
   Plus,
@@ -403,8 +404,11 @@ export default function AiCurriculumEditor() {
         if (type === 'video' && Array.isArray(data.video_results)) {
           return data.video_results as { videoId: string; title: string; thumbnail: string; channel: string; url: string }[];
         }
-      } catch {
-        toast.error(`Failed to generate ${type}`);
+      } catch (err: unknown) {
+        const errorMsg =
+          (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+          `Failed to generate ${type}`;
+        toast.error(errorMsg);
       }
     },
     [],
@@ -493,8 +497,12 @@ export default function AiCurriculumEditor() {
   const handlePublish = useCallback(async () => {
     setPublishing(true);
     try {
-      await aiCurriculumApi.publish(id!);
-      toast.success('Course published!');
+      const res = await aiCurriculumApi.publish(id!);
+      if (res.data?.data?.up_to_date) {
+        toast.success('Course is already published and up to date!');
+      } else {
+        toast.success(course?.status === 'published' ? 'Course republished!' : 'Course published!');
+      }
       navigate(`${base}/ai-curriculum`);
     } catch (err) {
       const msg = (err as { response?: { data?: { message?: string } } })
@@ -503,7 +511,7 @@ export default function AiCurriculumEditor() {
     } finally {
       setPublishing(false);
     }
-  }, [id, navigate, base]);
+  }, [id, navigate, base, course?.status]);
 
   if (loading) {
     return (
@@ -607,20 +615,35 @@ export default function AiCurriculumEditor() {
                 )}
               </button>
             )}
-            {isAdmin && (course.status === 'approved' || (course.status === 'published' && course.subject_id)) && (
-              <button
-                onClick={handlePublish}
-                disabled={publishing}
-                className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
-              >
-                {publishing ? (
-                  <Loader2 className='w-4 h-4 animate-spin' />
-                ) : (
-                  <Sparkles className='w-4 h-4' />
-                )}{' '}
-                {course.status === 'published' || course.subject_id ? 'Republish Course' : 'Publish Course'}
-              </button>
-            )}
+            {isAdmin &&
+              (course.status === 'approved' ||
+                (course.status === 'published' && course.subject_id)) &&
+              (course.status === 'published' && !course.has_unpublished_changes ? (
+                <button
+                  type='button'
+                  disabled
+                  title='All course content is live and up to date in production'
+                  className='flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-xl cursor-default min-h-[36px]'
+                >
+                  <CheckCircle2 className='w-4 h-4 text-emerald-600' />
+                  Published (Up to date)
+                </button>
+              ) : (
+                <button
+                  onClick={handlePublish}
+                  disabled={publishing}
+                  className='flex items-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
+                >
+                  {publishing ? (
+                    <Loader2 className='w-4 h-4 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-4 h-4' />
+                  )}{' '}
+                  {course.status === 'published' || course.subject_id
+                    ? 'Republish Course'
+                    : 'Publish Course'}
+                </button>
+              ))}
           </div>
         </div>
       </div>

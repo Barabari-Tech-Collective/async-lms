@@ -64,6 +64,7 @@ import {
   setStructure,
 } from '@/features/learningFlow/learningFlowSlice';
 import AdminLessonPreviewModal from '@/components/common/admin/AdminLessonPreview';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 
 const LearningFlow: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -145,6 +146,8 @@ const LearningFlow: React.FC = () => {
   const [lessonPreviewVideoUrl, setLessonPreviewVideoUrl] = useState<
     string | undefined
   >(undefined);
+  const [assignmentPreviewOpen, setAssignmentPreviewOpen] = useState(false);
+  const [previewAssignment, setPreviewAssignment] = useState<any | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{
     kind:
@@ -660,6 +663,7 @@ const LearningFlow: React.FC = () => {
         max_score: data.max_score,
         evaluator_type: data.evaluator_type,
         test_cases: data.test_cases,
+        rubric: data.rubric,
       });
 
       if (response.data.success) {
@@ -788,6 +792,10 @@ const LearningFlow: React.FC = () => {
   const handleCreateCapstone = async (data: {
     title: string;
     instructions: string;
+    max_score: number;
+    evaluator_type?: string | null;
+    test_cases?: string | null;
+    rubric?: string | null;
   }) => {
     if (!selectedTopicForCapstone) return;
     setModalLoading(true);
@@ -796,6 +804,10 @@ const LearningFlow: React.FC = () => {
         topic_id: selectedTopicForCapstone.id,
         title: data.title,
         instructions: data.instructions,
+        max_score: data.max_score,
+        evaluator_type: data.evaluator_type,
+        test_cases: data.test_cases,
+        rubric: data.rubric,
       });
       toast.success('Capstone project created');
       refreshStructure();
@@ -811,6 +823,10 @@ const LearningFlow: React.FC = () => {
   const handleUpdateCapstone = async (data: {
     title: string;
     instructions: string;
+    max_score: number;
+    evaluator_type?: string | null;
+    test_cases?: string | null;
+    rubric?: string | null;
   }) => {
     if (!editingCapstone) return;
     setModalLoading(true);
@@ -818,6 +834,10 @@ const LearningFlow: React.FC = () => {
       await apiClient.put(`/admin/projects/${editingCapstone.id}`, {
         title: data.title,
         instructions: data.instructions,
+        max_score: data.max_score,
+        evaluator_type: data.evaluator_type,
+        test_cases: data.test_cases,
+        rubric: data.rubric,
       });
       toast.success('Capstone updated');
       refreshStructure();
@@ -1380,10 +1400,7 @@ const LearningFlow: React.FC = () => {
                                                              );
                                                            setEditingAssignment({
                                                              ...a,
-                                                             instructions:
-                                                               res.data.data
-                                                                 .instructions ??
-                                                               '',
+                                                             ...(res.data?.data || {}),
                                                            });
                                                          } catch {
                                                            setEditingAssignment(
@@ -1395,6 +1412,20 @@ const LearningFlow: React.FC = () => {
                                                        title='Edit Assignment'
                                                      >
                                                        <Edit2 className='h-3 w-3' />
+                                                     </button>
+                                                     <button
+                                                       type='button'
+                                                       onClick={() => {
+                                                         setPreviewAssignment({
+                                                           ...a,
+                                                           unit_title: unit.title,
+                                                         });
+                                                         setAssignmentPreviewOpen(true);
+                                                       }}
+                                                       className='rounded-md p-1 hover:bg-blue-100 text-blue-600'
+                                                       title='Preview Assignment (Student View)'
+                                                     >
+                                                       <Eye className='h-3 w-3' />
                                                      </button>
                                                      <button
                                                        type='button'
@@ -1793,8 +1824,7 @@ const LearningFlow: React.FC = () => {
                                                                              res
                                                                                .data
                                                                                .data
-                                                                               .instructions ??
-                                                                             '',
+                                                                                .instructions ?? '',
                                                                            initial_files:
                                                                              res
                                                                                .data
@@ -1897,9 +1927,16 @@ const LearningFlow: React.FC = () => {
                                       <span className='text-xs sm:text-sm font-bold text-slate-800 truncate block'>
                                         {topic.capstone.title}
                                       </span>
-                                      <span className='text-[11px] font-semibold text-amber-700'>
-                                        +{topic.capstone.max_score} XP • Capstone Project
-                                      </span>
+                                      <div className='flex items-center gap-1.5 flex-wrap'>
+                                        <span className='text-[11px] font-semibold text-amber-700'>
+                                          +{topic.capstone.max_score || 100} XP • Capstone Project
+                                        </span>
+                                        {topic.capstone.evaluator_type && (
+                                          <span className='inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 border border-amber-300/60'>
+                                            {topic.capstone.evaluator_type} Evaluator
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                   <div className='flex items-center gap-1 text-slate-400 shrink-0 ml-2'>
@@ -2236,6 +2273,19 @@ const LearningFlow: React.FC = () => {
         loading={modalLoading}
       />
 
+      {assignmentPreviewOpen && previewAssignment && (
+        <AdminAssignmentPreviewModal
+          isOpen={assignmentPreviewOpen}
+          onClose={() => {
+            setAssignmentPreviewOpen(false);
+            setPreviewAssignment(null);
+          }}
+          assignmentId={previewAssignment.id}
+          assignmentData={previewAssignment}
+          unitTitle={previewAssignment.unit_title}
+        />
+      )}
+
       <CapstoneModal
         isOpen={capstoneModalOpen}
         onClose={() => {
@@ -2260,6 +2310,10 @@ const LearningFlow: React.FC = () => {
             ? {
                 title: editingCapstone.title,
                 instructions: editingCapstone.instructions,
+                max_score: editingCapstone.max_score,
+                evaluator_type: editingCapstone.evaluator_type,
+                test_cases: editingCapstone.test_cases,
+                rubric: editingCapstone.rubric,
               }
             : undefined
         }
