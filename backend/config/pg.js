@@ -330,7 +330,16 @@ pool.on('error', (err, client) => {
           ALTER TABLE college_assignment_submissions
             ADD CONSTRAINT unique_assignment_student UNIQUE (assignment_id, student_id);
         END IF;
-      END $$
+      END $$;
+
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'unique_assignment_user'
+        ) THEN
+          ALTER TABLE assignment_submissions
+            ADD CONSTRAINT unique_assignment_user UNIQUE (assignment_id, user_id);
+        END IF;
+      END $$;
     `);
     await client.query(
       `CREATE INDEX IF NOT EXISTS idx_college_assignments_college_id ON college_assignments(college_id);

@@ -150,10 +150,11 @@ export default function CollegeAssignmentView() {
 
   const handleTypeSelect = (type: SubmissionType) => {
     setActiveType(type);
-    if (type !== 'file') {
-      validateUrlInput(type, solutionUrl);
+    setUrlValidationError(null);
+    if (assignment?.submission_type === type && assignment.submission_link) {
+      setSolutionUrl(assignment.submission_link);
     } else {
-      setUrlValidationError(null);
+      setSolutionUrl('');
     }
   };
 
@@ -186,6 +187,10 @@ export default function CollegeAssignmentView() {
         toast.error('Please select a file to upload');
         return;
       }
+      if (!selectedFile && isSubmitted && assignment?.submission_type === 'file') {
+        toast.error('Please select a new file to update your submission');
+        return;
+      }
     } else {
       if (!solutionUrl.trim()) {
         toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
@@ -213,7 +218,8 @@ export default function CollegeAssignmentView() {
 
       await apiClient.post(`/college-assignments/${id}/submit`, formData);
 
-      toast.success('Assignment submitted successfully!');
+      toast.success(isSubmitted ? 'Submission updated successfully!' : 'Assignment submitted successfully!');
+      setSelectedFile(null);
       fetchAssignment();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit assignment'));
@@ -634,13 +640,26 @@ export default function CollegeAssignmentView() {
               {isSubmitted && (
                 <div className='p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1.5'>
                   <div className='flex items-center justify-between text-xs text-slate-500'>
-                    <span className='font-medium'>Submitted On:</span>
+                    <span className='font-medium'>
+                      {assignment.updated_at && assignment.submitted_at && new Date(assignment.updated_at).getTime() > new Date(assignment.submitted_at).getTime() + 1000
+                        ? 'Last Updated:'
+                        : 'Submitted On:'}
+                    </span>
                     <span>
-                      {assignment.submitted_at
-                        ? new Date(assignment.submitted_at).toLocaleString()
+                      {assignment.updated_at || assignment.submitted_at
+                        ? new Date(assignment.updated_at || assignment.submitted_at!).toLocaleString()
                         : 'Recently'}
                     </span>
                   </div>
+                  {assignment.submission_type && (
+                    <div className='flex items-center justify-between text-xs text-slate-500'>
+                      <span className='font-medium'>Submitted Via:</span>
+                      <span className='font-semibold text-slate-700 capitalize flex items-center gap-1'>
+                        <span>{SUBMISSION_TYPE_CONFIGS[assignment.submission_type]?.emoji || '📄'}</span>
+                        <span>{SUBMISSION_TYPE_CONFIGS[assignment.submission_type]?.label || assignment.submission_type}</span>
+                      </span>
+                    </div>
+                  )}
                   {assignment.submission_link && (
                     <div className='flex items-center justify-between gap-2 text-xs'>
                       <span className='text-slate-500 truncate'>Link:</span>

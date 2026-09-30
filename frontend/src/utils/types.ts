@@ -220,6 +220,7 @@ export interface CollegeAssignment {
   submission_file_url?: string | null;
   submission_file_name?: string | null;
   submitted_at?: string | null;
+  updated_at?: string | null;
   test_cases?: AssignmentTestCase[];
   rubric?: any;
   evaluator_type?: string | null;

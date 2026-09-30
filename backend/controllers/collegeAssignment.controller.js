@@ -226,7 +226,7 @@ exports.getMyCollegeAssignments = async (req, res) => {
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
               ca.allowed_submission_types,
               u.full_name AS created_by_name,
-              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
+              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at, cas.updated_at
        FROM college_assignments ca
        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
@@ -762,7 +762,7 @@ exports.getCollegeAssignmentById = async (req, res) => {
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
               ca.allowed_submission_types, ca.created_by,
               u.full_name AS created_by_name,
-              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
+              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at, cas.updated_at
        FROM college_assignments ca
        LEFT JOIN colleges c ON c.id = ca.college_id
        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)

@@ -2004,12 +2004,19 @@ exports.getAssignment = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, title, instructions, max_score, unit_id, evaluator_type, test_cases, rubric FROM assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, title, instructions, max_score, unit_id, evaluator_type, test_cases, rubric, allowed_submission_types FROM assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!result.rowCount)
       return res.status(404).json({ message: 'Assignment not found' });
-    res.json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    if (typeof row.allowed_submission_types === 'string') {
+      try {
+        row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
+      } catch (e) {}
+    }
+    res.json({ success: true, data: row });
   } catch (err) {
     res.status(500).json({ message: 'Internal server error' });
   }

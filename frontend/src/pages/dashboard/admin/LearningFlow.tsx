@@ -652,6 +652,7 @@ const LearningFlow: React.FC = () => {
     evaluator_type?: string | null;
     test_cases?: string | null;
     rubric?: string | null;
+    allowed_submission_types?: import('@/utils/types').SubmissionType[];
   }) => {
     if (!selectedUnitForAssignment) return;
 
@@ -664,6 +665,7 @@ const LearningFlow: React.FC = () => {
         evaluator_type: data.evaluator_type,
         test_cases: data.test_cases,
         rubric: data.rubric,
+        allowed_submission_types: data.allowed_submission_types,
       });
 
       if (response.data.success) {
@@ -760,6 +762,7 @@ const LearningFlow: React.FC = () => {
     evaluator_type?: string | null;
     test_cases?: string | null;
     rubric?: string | null;
+    allowed_submission_types?: import('@/utils/types').SubmissionType[];
   }) => {
     if (!editingAssignment) return;
 
@@ -2266,6 +2269,7 @@ const LearningFlow: React.FC = () => {
                 evaluator_type: (editingAssignment as any).evaluator_type,
                 test_cases: (editingAssignment as any).test_cases,
                 rubric: (editingAssignment as any).rubric,
+                allowed_submission_types: (editingAssignment as any).allowed_submission_types,
               }
             : undefined
         }

@@ -2364,18 +2364,23 @@ exports.getAssignmentById = async (req, res) => {
         a.evaluator_type,
         a.test_cases,
         a.rubric,
+        a.allowed_submission_types,
         s.name AS subject_title,
         s.slug AS subject_slug,
         u.title AS unit_title,
+        sub.submission_type,
         sub.submission_link,
-        sub.submitted_at
+        sub.submission_file_url,
+        sub.submission_file_name,
+        sub.submitted_at,
+        sub.updated_at
        FROM assignments a
        INNER JOIN units u ON a.unit_id = u.id
        INNER JOIN topics t ON u.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
        INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN assignment_submissions sub ON sub.assignment_id = a.id AND sub.user_id = $1
-       WHERE a.id = $2`,
+       WHERE a.id = $2 AND a.is_deleted = false`,
       [userId, id],
     );
 
@@ -2385,7 +2390,17 @@ exports.getAssignmentById = async (req, res) => {
         .json({ success: false, message: 'Assignment not found' });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const row = result.rows[0];
+    if (typeof row.allowed_submission_types === 'string') {
+      try {
+        row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
+      } catch (e) {}
+    }
+    if (!Array.isArray(row.allowed_submission_types) || row.allowed_submission_types.length === 0) {
+      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    }
+
+    res.json({ success: true, data: row });
   } catch (error) {
     console.error('Error fetching assignment:', error);
     serverError(res, error);
@@ -2393,45 +2408,107 @@ exports.getAssignmentById = async (req, res) => {
 };
 
 /**
- * Submit (or update) an assignment solution link
+ * Submit (or update) an assignment deliverable (file upload or URL)
  * POST /api/students/assignments/:id/submit
  */
 exports.submitAssignment = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
-    const { submission_link } = req.body;
+    let { submission_type = 'github', submission_link, submission_file_url, submission_file_name } = req.body || {};
 
-    if (!submission_link || !submission_link.trim()) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'submission_link is required' });
-    }
-
-    // Verify the student is enrolled in the subject this assignment belongs to
+    // Verify the student is enrolled and fetch the assignment + allowed submission types
     const enrolled = await pool.query(
-      `SELECT a.id FROM assignments a
+      `SELECT a.id, a.allowed_submission_types FROM assignments a
        INNER JOIN units u ON a.unit_id = u.id
        INNER JOIN topics t ON u.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
        INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
-       WHERE a.id = $2`,
+       WHERE a.id = $2 AND a.is_deleted = false`,
       [userId, id],
     );
 
     if (enrolled.rows.length === 0) {
       return res
         .status(404)
-        .json({ success: false, message: 'Assignment not found' });
+        .json({ success: false, message: 'Assignment not found or not enrolled' });
     }
 
+    const assignment = enrolled.rows[0];
+    let allowedTypes = assignment.allowed_submission_types;
+    if (typeof allowedTypes === 'string') {
+      try {
+        allowedTypes = JSON.parse(allowedTypes);
+      } catch (e) {}
+    }
+    if (!Array.isArray(allowedTypes) || allowedTypes.length === 0) {
+      allowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    }
+
+    if (!allowedTypes.includes(submission_type)) {
+      return res.status(400).json({
+        success: false,
+        message: `Submission type '${submission_type}' is not allowed for this assignment`,
+      });
+    }
+
+    // Validation per type
+    if (submission_type === 'file') {
+      if (!submission_file_url && req.file) {
+        const path = require('path');
+        const fs = require('fs');
+        const uploadDir = path.join(__dirname, '../uploads/submissions');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const fileName = `${Date.now()}-${req.file.originalname}`;
+        const filePath = path.join(uploadDir, fileName);
+        fs.writeFileSync(filePath, req.file.buffer);
+        submission_file_url = `/uploads/submissions/${fileName}`;
+        submission_file_name = req.file.originalname;
+      }
+
+      if (!submission_file_url) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please upload a document file',
+        });
+      }
+    } else {
+      if (!submission_link || !submission_link.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid submission link',
+        });
+      }
+      try {
+        new URL(submission_link.trim());
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid URL (e.g. starting with https://)',
+        });
+      }
+    }
+
+    const cleanLink = submission_type === 'file' ? null : submission_link.trim();
+    const cleanFileUrl = submission_type === 'file' ? submission_file_url : null;
+    const cleanFileName = submission_type === 'file' ? (submission_file_name || 'Uploaded File') : null;
+
     const result = await pool.query(
-      `INSERT INTO assignment_submissions (assignment_id, user_id, submission_link)
-       VALUES ($1, $2, $3)
+      `INSERT INTO assignment_submissions
+         (assignment_id, user_id, submission_type, submission_link, submission_file_url, submission_file_name, submitted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        ON CONFLICT (assignment_id, user_id)
-       DO UPDATE SET submission_link = EXCLUDED.submission_link, updated_at = CURRENT_TIMESTAMP
-       RETURNING submission_link, submitted_at`,
-      [id, userId, submission_link.trim()],
+       DO UPDATE SET
+         submission_type = EXCLUDED.submission_type,
+         submission_link = EXCLUDED.submission_link,
+         submission_file_url = EXCLUDED.submission_file_url,
+         submission_file_name = EXCLUDED.submission_file_name,
+         submitted_at = NOW(),
+         updated_at = NOW()
+       RETURNING id, assignment_id, user_id, submission_type, submission_link, submission_file_url, submission_file_name, submitted_at, updated_at`,
+      [id, userId, submission_type, cleanLink, cleanFileUrl, cleanFileName],
     );
 
     markActionToday(userId);
@@ -2441,7 +2518,7 @@ exports.submitAssignment = async (req, res) => {
       action: 'CREATE',
       entityType: 'assignment_submission',
       entityId: id,
-      details: { submission_link: submission_link.trim() },
+      details: { submission_type, submission_link: cleanLink, submission_file_name: cleanFileName },
     });
 
     const subjectIdRes = await pool.query(
