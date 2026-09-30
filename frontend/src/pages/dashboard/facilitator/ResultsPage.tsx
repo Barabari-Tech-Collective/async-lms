@@ -29,22 +29,24 @@ const ResultsPage = () => {
 
   const assignmentName =
     evaluation?.assignment_name || evaluation?.assignment_id;
-  const fetchResults = async () => {
+  const fetchResults = async (isInitial = false) => {
     try {
-      setLoading(true);
-      const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`);
+      if (isInitial) setLoading(true);
+      const { data } = await apiClient.get(`/evaluations/assignment/${id}/results`, {
+        params: { _t: Date.now() },
+      });
 
       setEvaluation(data.evaluation);
       setResults(data.results);
     } catch (err) {
       console.error('Failed to fetch results', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (id) fetchResults();
+    if (id) fetchResults(true);
   }, [id]);
 
   const filteredResults = (results || []).filter((r) => {
@@ -137,7 +139,7 @@ const ResultsPage = () => {
             <StudentTable 
               results={filteredResults} 
               evaluation={evaluation} 
-              assignmentId={id}
+              assignmentId={String((evaluation as any)?.college_assignment_id || (evaluation as any)?.assignment_id || (evaluation as any)?.project_id || id)}
               onRefresh={fetchResults}
             />
           </div>

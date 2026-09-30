@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
 import apiClient from '@/services/api';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { GraduationCap, Landmark, Rocket } from 'lucide-react';
+import { GraduationCap, Landmark, Rocket, BookOpen, Lock, CheckCircle2 } from 'lucide-react';
 import { useAppDispatch } from '@/app/hooks';
 import { loadUser } from '@/features/auth/authThunks';
 import toast from 'react-hot-toast';
@@ -16,9 +16,17 @@ interface College {
   name: string;
 }
 
+interface Subject {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 export default function FacilitatorOnboarding() {
   const [colleges, setColleges] = useState<College[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCustomCollege, setShowCustomCollege] = useState(false);
@@ -28,23 +36,35 @@ export default function FacilitatorOnboarding() {
   const dispatch = useAppDispatch();
 
   useEffect(() => {
-    const fetchColleges = async () => {
+    const fetchInitialData = async () => {
       try {
-        const res = await apiClient.get('/colleges');
-        setColleges(res.data.data || res.data);
+        const [collegesRes, subjectsRes] = await Promise.all([
+          apiClient.get('/colleges'),
+          apiClient.get('/subjects/published'),
+        ]);
+        setColleges(collegesRes.data.data || collegesRes.data || []);
+        setSubjects(subjectsRes.data.data || subjectsRes.data || []);
       } catch (err) {
-        toast.error(getErrorMessage(err, 'Failed to load colleges'));
+        toast.error(getErrorMessage(err, 'Failed to load onboarding data'));
       } finally {
         setLoading(false);
       }
     };
-    fetchColleges();
+    fetchInitialData();
   }, []);
 
   const toggleCollege = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
+  };
+
+  const selectSubject = (id: string) => {
+    if (selectedSubjectId === id) {
+      setSelectedSubjectId(null);
+    } else if (selectedSubjectId === null) {
+      setSelectedSubjectId(id);
+    }
   };
 
   const handleSubmit = async () => {
@@ -55,6 +75,11 @@ export default function FacilitatorOnboarding() {
 
     if (showCustomCollege && (!customName.trim() || !customCity.trim())) {
       toast.error('Please provide custom college name and city');
+      return;
+    }
+
+    if (!selectedSubjectId) {
+      toast.error('Please select the primary subject you will be teaching');
       return;
     }
 
@@ -88,6 +113,7 @@ export default function FacilitatorOnboarding() {
 
       await apiClient.post('/onboarding/facilitator-colleges', {
         college_ids: finalCollegeIds,
+        subject_id: selectedSubjectId,
       });
       toast.success('Onboarding complete!');
       await dispatch(loadUser());
@@ -233,12 +259,116 @@ export default function FacilitatorOnboarding() {
             )}
           </div>
 
+          {/* Subject Selection Section */}
+          <div className='space-y-2 pt-3 border-t border-slate-100'>
+            <div className='space-y-1'>
+              <div className='flex items-center justify-between'>
+                <h2 className='text-base sm:text-lg font-semibold flex items-center gap-2 text-slate-800'>
+                  <BookOpen className='h-4 sm:h-5 w-4 sm:h-5 text-primary shrink-0' />
+                  Select Subject You Teach
+                </h2>
+                {selectedSubjectId && (
+                  <button
+                    type='button'
+                    onClick={() => setSelectedSubjectId(null)}
+                    className='text-xs font-semibold text-primary hover:underline'
+                  >
+                    Change Subject
+                  </button>
+                )}
+              </div>
+              <p className='text-xs sm:text-sm text-muted-foreground'>
+                {selectedSubjectId
+                  ? '1 primary subject selected. Other subjects are locked (admins can assign additional subjects later).'
+                  : 'Choose your primary teaching subject. Once selected, other subjects will be locked.'}
+              </p>
+            </div>
+
+            <ScrollArea className='h-[160px] sm:h-[190px] border border-slate-200/80 rounded-xl p-3 sm:p-4 bg-muted/30'>
+              {loading ? (
+                <div className='flex items-center justify-center h-full'>
+                  <p className='text-xs sm:text-sm text-slate-500 animate-pulse'>Loading subjects...</p>
+                </div>
+              ) : subjects.length === 0 ? (
+                <div className='flex items-center justify-center h-full'>
+                  <p className='text-xs text-slate-400'>No active subjects found</p>
+                </div>
+              ) : (
+                <div className='space-y-2'>
+                  {subjects.map((subj) => {
+                    const isSelected = selectedSubjectId === subj.id;
+                    const isLocked = selectedSubjectId !== null && !isSelected;
+
+                    return (
+                      <div
+                        key={subj.id}
+                        onClick={() => {
+                          if (isLocked) return;
+                          selectSubject(subj.id);
+                        }}
+                        className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/30 cursor-pointer'
+                            : isLocked
+                            ? 'border-slate-200/60 bg-slate-100/60 opacity-40 cursor-not-allowed select-none'
+                            : 'border-slate-200/80 bg-white hover:bg-muted/50 hover:border-slate-300 cursor-pointer'
+                        }`}
+                      >
+                        <div className='flex items-center space-x-3 min-w-0 flex-1'>
+                          <div
+                            className={`h-4 w-4 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+                              isSelected
+                                ? 'border-primary bg-primary text-white'
+                                : isLocked
+                                ? 'border-slate-300 bg-slate-200'
+                                : 'border-slate-400 bg-white'
+                            }`}
+                          >
+                            {isSelected && (
+                              <div className='h-1.5 w-1.5 rounded-full bg-white' />
+                            )}
+                          </div>
+                          <span
+                            className={`text-xs sm:text-sm leading-tight truncate ${
+                              isSelected
+                                ? 'font-bold text-primary'
+                                : isLocked
+                                ? 'font-normal text-slate-400'
+                                : 'font-medium text-slate-700'
+                            }`}
+                          >
+                            {subj.name}
+                          </span>
+                        </div>
+
+                        {isSelected && (
+                          <div className='flex items-center gap-1.5 shrink-0'>
+                            <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary text-white'>
+                              <CheckCircle2 className='w-3 h-3' /> Selected
+                            </span>
+                          </div>
+                        )}
+
+                        {isLocked && (
+                          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200/70 text-slate-500 shrink-0'>
+                            <Lock className='w-3 h-3' /> Locked
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+
           <Button
             className='w-full py-3.5 sm:py-6 text-base sm:text-lg font-bold rounded-xl shadow-xl hover:shadow-primary/25 transition-all group min-h-[48px]'
             onClick={handleSubmit}
             disabled={
               loading ||
               isSubmitting ||
+              !selectedSubjectId ||
               (selectedIds.length === 0 && !showCustomCollege)
             }
           >

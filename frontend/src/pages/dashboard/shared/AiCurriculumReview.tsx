@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  ArrowLeft, CheckCircle, XCircle, MessageSquare, Loader2,
+  ArrowLeft, CheckCircle, CheckCircle2, XCircle, MessageSquare, Loader2,
   Sparkles, MonitorPlay, BookOpen, ListChecks, FileText, Send,
   ClipboardList, Trophy,
 } from 'lucide-react';
@@ -30,6 +30,18 @@ function LessonRow({ lesson }: { lesson: AiLesson }) {
     <div className='flex items-center gap-3 py-1.5'>
       <Icon className={`w-4 h-4 shrink-0 ${iconColor}`} />
       <span className='flex-1 text-[13px] text-slate-700'>{lesson.title}</span>
+      {lesson.is_new && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
+          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+          New
+        </span>
+      )}
+      {lesson.is_modified && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+          Edited
+        </span>
+      )}
       <span className='text-[12px] text-slate-400 shrink-0'>{lesson.duration_mins ?? 15} min</span>
       <span className='text-[11px] text-slate-400 border border-slate-200 rounded px-1.5 py-px shrink-0 font-medium'>
         Required
@@ -43,13 +55,29 @@ function LessonRow({ lesson }: { lesson: AiLesson }) {
 function ModuleCard({ mod, index }: { mod: AiModule; index: number }) {
   return (
     <div className='bg-white border border-slate-200 rounded-xl px-6 py-5'>
-      <h3 className='text-[15px] font-bold text-slate-800 mb-4'>
-        Topic {index + 1}: {mod.title}
-      </h3>
+      <div className='flex items-center gap-2 mb-4 flex-wrap'>
+        <h3 className='text-[15px] font-bold text-slate-800'>
+          Topic {index + 1}: {mod.title}
+        </h3>
+        {mod.is_new && (
+          <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+            <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+            New Topic
+          </span>
+        )}
+      </div>
       <div className='space-y-4'>
         {mod.topics.map((topic) => (
           <div key={topic.id}>
-            <p className='text-[12px] font-bold text-slate-500 mb-1.5'>Unit: {topic.title}</p>
+            <div className='flex items-center gap-2 mb-1.5 flex-wrap'>
+              <p className='text-[12px] font-bold text-slate-500'>Unit: {topic.title}</p>
+              {topic.is_new && (
+                <span className='inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                  <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+                  New Unit
+                </span>
+              )}
+            </div>
             <div className='space-y-0.5 pl-1'>
               {topic.lessons.map((lesson) => (
                 <LessonRow key={lesson.id} lesson={lesson} />
@@ -285,8 +313,13 @@ export default function AiCurriculumReview() {
   const totalLessons = course.modules.reduce((s, m) =>
     s + m.topics.reduce((ts, t) => ts + t.lessons.length, 0), 0);
 
-  const canSubmit = ['draft', 'changes_requested'].includes(course.status) && !isAdmin;
-  const isAdminReview = isAdmin && course.status === 'in_review';
+  const canSubmit =
+    ['draft', 'changes_requested', 'published', 'approved'].includes(course.status) &&
+    !isAdmin;
+  const isAdminReview =
+    isAdmin &&
+    (course.status === 'in_review' ||
+      (course.status === 'published' && Boolean(course.has_unpublished_changes)));
 
   return (
     <div className='min-h-screen bg-slate-50 flex flex-col'>
@@ -397,7 +430,7 @@ export default function AiCurriculumReview() {
               className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-[#1e2653] text-white rounded-xl hover:bg-[#16203f] disabled:opacity-50 transition-colors min-h-[36px]'
             >
               {submitting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Send className='w-4 h-4' />}
-              <span>Submit for Review</span>
+              <span>{course.status === 'published' ? 'Submit Updates for Review' : 'Submit for Review'}</span>
             </button>
           )}
 
@@ -408,28 +441,59 @@ export default function AiCurriculumReview() {
             </span>
           )}
 
-          {/* Admin: publish approved course */}
-          {isAdmin && course.status === 'approved' && (
-            <button
-              onClick={async () => {
-                setSubmitting(true);
-                try {
-                  await aiCurriculumApi.publish(id!);
-                  toast.success('Course published!');
-                  navigate(`${base}/ai-curriculum`);
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.message || 'Failed to publish');
-                } finally {
-                  setSubmitting(false);
-                }
-              }}
-              disabled={submitting}
-              className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
-            >
-              {submitting ? <Loader2 className='w-4 h-4 animate-spin' /> : <Sparkles className='w-4 h-4' />}
-              <span>Publish Course</span>
-            </button>
-          )}
+          {/* Admin: publish approved or republish published course */}
+          {isAdmin &&
+            (course.status === 'approved' ||
+              (course.status === 'published' && course.subject_id)) &&
+            (course.status === 'published' && !course.has_unpublished_changes ? (
+              <button
+                type='button'
+                disabled
+                title='All course content is live and up to date in production'
+                className='flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-xl cursor-default min-h-[36px]'
+              >
+                <CheckCircle2 className='w-4 h-4 text-emerald-600' />
+                <span>Published (Up to date)</span>
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  setSubmitting(true);
+                  try {
+                    const res = await aiCurriculumApi.publish(id!);
+                    if (res.data?.data?.up_to_date) {
+                      toast.success('Course is already published and up to date!');
+                    } else {
+                      toast.success(
+                        course.subject_id
+                          ? 'Course republished!'
+                          : 'Course published!',
+                      );
+                    }
+                    navigate(`${base}/ai-curriculum`);
+                  } catch (err: any) {
+                    toast.error(
+                      err?.response?.data?.message || 'Failed to publish',
+                    );
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                disabled={submitting}
+                className='flex items-center gap-2 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors min-h-[36px]'
+              >
+                {submitting ? (
+                  <Loader2 className='w-4 h-4 animate-spin' />
+                ) : (
+                  <Sparkles className='w-4 h-4' />
+                )}
+                <span>
+                  {course.status === 'published' || course.subject_id
+                    ? 'Republish Course'
+                    : 'Publish Course'}
+                </span>
+              </button>
+            ))}
         </div>
       </div>
     </div>

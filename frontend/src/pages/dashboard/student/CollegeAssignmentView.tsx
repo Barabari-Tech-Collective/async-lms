@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ChevronLeft,
@@ -11,6 +11,8 @@ import {
   AlertTriangle,
   ExternalLink,
   CheckCircle2,
+  Code2,
+  Lock,
 } from 'lucide-react';
 import apiClient from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -47,7 +49,6 @@ const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
 export default function CollegeAssignmentView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [assignment, setAssignment] = useState<CollegeAssignment | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +58,37 @@ export default function CollegeAssignmentView() {
   const [solutionUrl, setSolutionUrl] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
+
+  const parsedRubric = useMemo<any[] | null>(() => {
+    if (!assignment?.rubric) return null;
+    if (Array.isArray(assignment.rubric)) return assignment.rubric;
+    if (typeof assignment.rubric === 'string') {
+      try {
+        const parsed = JSON.parse(assignment.rubric);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === 'object' && parsed && Array.isArray((parsed as any).criteria)) {
+          return (parsed as any).criteria;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof assignment.rubric === 'object' && Array.isArray((assignment.rubric as any).criteria)) {
+      return (assignment.rubric as any).criteria;
+    }
+    return null;
+  }, [assignment?.rubric]);
+
+  const totalRubricPoints = useMemo(() => {
+    if (!parsedRubric) return 0;
+    return parsedRubric.reduce((acc, curr) => {
+      const p = Number(
+        curr.weight ?? curr.score ?? curr.points ?? curr.maxScore ?? curr.max_score ?? 0
+      );
+      return acc + (isNaN(p) ? 0 : p);
+    }, 0);
+  }, [parsedRubric]);
 
   const fetchAssignment = async () => {
     try {
@@ -182,7 +214,6 @@ export default function CollegeAssignmentView() {
       await apiClient.post(`/college-assignments/${id}/submit`, formData);
 
       toast.success('Assignment submitted successfully!');
-      setSelectedFile(null);
       fetchAssignment();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit assignment'));
@@ -354,7 +385,10 @@ export default function CollegeAssignmentView() {
                                     {tc.input}
                                   </td>
                                   <td className='px-3 sm:px-4 py-3 font-mono text-slate-700'>
-                                    {tc.output}
+                                    <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                                      <Lock className='w-3 h-3 text-slate-400' />
+                                      Locked (Evaluated on submission)
+                                    </span>
                                   </td>
                                   <td className='px-3 sm:px-4 py-3 text-center font-semibold text-[#333D7C]'>
                                     {tc.score}
@@ -367,27 +401,88 @@ export default function CollegeAssignmentView() {
                       </div>
                     )}
 
-                  {assignment.rubric && assignment.rubric.length > 0 && (
+                  {parsedRubric && parsedRubric.length > 0 && (
                     <div className='space-y-3 sm:space-y-4 pt-6 border-t border-slate-100'>
-                      <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
-                        Evaluation Rubric
-                      </h2>
+                      <div className='flex items-center justify-between'>
+                        <div>
+                          <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
+                            Evaluation Rubric
+                          </h2>
+                          <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
+                            Criteria and point distribution for automated evaluation
+                          </p>
+                        </div>
+                        <div className='flex items-center gap-1.5 sm:gap-2'>
+                          <span className='px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/70'>
+                            {parsedRubric.length} {parsedRubric.length === 1 ? 'Criterion' : 'Criteria'}
+                          </span>
+                          {totalRubricPoints > 0 && (
+                            <span className='px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200'>
+                              {totalRubricPoints} pts total
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
                       <div className='grid gap-2.5 sm:gap-3'>
-                        {assignment.rubric.map((item, idx) => (
-                          <div
-                            key={idx}
-                            className='flex items-start justify-between p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white hover:border-[#333D7C]/30 transition-colors'
-                          >
-                            <div className='min-w-0 flex-1'>
-                              <h3 className='font-semibold text-xs sm:text-sm text-slate-800 truncate'>
-                                {item.name}
-                              </h3>
+                        {parsedRubric.map((item: any, idx: number) => {
+                          const rawPoints =
+                            item.weight ??
+                            item.score ??
+                            item.points ??
+                            item.maxScore ??
+                            item.max_score ??
+                            0;
+                          const points = Number.isNaN(Number(rawPoints))
+                            ? rawPoints
+                            : Number(rawPoints);
+                          const title =
+                            item.name || item.title || item.criterion || `Criterion ${idx + 1}`;
+
+                          return (
+                            <div
+                              key={idx}
+                              className='p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white hover:border-[#333D7C]/30 transition-colors space-y-2'
+                            >
+                              <div className='flex items-start justify-between gap-3'>
+                                <div className='flex items-start gap-2.5 min-w-0 flex-1'>
+                                  <div className='w-6 h-6 rounded-lg bg-[#333D7C]/10 text-[#333D7C] flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold'>
+                                    {idx + 1}
+                                  </div>
+                                  <div className='min-w-0 flex-1'>
+                                    <h3 className='font-semibold text-xs sm:text-sm text-slate-800 leading-snug'>
+                                      {title}
+                                    </h3>
+                                    {item.description && (
+                                      <p className='text-xs sm:text-sm text-slate-600 mt-1 leading-relaxed'>
+                                        {item.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className='shrink-0 ml-3 px-2.5 py-1 bg-[#333D7C]/10 text-[#333D7C] border border-[#333D7C]/20 rounded-lg font-bold text-xs sm:text-sm whitespace-nowrap shadow-2xs'>
+                                  {points} {points === 1 ? 'pt' : 'pts'}
+                                </div>
+                              </div>
+
+                              {totalRubricPoints > 0 &&
+                                typeof points === 'number' &&
+                                points > 0 && (
+                                  <div className='w-full bg-slate-100 rounded-full h-1.5 mt-1 overflow-hidden'>
+                                    <div
+                                      className='bg-[#333D7C] h-1.5 rounded-full transition-all duration-300'
+                                      style={{
+                                        width: `${Math.min(
+                                          100,
+                                          Math.round((points / totalRubricPoints) * 100)
+                                        )}%`,
+                                      }}
+                                    />
+                                  </div>
+                                )}
                             </div>
-                            <div className='shrink-0 ml-3 px-2.5 py-1 bg-[#333D7C]/10 text-[#333D7C] rounded-lg font-semibold text-xs sm:text-sm'>
-                              {item.score} pts
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -411,7 +506,7 @@ export default function CollegeAssignmentView() {
           </div>
 
           {/* Right: Submit Assignment */}
-          <div className='lg:col-span-5 space-y-6'>
+          <div className='lg:col-span-5 space-y-6 min-w-0'>
             <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-5 sm:space-y-6'>
               <div className='flex items-center justify-between'>
                 <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
@@ -598,6 +693,39 @@ export default function CollegeAssignmentView() {
                   </>
                 )}
               </Button>
+
+              {isSubmitted && (
+                <div className='p-4 bg-emerald-50/80 rounded-xl sm:rounded-2xl border border-emerald-100 space-y-2 overflow-hidden min-w-0 max-w-full'>
+                  <div className='flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider'>
+                    <CheckCircle2 className='w-4 h-4 text-emerald-600 shrink-0' />
+                    <span>Submission Received</span>
+                  </div>
+                  {assignment?.submission_link && (
+                    <a
+                      href={assignment.submission_link}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      title={assignment.submission_link}
+                      className='flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline w-full max-w-full min-w-0'
+                    >
+                      <ExternalLink className='w-3.5 h-3.5 shrink-0 text-blue-600' />
+                      <span className='truncate block min-w-0 flex-1'>{assignment.submission_link}</span>
+                    </a>
+                  )}
+                  {assignment?.submission_file_url && !assignment?.submission_link && (
+                    <a
+                      href={assignment.submission_file_url}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      title={assignment.submission_file_name || 'Uploaded File'}
+                      className='flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline w-full max-w-full min-w-0'
+                    >
+                      <FileText className='w-3.5 h-3.5 shrink-0 text-blue-600' />
+                      <span className='truncate block min-w-0 flex-1'>{assignment.submission_file_name || 'View Uploaded File'}</span>
+                    </a>
+                  )}
+                </div>
+              )}
             </Card>
           </div>
         </div>

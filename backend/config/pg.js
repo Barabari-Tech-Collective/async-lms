@@ -1,16 +1,45 @@
 const { Pool } = require('pg');
-const pool = new Pool({
-  host: (process.env.PGHOST || '').trim(),
-  database: (process.env.PGDATABASE || '').trim(),
-  user: (process.env.PGUSER || '').trim(),
-  password: (process.env.PGPASSWORD || '').trim(),
-  port: process.env.PGPORT,
-  ssl: { rejectUnauthorized: false },
-  family: 4,
-  connectionTimeoutMillis: 30000, // Increased to 30s so sleeping Neon DBs have time to wake up!
-  idleTimeoutMillis: 10000, // Close idle connections after 10s to prevent Neon pooler disconnects
-  keepAlive: true,
-});
+
+let dbHost = (process.env.PGHOST || '').trim();
+// Use Neon's connection pooler endpoint if using Neon to prevent cold-start ETIMEDOUT
+if (dbHost.includes('.neon.tech') && !dbHost.includes('-pooler')) {
+  const parts = dbHost.split('.');
+  parts[0] = parts[0] + '-pooler';
+  dbHost = parts.join('.');
+}
+
+let connectionString = (process.env.DATABASE_URL || '').trim();
+if (connectionString && connectionString.includes('.neon.tech') && !connectionString.includes('-pooler')) {
+  connectionString = connectionString.replace(/(@[a-zA-Z0-9_-]+)(\.c-[^/:]+)/, '$1-pooler$2');
+}
+
+const poolConfig = connectionString
+  ? {
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
+      keepAlive: true,
+    }
+  : {
+      host: dbHost,
+      database: (process.env.PGDATABASE || '').trim(),
+      user: (process.env.PGUSER || '').trim(),
+      password: (process.env.PGPASSWORD || '').trim(),
+      port: process.env.PGPORT || 5432,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      connectionTimeoutMillis: 60000, // Allow 60s for Neon cold starts / wake-ups
+      idleTimeoutMillis: 30000,
+      statement_timeout: 15000, // 15s max query execution before auto-cancellation
+      query_timeout: 15000,
+      keepAlive: true,
+    };
+
+const pool = new Pool(poolConfig);
 
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
@@ -51,6 +80,30 @@ pool.on('error', (err, client) => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_active_unique 
       ON users(email) 
       WHERE deleted_at IS NULL;
+    `);
+
+    // 30-Day College Recycle Bin Migration
+    await client.query(`
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_colleges_deleted_at ON colleges(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_colleges_is_deleted ON colleges(is_deleted);
+
+      -- Drop unconditional unique constraints
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_short_code_key;
+      ALTER TABLE colleges DROP CONSTRAINT IF EXISTS colleges_name_key;
+
+      -- Create partial unique indexes active only for non-deleted colleges
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_name_active_unique 
+      ON colleges(LOWER(TRIM(name))) 
+      WHERE deleted_at IS NULL AND is_deleted = false;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_colleges_short_code_active_unique 
+      ON colleges(LOWER(TRIM(short_code))) 
+      WHERE short_code IS NOT NULL AND deleted_at IS NULL AND is_deleted = false;
+
+      -- Backfill legacy soft-deleted rows
+      UPDATE colleges SET deleted_at = NOW() WHERE is_deleted = true AND deleted_at IS NULL;
     `);
 
     // Add verification and token_version columns to users, and create otp_codes table
@@ -444,6 +497,12 @@ pool.on('error', (err, client) => {
     await client.query(
       `ALTER TABLE ai_course_topics ADD COLUMN IF NOT EXISTS quiz_questions JSONB NOT NULL DEFAULT '[]'::jsonb`,
     );
+    await client.query(
+      `ALTER TABLE ai_courses ADD COLUMN IF NOT EXISTS has_unpublished_changes BOOLEAN NOT NULL DEFAULT false`,
+    );
+    await client.query(
+      `ALTER TABLE ai_courses ADD COLUMN IF NOT EXISTS last_published_at TIMESTAMPTZ`,
+    );
 
     // Last accessed tracking for "Continue Learning"
     await client.query(
@@ -478,6 +537,55 @@ pool.on('error', (err, client) => {
       )
     `);
 
+    // ── Facilitator Subjects: Subject-level scoping ─────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS facilitator_subjects (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        facilitator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject_id     UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        is_deleted     BOOLEAN NOT NULL DEFAULT false,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE facilitator_subjects ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'facilitator_subjects'::regclass
+            AND conname = 'uq_facilitator_subject'
+        ) THEN
+          ALTER TABLE facilitator_subjects
+            ADD CONSTRAINT uq_facilitator_subject UNIQUE (facilitator_id, subject_id);
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_fac_subj_fac_id ON facilitator_subjects(facilitator_id) WHERE is_deleted = false;
+      CREATE INDEX IF NOT EXISTS idx_fac_subj_subj_id ON facilitator_subjects(subject_id) WHERE is_deleted = false;
+    `);
+
+    // Backfill existing active facilitators so their existing dashboard is preserved (runs only on initial setup)
+    await client.query(`
+      ALTER TABLE facilitator_colleges ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM facilitator_subjects LIMIT 1) THEN
+          INSERT INTO facilitator_subjects (facilitator_id, subject_id)
+          SELECT DISTINCT fc.facilitator_id, us.subject_id
+          FROM facilitator_colleges fc
+          JOIN student_profiles sp ON sp.college_id = fc.college_id
+          JOIN user_subjects us ON us.user_id = sp.user_id
+          WHERE fc.is_deleted = false
+          ON CONFLICT (facilitator_id, subject_id) DO NOTHING;
+        END IF;
+      END $$;
+    `);
+
     // ── Soft delete: is_deleted flag on every table that previously used hard DELETE ──
     const softDeleteTables = [
       'topics', 'units', 'subtopics', 'lesson_content', 'quizzes',
@@ -485,7 +593,7 @@ pool.on('error', (err, client) => {
       'projects', 'colleges', 'facilitator_colleges', 'ai_courses',
       'ai_course_modules', 'ai_course_topics', 'ai_course_lessons',
       'college_assignments', 'notifications', 'channel_whitelist',
-      'student_projects', 'subjects',
+      'student_projects', 'subjects', 'facilitator_subjects',
     ];
     for (const table of softDeleteTables) {
       await client.query(
@@ -501,12 +609,80 @@ pool.on('error', (err, client) => {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS role_focus TEXT`,
     );
 
-    // ... rest of the tables
-    // Dump lessons for debugging
-    const dumpRes = await client.query(
-      'SELECT id, title, video_url, exercise_data, quiz_questions FROM ai_course_lessons',
+    // ── AI Course status & delta tracking columns ──
+    await client.query(
+      `ALTER TABLE ai_courses ADD COLUMN IF NOT EXISTS has_unpublished_changes BOOLEAN NOT NULL DEFAULT false`,
     );
-    // require('fs').writeFileSync('db_dump.json', JSON.stringify(dumpRes.rows, null, 2));
+    await client.query(
+      `ALTER TABLE ai_courses ADD COLUMN IF NOT EXISTS last_published_at TIMESTAMPTZ`,
+    );
+
+    // ── Ensure unique constraint on evaluation_results(evaluation_id, submission_id) ──
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'evaluation_results') THEN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'evaluation_results'::regclass
+              AND conname = 'uq_evaluation_results_eval_submission'
+          ) THEN
+            -- Safely deduplicate preserving completed submissions, highest marks, and newest rows
+            DELETE FROM evaluation_results
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY evaluation_id, submission_id
+                         ORDER BY 
+                           CASE 
+                             WHEN status = 'completed' THEN 1 
+                             WHEN status = 'failed' THEN 2 
+                             ELSE 3 
+                           END,
+                           marks DESC,
+                           created_at DESC
+                       ) AS rn
+                FROM evaluation_results
+                WHERE evaluation_id IS NOT NULL AND submission_id IS NOT NULL
+              ) ranked
+              WHERE rn > 1
+            );
+
+            ALTER TABLE evaluation_results
+              ADD CONSTRAINT uq_evaluation_results_eval_submission
+              UNIQUE (evaluation_id, submission_id);
+            RAISE NOTICE '[Migration] Created unique constraint on evaluation_results(evaluation_id, submission_id).';
+          END IF;
+        END IF;
+      EXCEPTION
+        WHEN others THEN
+          RAISE NOTICE '[Migration] Skipping evaluation_results constraint: %', SQLERRM;
+      END $$;
+    `);
+
+    // ── Capstone Projects: Evaluation attributes & Central Evaluator support ──
+    await client.query(`
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS evaluator_type TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_cases JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS rubric JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_score INTEGER DEFAULT 100;
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'evaluations') THEN
+          ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS score NUMERIC;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS rubric_breakdown JSONB;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS execution_logs TEXT;
+    `);
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles } from 'lucide-react';
+import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles, Eye } from 'lucide-react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 import toast from 'react-hot-toast';
 import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
@@ -87,7 +88,7 @@ export default function CreateAssignment() {
   const dashboardType = location.pathname.includes('/dashboard/admin') ? 'admin' : 'facilitator';
   const basePath = `/dashboard/${dashboardType}`;
 
-  // ── Basic Information ──
+  // ΓöÇΓöÇ Basic Information ΓöÇΓöÇ
   const queryParams = new URLSearchParams(location.search);
   const editId = editData.editId || queryParams.get('editId') || null;
   const [loadingAssignment, setLoadingAssignment] = useState<boolean>(!!editId);
@@ -106,25 +107,25 @@ export default function CreateAssignment() {
   const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
   const [availableTopics, setAvailableTopics] = useState<{value: string, label: string}[]>([]);
 
-  // ── Colleges & Evaluators from API ──
+  // ΓöÇΓöÇ Colleges & Evaluators from API ΓöÇΓöÇ
   const [colleges, setColleges] = useState<College[]>([]);
   const [evaluators, setEvaluators] = useState<{id: string; name: string}[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Instruction Document Upload ──
+  // ΓöÇΓöÇ Instruction Document Upload ΓöÇΓöÇ
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUrl, setInstructionUrl] = useState(editData.instruction_file_url || '');
   const [instructionName, setInstructionName] = useState(editData.instruction_file_name || '');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Evaluation Setup ──
+  // ΓöÇΓöÇ Evaluation Setup ΓöÇΓöÇ
   const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
   const [aiEvaluationType, setAiEvaluationType] = useState(editData.aiEvaluationType || '');
   const [weightage, setWeightage] = useState(editData.weightage || '100');
   const [enablePlagiarism, setEnablePlagiarism] = useState(editData.enablePlagiarism || false);
 
-  // ── Rubrics & Test Cases State ──
+  // ΓöÇΓöÇ Rubrics & Test Cases State ΓöÇΓöÇ
   const [rubrics, setRubrics] = useState<RubricItem[]>(editData.rubricsList || []);
   const [rubricJson, setRubricJson] = useState<string>(
     editData.rubric
@@ -151,10 +152,10 @@ export default function CreateAssignment() {
   const [rubricViewMode, setRubricViewMode] = useState<'json' | 'builder'>(editData.rubricsList?.length ? 'builder' : 'json');
   const [generatingRubric, setGeneratingRubric] = useState(false);
 
-  // ── Editor Type ──
+  // ΓöÇΓöÇ Editor Type ΓöÇΓöÇ
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
 
-  // ── Test Cases ──
+  // ΓöÇΓöÇ Test Cases ΓöÇΓöÇ
   const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
   const [testCasesJson, setTestCasesJson] = useState<string>(
     editData.test_cases
@@ -172,6 +173,7 @@ export default function CreateAssignment() {
   );
   const [testCaseViewMode, setTestCaseViewMode] = useState<'json' | 'builder'>(editData.testCasesList?.length ? 'builder' : 'json');
   const [generatingTestCases, setGeneratingTestCases] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const handleFileUpload = async (file: File) => {
     const allowed = ['.pdf', '.docx', '.txt', '.doc'];
@@ -201,7 +203,7 @@ export default function CreateAssignment() {
     }
   };
 
-  // ── Load Reference Data on Mount ──
+  // ΓöÇΓöÇ Load Reference Data on Mount ΓöÇΓöÇ
   useEffect(() => {
     apiClient
       .get<{ data: College[] }>('/facilitator/colleges')
@@ -219,7 +221,7 @@ export default function CreateAssignment() {
       .catch((error) => console.error('Failed to load courses', error));
   }, []);
 
-  // ── Load Assignment Details on Edit ──
+  // ΓöÇΓöÇ Load Assignment Details on Edit ΓöÇΓöÇ
   useEffect(() => {
     if (!editId) return;
 
@@ -336,7 +338,7 @@ export default function CreateAssignment() {
     }
   }, [availableTopics, topicId]);
 
-  // ── AI Auto-Generate Handlers ──
+  // ΓöÇΓöÇ AI Auto-Generate Handlers ΓöÇΓöÇ
   const handleGenerateTestCases = async () => {
     const instructionsText = assignmentDescription.trim() || description.trim();
     if (!title.trim() || !instructionsText) {
@@ -432,7 +434,7 @@ export default function CreateAssignment() {
     }
   };
 
-  // ── Submission Settings ──
+  // ΓöÇΓöÇ Submission Settings ΓöÇΓöÇ
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<string[]>(
     editData.allowed_submission_types || editData.allowedSubmissionTypes || [
       'file',
@@ -462,7 +464,7 @@ export default function CreateAssignment() {
     setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
   };
 
-  // ── Rubrics helpers ──
+  // ΓöÇΓöÇ Rubrics helpers ΓöÇΓöÇ
   const totalScore = rubrics.reduce((sum, r) => sum + r.maxScore, 0);
 
   const addRubric = () => {
@@ -482,7 +484,7 @@ export default function CreateAssignment() {
     );
   };
 
-  // ── Test Cases helpers ──
+  // ΓöÇΓöÇ Test Cases helpers ΓöÇΓöÇ
   const totalTestCaseScore = testCases.reduce((sum, tc) => sum + tc.score, 0);
 
   const addTestCase = () => {
@@ -504,7 +506,7 @@ export default function CreateAssignment() {
 
   const isCodeEvaluator = ['JS', 'PYTHON', 'JAVA'].includes(aiEvaluationType);
 
-  // ── Validation & Submit ──
+  // ΓöÇΓöÇ Validation & Submit ΓöÇΓöÇ
   const handleCreate = async () => {
     const missing: string[] = [];
 
@@ -634,7 +636,7 @@ export default function CreateAssignment() {
   return (
     <div className='min-h-screen bg-slate-50/60'>
       <div className='max-w-3xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
-        {/* ── Page Header ── */}
+        {/* ΓöÇΓöÇ Page Header ΓöÇΓöÇ */}
         <div className='flex items-center gap-3'>
           <button
             className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
@@ -661,7 +663,7 @@ export default function CreateAssignment() {
         </div>
 
         {/* ================================================================
-            SECTION 1 — Basic Information
+            SECTION 1 ΓÇö Basic Information
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -824,7 +826,7 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 2 — Evaluation Setup
+            SECTION 2 ΓÇö Evaluation Setup
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -950,10 +952,10 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 3 — Test Cases & Evaluation Rubrics
+            SECTION 3 ΓÇö Test Cases & Evaluation Rubrics
         ================================================================ */}
 
-        {/* ── Test Cases Card ── */}
+        {/* ΓöÇΓöÇ Test Cases Card ΓöÇΓöÇ */}
         <Card className='border-none shadow-sm overflow-hidden bg-white'>
           <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
@@ -1135,14 +1137,14 @@ export default function CreateAssignment() {
           </CardContent>
         </Card>
 
-        {/* ── Evaluation Rubrics Card ── */}
+        {/* ΓöÇΓöÇ Evaluation Rubrics Card ΓöÇΓöÇ */}
         <Card className='border-none shadow-sm overflow-hidden bg-white'>
           <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
               <div>
                 <div className='flex items-center gap-2'>
                   <div className='w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold'>
-                    📋
+                    ≡ƒôï
                   </div>
                   <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
                 </div>
@@ -1318,7 +1320,7 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 4 — Submission Settings
+            SECTION 4 ΓÇö Submission Settings
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -1348,42 +1350,42 @@ export default function CreateAssignment() {
                   id: 'file',
                   title: 'Document / File Upload',
                   desc: 'Direct file upload: PDF, DOCX, XLSX, TXT, ZIP',
-                  emoji: '📁',
+                  emoji: '≡ƒôü',
                   color: 'blue',
                 },
                 {
                   id: 'github',
                   title: 'GitHub / Git Repository',
                   desc: 'Public code repository: GitHub, GitLab, Bitbucket',
-                  emoji: '🐙',
+                  emoji: '≡ƒÉÖ',
                   color: 'slate',
                 },
                 {
                   id: 'docs',
                   title: 'Google Docs / Office 365',
                   desc: 'Cloud document links with sharing permissions',
-                  emoji: '📄',
+                  emoji: '≡ƒôä',
                   color: 'sky',
                 },
                 {
                   id: 'figma',
                   title: 'Figma Design / Prototype',
                   desc: 'Figma files, interactive prototypes, or FigJam boards',
-                  emoji: '🎨',
+                  emoji: '≡ƒÄ¿',
                   color: 'purple',
                 },
                 {
                   id: 'excel',
                   title: 'Google Sheets / Excel Online',
                   desc: 'Cloud spreadsheets for data and financial models',
-                  emoji: '📊',
+                  emoji: '≡ƒôè',
                   color: 'emerald',
                 },
                 {
                   id: 'url',
                   title: 'General URL / Live App',
                   desc: 'Deployed web applications, portfolios, or external links',
-                  emoji: '🌐',
+                  emoji: '≡ƒîÉ',
                   color: 'amber',
                 },
               ].map((item) => {
@@ -1422,24 +1424,70 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ── Footer Actions ── */}
-        <div className='flex flex-col-reverse sm:flex-row justify-end gap-2.5 sm:gap-3 pb-8'>
+        <div className='flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-8 pt-2'>
           <Button
+            type='button'
             variant='outline'
-            className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
-            onClick={() => navigate(`${basePath}/assignment-management`)}
+            onClick={() => setPreviewOpen(true)}
+            className='h-10 px-4 text-xs sm:text-sm font-semibold border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center gap-1.5'
           >
-            Cancel
+            <Eye className='w-4 h-4 text-indigo-600' />
+            <span>Preview Student View</span>
           </Button>
-          <Button
-            className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm'
-            onClick={handleCreate}
-            disabled={submitting}
-          >
-            {submitting && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}
-            {submitting ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update Assignment' : 'Create Assignment')}
-          </Button>
+
+          <div className='flex items-center gap-2.5'>
+            <Button
+              variant='outline'
+              className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
+              onClick={() => navigate(`${basePath}/assignment-management`)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm font-semibold'
+              onClick={handleCreate}
+              disabled={submitting}
+            >
+              {submitting && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}
+              {submitting ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update Assignment' : 'Create Assignment')}
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* ── Student View Preview Modal ── */}
+      <AdminAssignmentPreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        assignmentData={{
+          title: title.trim() || 'Untitled Assignment',
+          instructions: assignmentDescription.trim() || description.trim(),
+          max_score: Number(weightage) || 100,
+          evaluator_type:
+            !aiEvaluationType || aiEvaluationType === 'none' ? null : aiEvaluationType,
+          test_cases:
+            testCaseViewMode === 'json' && testCasesJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(testCasesJson);
+                  } catch {
+                    return testCasesJson;
+                  }
+                })()
+              : testCases,
+          rubric:
+            rubricViewMode === 'json' && rubricJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(rubricJson);
+                  } catch {
+                    return rubricJson;
+                  }
+                })()
+              : rubrics,
+          subject_title: availableCourses.find((c) => c.value === course)?.label || course,
+        }}
+      />
     </div>
   );
 }

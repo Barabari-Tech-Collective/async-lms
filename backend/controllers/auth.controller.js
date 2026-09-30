@@ -5,6 +5,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { logAction } = require('../utils/auditLogger');
 const crypto = require('crypto');
 const { sendMail } = require('../utils/mailer');
+const { reconcileUserStreak } = require('../services/presenceService');
 
 const oauth2Client = new OAuth2Client(
   process.env.GOOGLE_AUTH_CLIENT_ID,
@@ -118,16 +119,24 @@ async function issueSessionToken(user) {
   };
 
   if (user.role === 'facilitator') {
-    const colRes = await pool.query(
-      'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-      [user.id],
-    );
+    const [colRes, subRes] = await Promise.all([
+      pool.query(
+        'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+        [user.id],
+      ),
+      pool.query(
+        'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+        [user.id],
+      ),
+    ]);
     payload.college_ids = colRes.rows.map((r) => r.college_id);
+    payload.subject_ids = subRes.rows.map((r) => r.subject_id);
   }
 
   return {
     token: jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' }),
     collegeIds: payload.college_ids ?? [],
+    subjectIds: payload.subject_ids ?? [],
   };
 }
 
@@ -394,14 +403,22 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Fetch facilitator college scope if applicable
+    // Fetch facilitator college & subject scope if applicable
     let collegeIds = [];
+    let subjectIds = [];
     if (user.role === 'facilitator') {
-      const colRes = await pool.query(
-        'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-        [user.id],
-      );
+      const [colRes, subRes] = await Promise.all([
+        pool.query(
+          'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+        pool.query(
+          'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+      ]);
       collegeIds = colRes.rows.map((r) => r.college_id);
+      subjectIds = subRes.rows.map((r) => r.subject_id);
     }
 
     const token = jwt.sign(
@@ -412,6 +429,7 @@ exports.login = async (req, res) => {
         scope: user.must_change_password ? 'password_reset_only' : undefined,
         college_id: user.role === 'student' ? user.college_id : undefined,
         college_ids: user.role === 'facilitator' ? collegeIds : undefined,
+        subject_ids: user.role === 'facilitator' ? subjectIds : undefined,
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' },
@@ -855,12 +873,22 @@ exports.getMe = async (req, res) => {
   const userID = req.user?.id; // Extracted from JWT by middleware
 
   try {
+    if (req.user?.role === 'student' || !req.user?.role) {
+      await reconcileUserStreak(userID);
+    }
+
     const userRes = await pool.query(
       `SELECT u.id, u.full_name, u.email, LOWER(r.role_key) AS role, u.domain, u.role_focus, u.onboarding_step, u.is_verified, u.must_change_password,
               sp.college_id, sp.degree, sp.year,
               c.is_verified AS college_is_verified,
               c.name AS college_name,
-              COALESCE(us.current_streak, 0) AS current_streak,
+              CASE 
+                WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+                ELSE 0 
+              END AS current_streak,
+              COALESCE(us.longest_streak, 0) AS longest_streak,
+              (us.last_activity::date = CURRENT_DATE) AS practiced_today,
+              (us.last_activity::date = CURRENT_DATE - 1 AND COALESCE(us.current_streak, 0) > 0) AS streak_in_jeopardy,
               COALESCE(SUM(pl.points), 0)::integer AS total_points
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id
@@ -870,7 +898,7 @@ exports.getMe = async (req, res) => {
        LEFT JOIN points_log pl ON pl.user_id = u.id
        WHERE u.id = $1
        GROUP BY u.id, u.full_name, u.email, r.role_key, u.domain, u.role_focus, u.onboarding_step, u.is_verified, u.must_change_password,
-                sp.college_id, sp.degree, sp.year, c.is_verified, c.name, us.current_streak`,
+                sp.college_id, sp.degree, sp.year, c.is_verified, c.name, us.current_streak, us.longest_streak, us.last_activity`,
       [userID],
     );
 
@@ -880,16 +908,24 @@ exports.getMe = async (req, res) => {
 
     const user = userRes.rows[0];
     let collegeIds = [];
+    let subjectIds = [];
 
     if (user.role === 'facilitator') {
-      const colRes = await pool.query(
-        'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-        [userID],
-      );
+      const [colRes, subRes] = await Promise.all([
+        pool.query(
+          'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+          [userID],
+        ),
+        pool.query(
+          'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+          [userID],
+        ),
+      ]);
       collegeIds = colRes.rows.map((r) => r.college_id);
+      subjectIds = subRes.rows.map((r) => r.subject_id);
     }
 
-    res.json({ ...user, college_ids: collegeIds });
+    res.json({ ...user, college_ids: collegeIds, subject_ids: subjectIds });
   } catch (error) {
     // getMe is the session-bootstrap call on every app load; a silent failure
     // here looks like a broken login with nothing in the logs to explain it.
@@ -996,14 +1032,22 @@ exports.verifyEmail = async (req, res) => {
 
     const user = userRes.rows[0];
 
-    // Fetch facilitator college scope if applicable
+    // Fetch facilitator college & subject scope if applicable
     let collegeIds = [];
+    let subjectIds = [];
     if (user.role === 'facilitator') {
-      const colRes = await pool.query(
-        'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-        [user.id],
-      );
+      const [colRes, subRes] = await Promise.all([
+        pool.query(
+          'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+        pool.query(
+          'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+      ]);
       collegeIds = colRes.rows.map((r) => r.college_id);
+      subjectIds = subRes.rows.map((r) => r.subject_id);
     }
 
     const token = jwt.sign(
@@ -1013,6 +1057,7 @@ exports.verifyEmail = async (req, res) => {
         token_version: user.token_version,
         college_id: user.role === 'student' ? user.college_id : undefined,
         college_ids: user.role === 'facilitator' ? collegeIds : undefined,
+        subject_ids: user.role === 'facilitator' ? subjectIds : undefined,
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' },
@@ -1401,14 +1446,22 @@ exports.changePassword = async (req, res) => {
 
     const user = userRes.rows[0];
 
-    // Fetch facilitator college scope if applicable
+    // Fetch facilitator college & subject scope if applicable
     let collegeIds = [];
+    let subjectIds = [];
     if (user.role === 'facilitator') {
-      const colRes = await pool.query(
-        'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1',
-        [user.id]
-      );
+      const [colRes, subRes] = await Promise.all([
+        pool.query(
+          'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+        pool.query(
+          'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+          [user.id],
+        ),
+      ]);
       collegeIds = colRes.rows.map((r) => r.college_id);
+      subjectIds = subRes.rows.map((r) => r.subject_id);
     }
 
     const token = jwt.sign(
@@ -1419,6 +1472,7 @@ exports.changePassword = async (req, res) => {
         scope: undefined, // Fully clear the scope!
         college_id: user.role === 'student' ? user.college_id : undefined,
         college_ids: user.role === 'facilitator' ? collegeIds : undefined,
+        subject_ids: user.role === 'facilitator' ? subjectIds : undefined,
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }

@@ -1,11 +1,17 @@
 // Shared engagement analytics tab components used by both FacilitatorAnalytics and admin Analytics.
 import { useEffect, useState, useCallback } from 'react';
-import { Loader2, ListChecks, Search } from 'lucide-react';
+import {
+  Loader2, ListChecks, Search, ArrowUpRight, Users, CheckCircle2, XCircle, Clock, X, ChevronRight,
+  FileSpreadsheet, FileText, FolderGit2,
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import apiClient from '@/services/api';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Cell,
 } from 'recharts';
 import { StudentDetailsModal } from './StudentDetailsModal';
+import { StudentSubmissionsDrawer } from './StudentSubmissionsDrawer';
+import { StudentCohortProgressDrawer } from './StudentCohortProgressDrawer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,23 +20,76 @@ export type Batch = { id: string; name: string };
 export type Subject = { id: string; name: string };
 export type Assignment = { id: string; title: string };
 
+export type QuizStudent = {
+  id: string;
+  name: string;
+  email: string;
+  college?: string;
+  batch?: string;
+  status: 'Passed' | 'Failed' | 'Not Attempted';
+  score_pct: number | null;
+  quizzes_attempted: number;
+  attempts_count?: number;
+};
+
 type QuizData = {
   enrolled: number; attempted: number; not_attempted: number;
   passed: number; failed: number; avg_score_pct: number;
   score_distribution: { range: string; count: number }[];
   question_analytics?: { question_id: string; question_text: string; correct_pct: number }[];
   question_analytics_total: number;
+  total_quizzes?: number;
+  students?: QuizStudent[];
 };
 
-type AssignmentData = {
-  total: number; submitted: number; not_submitted: number; rate: number;
-  students: { id: string; name: string; email: string; status: string | null }[];
+export type AssignmentStudent = {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  score_pct: number | null;
+  assignments_attempted?: number;
 };
 
-type ProjectData = {
+export type AssignmentData = {
+  enrolled: number;
+  attempted: number;
+  not_attempted: number;
+  passed: number;
+  failed: number;
+  avg_score_pct: number;
+  score_distribution: { range: string; count: number }[];
+  students: AssignmentStudent[];
+  total_assignments?: number;
   total: number;
-  not_started: number; submitted: number; approved: number;
-  students: { id: string; name: string; email: string; status: string }[];
+  submitted: number;
+  not_submitted: number;
+  rate: number;
+};
+
+export type ProjectStudent = {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  score_pct: number | null;
+  projects_attempted?: number;
+};
+
+export type ProjectData = {
+  enrolled: number;
+  attempted: number;
+  not_attempted: number;
+  passed: number;
+  failed: number;
+  avg_score_pct: number;
+  score_distribution: { range: string; count: number }[];
+  students: ProjectStudent[];
+  total_projects?: number;
+  total: number;
+  not_started: number;
+  submitted: number;
+  approved: number;
 };
 
 type BatchSubject = { id: string; name: string; quiz_completion: number; pass_rate: number; assignment_completion: number; project_completion: number; lesson_completion: number; module_progress: number; };
@@ -41,8 +100,79 @@ type BatchDashData = {
   subjects: BatchSubject[];
 };
 
+export type TimeRangePreset = '1d' | '7d' | '10d' | '15d' | '30d' | 'custom';
+
+export type BatchReportStudent = {
+  student_id: string;
+  full_name: string;
+  email: string;
+  college_name: string;
+  college_code: string;
+  batch: string;
+  degree: string;
+  overall_subject_progress: number;
+  weekly_lessons_completed: number;
+  weekly_lessons_xp: number;
+  weekly_exercises_passed: number;
+  weekly_exercises_xp: number;
+  weekly_quizzes_attempted: number;
+  weekly_quizzes_passed?: number;
+  weekly_quizzes_xp: number;
+  weekly_avg_quiz_score: number | null;
+  weekly_assignments_attempted?: number;
+  weekly_assignments_submitted: number;
+  weekly_assignments_passed?: number;
+  weekly_assignments_xp: number;
+  weekly_projects_attempted?: number;
+  weekly_projects_submitted: number;
+  weekly_projects_passed?: number;
+  weekly_projects_approved: number;
+  weekly_projects_xp: number;
+  weekly_xp_earned: number;
+  last_active_at: string | null;
+  engagement_status: 'Active' | 'Inactive';
+};
+
+export type BatchReportData = {
+  period: {
+    time_range: string;
+    start_date: string;
+    end_date: string;
+  };
+  meta: {
+    subject_name: string;
+    college_name: string;
+    batch: string;
+  };
+  summary: {
+    total_enrolled: number;
+    active_count: number;
+    inactive_count: number;
+    lessons_completed: number;
+    lessons_xp: number;
+    exercises_passed: number;
+    exercises_xp: number;
+    quizzes_attempted: number;
+    quizzes_passed?: number;
+    quizzes_xp: number;
+    assignments_attempted?: number;
+    assignments_submitted: number;
+    assignments_passed?: number;
+    assignments_xp: number;
+    projects_attempted?: number;
+    projects_submitted: number;
+    projects_passed?: number;
+    projects_approved: number;
+    projects_xp: number;
+    total_xp_earned: number;
+    cohort_avg_progress: number;
+  };
+  students: BatchReportStudent[];
+};
+
 type StudentRow = {
   id: string; name: string; email: string;
+  last_active_at?: string | null;
   quiz_submitted_count: number; quiz_total_count: number;
   assignment_submitted_count: number; assignment_total_count: number; 
   project_submitted_count: number; project_total_count: number;
@@ -50,19 +180,87 @@ type StudentRow = {
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
-export function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+export function StatCard({
+  label,
+  value,
+  sub,
+  onClick,
+  actionLabel,
+  colorScheme = 'default',
+}: {
+  label: string;
+  value?: string | number | null;
+  sub?: string;
+  onClick?: () => void;
+  actionLabel?: string;
+  colorScheme?: 'default' | 'rose' | 'emerald' | 'indigo' | 'amber' | 'blue';
+}) {
+  const isClickable = Boolean(onClick);
+
+  const schemeStyles = {
+    default: {
+      text: 'text-slate-800',
+      btn: 'text-slate-600 bg-slate-100/90 hover:bg-slate-200/80 border-slate-200/70',
+      cardHover: 'hover:border-slate-300 hover:shadow-xs',
+    },
+    rose: {
+      text: 'text-rose-600',
+      btn: 'text-rose-600 bg-rose-50 hover:bg-rose-100/90 border-rose-200/60',
+      cardHover: 'hover:border-rose-300 hover:shadow-rose-50/50 hover:shadow-xs',
+    },
+    emerald: {
+      text: 'text-emerald-600',
+      btn: 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100/90 border-emerald-200/60',
+      cardHover: 'hover:border-emerald-300 hover:shadow-emerald-50/50 hover:shadow-xs',
+    },
+    indigo: {
+      text: 'text-indigo-600',
+      btn: 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100/90 border-indigo-200/60',
+      cardHover: 'hover:border-indigo-300 hover:shadow-indigo-50/50 hover:shadow-xs',
+    },
+    amber: {
+      text: 'text-amber-600',
+      btn: 'text-amber-600 bg-amber-50 hover:bg-amber-100/90 border-amber-200/60',
+      cardHover: 'hover:border-amber-300 hover:shadow-amber-50/50 hover:shadow-xs',
+    },
+    blue: {
+      text: 'text-blue-600',
+      btn: 'text-blue-600 bg-blue-50 hover:bg-blue-100/90 border-blue-200/60',
+      cardHover: 'hover:border-blue-300 hover:shadow-blue-50/50 hover:shadow-xs',
+    },
+  }[colorScheme];
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-2 sm:p-3 flex flex-col justify-between h-full w-full">
-      <div className="flex-1 flex items-end justify-center pb-1 min-h-[32px]">
-        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter leading-tight text-center whitespace-nowrap overflow-hidden text-ellipsis">
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-slate-200 p-1.5 sm:p-3 flex flex-col justify-between h-full w-full transition-all duration-200 min-w-0 ${
+        isClickable ? `cursor-pointer group ${schemeStyles.cardHover}` : ''
+      }`}
+    >
+      <div className="flex-1 flex items-end justify-center pb-0.5 sm:pb-1 min-h-[26px] sm:min-h-[32px]">
+        <p className="text-[7.5px] sm:text-[9px] text-slate-500 font-bold uppercase tracking-tight text-center leading-tight">
           {label}
         </p>
       </div>
       <div className="text-center">
-        <p className="text-lg xl:text-xl font-bold text-slate-800">{value}</p>
+        <p className={`text-base sm:text-lg xl:text-xl font-bold ${schemeStyles.text}`}>{value ?? 0}</p>
       </div>
-      <div className="h-3 mt-1 text-center flex items-center justify-center">
-        {sub ? <p className="text-[8px] text-slate-400 leading-none">{sub}</p> : null}
+      <div className="min-h-[18px] sm:min-h-[22px] mt-0.5 sm:mt-1 text-center flex items-center justify-center">
+        {actionLabel && isClickable ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick?.();
+            }}
+            className={`inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-md border transition-all ${schemeStyles.btn}`}
+          >
+            <span>{actionLabel}</span>
+            <ArrowUpRight className="w-2.5 h-2.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </button>
+        ) : sub ? (
+          <p className="text-[7.5px] sm:text-[8px] text-slate-400 leading-none truncate">{sub}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -70,15 +268,19 @@ export function StatCard({ label, value, sub }: { label: string; value: string |
 
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    Submitted: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
-    Pending: 'bg-amber-50 text-amber-700 border-amber-200/60',
-    Approved: 'bg-blue-50 text-blue-700 border-blue-200/60',
-    'Not Started': 'bg-slate-100 text-slate-600 border-slate-200/70',
-    'In Progress': 'bg-purple-50 text-purple-700 border-purple-200/60',
-    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+    Passed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    Failed: 'bg-rose-50 text-rose-700 border-rose-200',
+    'Submitted / Pending Review': 'bg-amber-50 text-amber-700 border-amber-200',
+    Submitted: 'bg-amber-50 text-amber-700 border-amber-200',
+    Pending: 'bg-amber-50 text-amber-700 border-amber-200',
+    'Not Started': 'bg-slate-100 text-slate-600 border-slate-200',
+    'Not Attempted': 'bg-slate-100 text-slate-600 border-slate-200',
+    Approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'In Progress': 'bg-purple-50 text-purple-700 border-purple-200',
+    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   };
   return (
-    <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold whitespace-nowrap inline-flex items-center shrink-0 border ${map[status] ?? 'bg-slate-100 text-slate-600 border-slate-200/60'}`}>
+    <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold whitespace-nowrap inline-flex items-center shrink-0 border ${map[status] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}>
       {status}
     </span>
   );
@@ -172,18 +374,22 @@ export function PaginationControls({
 }
 
 export function Select({
-  label, value, onChange, options, placeholder,
+  label, value, onChange, options, placeholder, disabled, className = '',
 }: {
   label: string; value: string; onChange: (v: string) => void;
   options: { id: string; name: string }[]; placeholder: string;
+  disabled?: boolean; className?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 w-full sm:w-auto flex-1 min-w-[130px]">
-      <label className="text-xs font-medium text-slate-500">{label}</label>
+    <div className={`flex flex-col gap-1 min-w-0 transition-opacity ${disabled ? 'opacity-40 cursor-not-allowed' : ''} ${className || 'w-full sm:w-auto flex-1 min-w-[120px] sm:min-w-[130px]'}`}>
+      <label className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="border border-slate-200 bg-white rounded-lg px-3 py-2 text-xs sm:text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 w-full sm:min-w-40 min-h-[38px]"
+        disabled={disabled}
+        className={`border border-slate-200 bg-white rounded-lg px-2.5 sm:px-3 py-2 text-xs sm:text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 w-full sm:min-w-36 min-h-[38px] transition-all truncate ${
+          disabled ? 'bg-slate-100/70 text-slate-400 cursor-not-allowed border-slate-200/50' : ''
+        }`}
       >
         <option value="">{placeholder}</option>
         {options.map((o) => (
@@ -194,7 +400,42 @@ export function Select({
   );
 }
 
-const CHART_COLOR = '#4F46E5';
+export function formatLastActive(dateStr?: string | null, hasActivity?: boolean): { text: string; isRecent: boolean } {
+  if (!dateStr) {
+    if (hasActivity) return { text: 'Active in course', isRecent: false };
+    return { text: 'Never active', isRecent: false };
+  }
+  const date = new Date(dateStr);
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffHours < 1) return { text: 'Active just now', isRecent: true };
+  if (diffHours < 24) return { text: `Active ${diffHours}h ago`, isRecent: true };
+  if (diffDays === 1) return { text: 'Active yesterday', isRecent: true };
+  if (diffDays <= 7) return { text: `Active ${diffDays}d ago`, isRecent: false };
+  if (diffDays <= 30) return { text: `Active ${Math.floor(diffDays / 7)}w ago`, isRecent: false };
+  return { text: `Active ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, isRecent: false };
+}
+
+export const ACTIVE_OPTIONS = [
+  { id: 'overall', name: 'Overall Active' },
+  { id: '1', name: 'Active Today (24h)' },
+  { id: '2', name: 'Active in Last 2 Days' },
+  { id: '3', name: 'Active in Last 3 Days' },
+  { id: '7', name: 'Active in Last 7 Days' },
+  { id: '30', name: 'Active in Last 30 Days' },
+  { id: '365', name: 'Active in Last 1 Year' },
+];
+
+export const INACTIVE_OPTIONS = [
+  { id: 'never', name: 'Never Active' },
+  { id: '1', name: 'Inactive > 1 Day' },
+  { id: '2', name: 'Inactive > 2 Days' },
+  { id: '3', name: 'Inactive > 3 Days' },
+  { id: '7', name: 'Inactive > 7 Days' },
+  { id: '30', name: 'Inactive > 30 Days' },
+];
+
 const DIST_COLORS = ['#EF4444', '#F97316', '#EAB308', '#22C55E', '#3B82F6'];
 
 function QuestionAnalyticsTable({ questions }: { questions: { question_id: string; question_text: string; correct_pct: number }[] }) {
@@ -221,6 +462,427 @@ function QuestionAnalyticsTable({ questions }: { questions: { question_id: strin
   );
 }
 
+// ─── Quiz Students Drilldown Modal ──────────────────────────────────────────
+
+export type QuizFilterType = 'all' | 'attempted' | 'not_attempted' | 'passed' | 'failed';
+export type AnalyticsFilterType = 'all' | 'attempted' | 'not_attempted' | 'passed' | 'failed';
+
+export function QuizStudentsModal({
+  isOpen,
+  onClose,
+  initialFilter = 'failed',
+  students = [],
+  totalQuizzes,
+  contextInfo,
+  onSelectStudent,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  initialFilter?: QuizFilterType;
+  students?: QuizStudent[];
+  totalQuizzes?: number;
+  contextInfo?: {
+    college?: string;
+    batch?: string;
+    subject?: string;
+    topic?: string;
+    quiz?: string;
+  };
+  onSelectStudent?: (student: { id: string; name: string }) => void;
+}) {
+  const [activeFilter, setActiveFilter] = useState<QuizFilterType>(initialFilter);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 8;
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveFilter(initialFilter);
+      setSearch('');
+      setPage(1);
+    }
+  }, [isOpen, initialFilter]);
+
+  const counts = {
+    all: students.length,
+    passed: students.filter((s) => s.status === 'Passed').length,
+    failed: students.filter((s) => s.status === 'Failed').length,
+    attempted: students.filter((s) => s.status === 'Passed' || s.status === 'Failed').length,
+    not_attempted: students.filter((s) => s.status === 'Not Attempted').length,
+  };
+
+  const filteredStudents = students.filter((s) => {
+    if (activeFilter === 'passed' && s.status !== 'Passed') return false;
+    if (activeFilter === 'failed' && s.status !== 'Failed') return false;
+    if (activeFilter === 'attempted' && s.status === 'Not Attempted') return false;
+    if (activeFilter === 'not_attempted' && s.status !== 'Not Attempted') return false;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const matchName = s.name.toLowerCase().includes(q);
+      const matchEmail = s.email.toLowerCase().includes(q);
+      const matchCollege = s.college?.toLowerCase().includes(q);
+      return matchName || matchEmail || matchCollege;
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const paginatedStudents = filteredStudents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const filterTabs: { id: QuizFilterType; label: string; count: number; activeColor: string }[] = [
+    { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
+    { id: 'failed', label: 'Failed', count: counts.failed, activeColor: 'bg-rose-600 text-white' },
+    { id: 'passed', label: 'Passed', count: counts.passed, activeColor: 'bg-emerald-600 text-white' },
+    { id: 'attempted', label: 'Attempted', count: counts.attempted, activeColor: 'bg-indigo-600 text-white' },
+    { id: 'not_attempted', label: 'Not Attempted', count: counts.not_attempted, activeColor: 'bg-slate-600 text-white' },
+  ];
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="w-[95vw] sm:max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-slate-50 rounded-2xl shadow-2xl border border-slate-200/80"
+      >
+        {/* Header */}
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-white border-b border-slate-200/80 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3 min-w-0 pr-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 shadow-xs">
+              <Users className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <DialogTitle className="text-sm sm:text-base md:text-lg font-bold text-slate-900 truncate tracking-tight flex items-center gap-2">
+                <span>Quiz Students Directory</span>
+                <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-medium">
+                  {filteredStudents.length} {filteredStudents.length === 1 ? 'student' : 'students'}
+                </span>
+              </DialogTitle>
+              <p className="text-[11px] text-slate-400 truncate">
+                {contextInfo?.quiz ? `Quiz: ${contextInfo.quiz}` : contextInfo?.topic ? `Module: ${contextInfo.topic}` : 'Detailed roster of students and their assessment performance'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 sm:p-2 hover:bg-slate-100 active:bg-slate-200 text-slate-400 hover:text-slate-700 rounded-xl transition-colors shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center"
+            title="Close modal"
+          >
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        </div>
+
+        {/* Filter and Search Toolbar */}
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-3 bg-white/80 border-b border-slate-200/60 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0">
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5 w-full sm:w-auto flex-nowrap shrink-0">
+            {filterTabs.map((tab) => {
+              const isActive = activeFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveFilter(tab.id);
+                    setPage(1);
+                  }}
+                  className={`inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                    isActive
+                      ? `${tab.activeColor} shadow-xs`
+                      : 'bg-slate-100 hover:bg-slate-200/70 text-slate-600'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-700 border border-slate-200/60'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search Box */}
+          <div className="relative w-full sm:w-60 shrink-0">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, email..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Modal Body / Table */}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 no-scrollbar">
+          {filteredStudents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
+                <Users className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No students found</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                {search
+                  ? `No students matching "${search}" in the ${activeFilter} category.`
+                  : `There are currently 0 students under the ${activeFilter} filter.`}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+              {/* Mobile Card List (md:hidden) */}
+              <div className="divide-y divide-slate-100 md:hidden">
+                {paginatedStudents.map((s) => {
+                  const initials = s.name
+                    ? s.name
+                        .split(' ')
+                        .map((n) => n[0])
+                        .slice(0, 2)
+                        .join('')
+                        .toUpperCase()
+                    : '??';
+
+                  return (
+                    <div key={s.id} className="p-3.5 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0">
+                            {initials}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                              {s.name}
+                            </p>
+                            <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          {s.status === 'Passed' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                              Passed
+                            </span>
+                          ) : s.status === 'Failed' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70">
+                              <XCircle className="w-3 h-3 text-rose-500" />
+                              Failed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200/70">
+                              <Clock className="w-3 h-3 text-slate-400" />
+                              Not Attempted
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-400 font-medium">Score:</span>
+                          {s.score_pct !== null ? (
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-12 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    s.score_pct >= 60
+                                      ? 'bg-emerald-500'
+                                      : s.score_pct >= 40
+                                      ? 'bg-amber-500'
+                                      : 'bg-rose-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, Math.max(0, s.score_pct))}%` }}
+                                />
+                              </div>
+                              <span
+                                className={`text-xs font-bold ${
+                                  s.score_pct >= 60
+                                    ? 'text-emerald-700'
+                                    : s.score_pct >= 40
+                                    ? 'text-amber-700'
+                                    : 'text-rose-700'
+                                }`}
+                              >
+                                {s.score_pct}%
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">No score</span>
+                          )}
+                        </div>
+
+                        <div className="text-[11px] text-slate-600">
+                          {s.quizzes_attempted > 0 ? (
+                            <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                              {totalQuizzes && totalQuizzes > 1
+                                ? `${s.quizzes_attempted}/${totalQuizzes} quizzes`
+                                : `${s.quizzes_attempted} quizzes`}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">0 quizzes</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {onSelectStudent && (
+                        <button
+                          onClick={() => onSelectStudent({ id: s.id, name: s.name })}
+                          className="w-full flex items-center justify-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 py-1.5 px-3 rounded-xl border border-indigo-200/50 transition-colors"
+                        >
+                          <span>View Progress</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table View (hidden md:block) */}
+              <div className="hidden md:block overflow-x-auto no-scrollbar">
+                <table className="w-full text-xs sm:text-sm text-left">
+                  <thead className="bg-slate-50/80 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-4 sm:px-5 py-3 whitespace-nowrap">Student</th>
+                      <th className="px-4 sm:px-5 py-3 whitespace-nowrap">Status</th>
+                      <th className="px-4 sm:px-5 py-3 whitespace-nowrap">Score</th>
+                      <th className="px-4 sm:px-5 py-3 whitespace-nowrap">Quizzes Attempted</th>
+                      <th className="px-4 sm:px-5 py-3 whitespace-nowrap text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {paginatedStudents.map((s) => {
+                      const initials = s.name
+                        ? s.name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .slice(0, 2)
+                            .join('')
+                            .toUpperCase()
+                        : '??';
+
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="px-4 sm:px-5 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0">
+                                {initials}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-800 text-xs sm:text-sm truncate">
+                                  {s.name}
+                                </p>
+                                <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 sm:px-5 py-3 whitespace-nowrap">
+                            {s.status === 'Passed' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                Passed
+                              </span>
+                            ) : s.status === 'Failed' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/70">
+                                <XCircle className="w-3 h-3 text-rose-500" />
+                                Failed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/70">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                Not Attempted
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 sm:px-5 py-3 whitespace-nowrap">
+                            {s.score_pct !== null ? (
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${
+                                      s.score_pct >= 60
+                                        ? 'bg-emerald-500'
+                                        : s.score_pct >= 40
+                                        ? 'bg-amber-500'
+                                        : 'bg-rose-500'
+                                    }`}
+                                    style={{ width: `${Math.min(100, Math.max(0, s.score_pct))}%` }}
+                                  />
+                                </div>
+                                <span
+                                  className={`text-xs font-bold ${
+                                    s.score_pct >= 60
+                                      ? 'text-emerald-700'
+                                      : s.score_pct >= 40
+                                      ? 'text-amber-700'
+                                      : 'text-rose-700'
+                                  }`}
+                                >
+                                  {s.score_pct}%
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">No score</span>
+                            )}
+                          </td>
+                          <td className="px-4 sm:px-5 py-3 whitespace-nowrap text-xs text-slate-600">
+                            {s.quizzes_attempted > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                                {totalQuizzes && totalQuizzes > 1
+                                  ? `${s.quizzes_attempted} / ${totalQuizzes} quizzes`
+                                  : `${s.quizzes_attempted} ${s.quizzes_attempted === 1 ? 'quiz' : 'quizzes'}`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">0 quizzes</span>
+                            )}
+                          </td>
+                          <td className="px-4 sm:px-5 py-3 whitespace-nowrap text-right">
+                            {onSelectStudent && (
+                              <button
+                                onClick={() => onSelectStudent({ id: s.id, name: s.name })}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200/50 transition-colors"
+                              >
+                                <span>View Progress</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500 bg-slate-50/50">
+                  <span>
+                    Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredStudents.length)} of {filteredStudents.length} students
+                  </span>
+                  <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Tab: Quiz Analytics ──────────────────────────────────────────────────────
 
 const QUIZ_PAGE_SIZE = 10;
@@ -236,6 +898,15 @@ export function QuizTab({ colleges, batches, subjects }: { colleges: College[]; 
   const [data, setData] = useState<QuizData | null>(null);
   const [loading, setLoading] = useState(false);
   const [qPage, setQPage] = useState(1);
+
+  const [studentsModalOpen, setStudentsModalOpen] = useState(false);
+  const [modalFilter, setModalFilter] = useState<QuizFilterType>('failed');
+  const [drilldownStudent, setDrilldownStudent] = useState<{ id: string; name: string } | null>(null);
+
+  const handleOpenStudentsModal = (filter: QuizFilterType) => {
+    setModalFilter(filter);
+    setStudentsModalOpen(true);
+  };
 
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
@@ -280,7 +951,7 @@ export function QuizTab({ colleges, batches, subjects }: { colleges: College[]; 
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
-      <div className="flex flex-wrap gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
@@ -291,12 +962,46 @@ export function QuizTab({ colleges, batches, subjects }: { colleges: College[]; 
       {loading ? <LoadingState /> : !data ? <EmptyState /> : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-            <StatCard label="Enrolled" value={data.enrolled} />
-            <StatCard label="Attempted" value={data.attempted} />
-            <StatCard label="Not Attempted" value={data.not_attempted} />
-            <StatCard label="Passed" value={data.passed} />
-            <StatCard label="Failed" value={data.failed} />
-            <StatCard label="Avg Score" value={`${data.avg_score_pct}%`} />
+            <StatCard
+              label="Enrolled"
+              value={data.enrolled}
+              actionLabel="View List"
+              colorScheme="blue"
+              onClick={() => handleOpenStudentsModal('all')}
+            />
+            <StatCard
+              label="Attempted"
+              value={data.attempted}
+              actionLabel="View List"
+              colorScheme="indigo"
+              onClick={() => handleOpenStudentsModal('attempted')}
+            />
+            <StatCard
+              label="Not Attempted"
+              value={data.not_attempted}
+              actionLabel="View List"
+              colorScheme="default"
+              onClick={() => handleOpenStudentsModal('not_attempted')}
+            />
+            <StatCard
+              label="Passed"
+              value={data.passed}
+              actionLabel="View List"
+              colorScheme="emerald"
+              onClick={() => handleOpenStudentsModal('passed')}
+            />
+            <StatCard
+              label="Failed"
+              value={data.failed}
+              actionLabel="View List"
+              colorScheme="rose"
+              onClick={() => handleOpenStudentsModal('failed')}
+            />
+            <StatCard
+              label="Avg Score"
+              value={`${data.avg_score_pct}%`}
+              colorScheme="amber"
+            />
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs min-w-0">
@@ -342,6 +1047,39 @@ export function QuizTab({ colleges, batches, subjects }: { colleges: College[]; 
               );
             })()}
           </div>
+
+          <QuizStudentsModal
+            isOpen={studentsModalOpen}
+            onClose={() => setStudentsModalOpen(false)}
+            initialFilter={modalFilter}
+            students={data?.students || []}
+            totalQuizzes={data?.total_quizzes}
+            contextInfo={{
+              college: colleges.find((c) => c.id === college)?.name,
+              batch: batches.find((b) => b.id === batch)?.name,
+              subject: subjects.find((s) => s.id === subject)?.name,
+              topic: topics.find((t) => t.id === topic)?.name,
+              quiz: quizzes.find((q) => q.id === quiz)?.name,
+            }}
+            onSelectStudent={(student) => {
+              setStudentsModalOpen(false);
+              setDrilldownStudent(student);
+            }}
+          />
+
+          {drilldownStudent && (
+            <StudentDetailsModal
+              isOpen={Boolean(drilldownStudent)}
+              onClose={() => {
+                setDrilldownStudent(null);
+                setStudentsModalOpen(true);
+              }}
+              studentId={drilldownStudent.id}
+              studentName={drilldownStudent.name}
+              subjectId={subject}
+              mode="quizzes_only"
+            />
+          )}
         </>
       )}
     </div>
@@ -364,6 +1102,11 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
   const [data, setData] = useState<AssignmentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [aPage, setAPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
+  const [search, setSearch] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
+
+  const PAGE_SIZE = 10;
 
   // Fetch topics when subject changes
   useEffect(() => {
@@ -389,7 +1132,7 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
       .catch(() => setCourseAssignments([]));
   }, [topic]);
 
-  const load = useCallback(async (p = 1) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -404,9 +1147,6 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
         params.set('assignment_id', id);
       }
       
-      params.set('page', String(p));
-      params.set('limit', '10');
-      
       const res = await apiClient.get(`/facilitator/analytics/assignments?${params}`);
       setData(res.data.data);
     } catch {
@@ -416,81 +1156,353 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
     }
   }, [college, batch, subject, topic, assignmentCompound]);
 
-  const handlePageChange = (p: number) => {
-    setAPage(p);
-    load(p);
-  };
-
-  useEffect(() => { setAPage(1); load(1); }, [load]);
+  useEffect(() => {
+    setAPage(1);
+    setStatusFilter('all');
+    setSearch('');
+    load();
+  }, [load]);
 
   const mergedAssignments = [
     ...collegeAssignments.map(a => ({ id: `college|${a.id}`, name: `[College] ${a.title}` })),
     ...courseAssignments.map(a => ({ id: `course|${a.id}`, name: `[Course] ${a.name}` }))
   ];
 
+  const students = data?.students || [];
+
+  const counts = {
+    all: students.length,
+    attempted: students.filter((s) => s.status !== 'Not Started').length,
+    not_attempted: students.filter((s) => s.status === 'Not Started').length,
+    passed: students.filter((s) => s.status === 'Passed').length,
+    failed: students.filter((s) => s.status === 'Failed').length,
+  };
+
+  const filteredStudents = students.filter((s) => {
+    if (statusFilter === 'passed' && s.status !== 'Passed') return false;
+    if (statusFilter === 'failed' && s.status !== 'Failed') return false;
+    if (statusFilter === 'attempted' && s.status === 'Not Started') return false;
+    if (statusFilter === 'not_attempted' && s.status !== 'Not Started') return false;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const paginatedStudents = filteredStudents.slice((aPage - 1) * PAGE_SIZE, aPage * PAGE_SIZE);
+
+  const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
+    { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
+    { id: 'attempted', label: 'Attempted', count: counts.attempted, activeColor: 'bg-indigo-600 text-white' },
+    { id: 'not_attempted', label: 'Not Attempted', count: counts.not_attempted, activeColor: 'bg-slate-600 text-white' },
+    { id: 'passed', label: 'Passed', count: counts.passed, activeColor: 'bg-emerald-600 text-white' },
+    { id: 'failed', label: 'Failed', count: counts.failed, activeColor: 'bg-rose-600 text-white' },
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-3">
+    <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
         <Select label="Module" value={topic} onChange={setTopic} options={topics} placeholder="All Modules" />
-        <Select label="Assignment" value={assignmentCompound} onChange={setAssignmentCompound} options={mergedAssignments} placeholder="Select Assignment" />
+        <Select label="Assignment" value={assignmentCompound} onChange={setAssignmentCompound} options={mergedAssignments} placeholder="All Assignments" />
       </div>
 
       {loading ? <LoadingState /> : !data ? <EmptyState /> : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-            <StatCard label="Total Students" value={data.total} />
-            <StatCard label="Submitted" value={data.submitted} />
-            <StatCard label="Not Submitted" value={data.not_submitted} />
-            <StatCard label="Submission Rate" value={`${data.rate}%`} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            <StatCard
+              label="Enrolled"
+              value={data.enrolled ?? data.total ?? 0}
+              actionLabel="View All"
+              colorScheme="blue"
+              onClick={() => { setStatusFilter('all'); setAPage(1); }}
+            />
+            <StatCard
+              label="Attempted"
+              value={data.attempted ?? data.submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="indigo"
+              onClick={() => { setStatusFilter('attempted'); setAPage(1); }}
+            />
+            <StatCard
+              label="Not Attempted"
+              value={data.not_attempted ?? data.not_submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="default"
+              onClick={() => { setStatusFilter('not_attempted'); setAPage(1); }}
+            />
+            <StatCard
+              label="Passed"
+              value={data.passed ?? 0}
+              actionLabel="View List"
+              colorScheme="emerald"
+              onClick={() => { setStatusFilter('passed'); setAPage(1); }}
+            />
+            <StatCard
+              label="Failed"
+              value={data.failed ?? 0}
+              actionLabel="View List"
+              colorScheme="rose"
+              onClick={() => { setStatusFilter('failed'); setAPage(1); }}
+            />
+            <StatCard
+              label="Avg Score"
+              value={`${data.avg_score_pct ?? 0}%`}
+              colorScheme="amber"
+            />
           </div>
           {!assignmentCompound && (
             <p className="text-xs text-slate-500 -mt-2">
-              No specific assignment selected — showing students who submitted at least one assignment (course or college).
+              No specific assignment selected — showing student performance aggregated across subject assignments.
             </p>
           )}
 
+          {/* Score Distribution Bar Chart */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs min-w-0">
+            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Score Distribution</h3>
+            {(!data.score_distribution || data.score_distribution.every((d) => d.count === 0)) ? (
+              <EmptyState message="No evaluated assignments yet — score distribution will appear once submissions are graded" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.score_distribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={45}>
+                    {data.score_distribution.map((_, i) => (
+                      <Cell key={i} fill={DIST_COLORS[i % DIST_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Student Submissions Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Submissions</h3>
+              <div className="relative w-full sm:w-60 shrink-0">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search student name, email..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setAPage(1);
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
+                {search && (
+                  <button
+                    onClick={() => { setSearch(''); setAPage(1); }}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
-            {data.students.length === 0 ? <EmptyState message="No students found" /> : (
+
+            {/* Filter Tabs */}
+            <div className="px-4 sm:px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+              {filterTabs.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setStatusFilter(tab.id);
+                      setAPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                      isActive
+                        ? `${tab.activeColor} shadow-xs`
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredStudents.length === 0 ? (
+              <EmptyState message="No students match the current filter or search query" />
+            ) : (
               <>
-                <div className="overflow-x-auto no-scrollbar w-full min-w-0">
+                {/* Mobile Card List (sm:hidden) */}
+                <div className="sm:hidden divide-y divide-slate-100">
+                  {paginatedStudents.map((s) => {
+                    const initials = s.name
+                      ? s.name
+                          .split(' ')
+                          .map((n: string) => n[0])
+                          .slice(0, 2)
+                          .join('')
+                          .toUpperCase()
+                      : '??';
+                    const attemptedCount = s.assignments_attempted ?? (s.status !== 'Not Started' ? 1 : 0);
+                    const totalCount = data.total_assignments ?? 1;
+
+                    return (
+                      <div key={s.id} className="p-3.5 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-slate-800 text-xs truncate">
+                                {s.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            <StatusBadge status={s.status} />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-medium">Score:</span>
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  s.score_pct >= 60
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                }`}
+                              >
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">No score</span>
+                            )}
+                          </div>
+
+                          <div className="text-[11px] text-slate-600">
+                            {attemptedCount > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                                {attemptedCount} / {totalCount} attempted
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">0 / {totalCount} attempted</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 py-2 px-3 rounded-xl border border-indigo-200/60 transition-colors shadow-sm"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>View Submissions & Breakdown</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-indigo-500 ml-auto" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop/Tablet Table View (hidden sm:block) */}
+                <div className="hidden sm:block overflow-x-auto no-scrollbar w-full min-w-0">
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
                         <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
-                        <th className="text-left px-3.5 sm:px-5 py-3 hidden sm:table-cell">Email</th>
-                        <th className="text-right sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {data.students.map((s) => (
+                      {paginatedStudents.map((s) => (
                         <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-3.5 sm:px-5 py-3 font-medium text-slate-800">
                             <p>{s.name}</p>
-                            <p className="text-[11px] text-slate-400 sm:hidden font-normal">{s.email}</p>
                           </td>
-                          <td className="px-3.5 sm:px-5 py-3 text-slate-500 hidden sm:table-cell">{s.email}</td>
-                          <td className="px-3.5 sm:px-5 py-3 text-right sm:text-left"><StatusBadge status={s.status ?? 'Pending'} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-slate-500">{s.email}</td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {(s.assignments_attempted ?? (s.status !== 'Not Started' ? 1 : 0)) > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200/60 text-xs inline-flex items-center gap-1">
+                                {data.total_assignments && data.total_assignments > 1
+                                  ? `${s.assignments_attempted ?? 1} / ${data.total_assignments} assignments`
+                                  : `${s.assignments_attempted ?? 1} ${(s.assignments_attempted ?? 1) === 1 ? 'assignment' : 'assignments'}`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">
+                                0 {data.total_assignments && data.total_assignments > 1 ? `/ ${data.total_assignments}` : ''} assignments
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                                s.score_pct >= 60 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}>
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-right">
+                            <button
+                              onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg border border-indigo-200/80 transition-all shadow-sm"
+                              title="View student submissions & evaluation feedback"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Submissions</span>
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {Math.ceil(data.total / 10) > 1 && (
+                {totalPages > 1 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{data.total} students · page {aPage} of {Math.ceil(data.total / 10)}</span>
-                    <PaginationControls page={aPage} totalPages={Math.ceil(data.total / 10)} onPageChange={handlePageChange} />
+                    <span>{filteredStudents.length} students · page {aPage} of {totalPages}</span>
+                    <PaginationControls page={aPage} totalPages={totalPages} onPageChange={setAPage} />
                   </div>
                 )}
               </>
             )}
           </div>
         </>
+      )}
+
+      {selectedStudent && (
+        <StudentSubmissionsDrawer
+          isOpen={Boolean(selectedStudent)}
+          onClose={() => setSelectedStudent(null)}
+          studentId={selectedStudent.id}
+          studentName={selectedStudent.name}
+          studentEmail={selectedStudent.email}
+          type="assignments"
+          subjectId={subject}
+          topicId={topic}
+        />
       )}
     </div>
   );
@@ -511,6 +1523,11 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
   const [data, setData] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(false);
   const [pPage, setPPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
+  const [search, setSearch] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
+
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
@@ -526,7 +1543,7 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
       .catch(() => setProjects([]));
   }, [topic]);
 
-  const load = useCallback(async (p = 1) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -535,8 +1552,6 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
       if (subject) params.set('subject_id', subject);
       if (topic) params.set('topic_id', topic);
       if (project) params.set('project_id', project);
-      params.set('page', String(p));
-      params.set('limit', '10');
 
       const res = await apiClient.get(`/facilitator/analytics/projects?${params}`);
       setData(res.data.data);
@@ -547,30 +1562,50 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
     }
   }, [college, batch, subject, topic, project]);
 
-  const handlePageChange = (p: number) => {
-    setPPage(p);
-    load(p);
+  useEffect(() => {
+    setPPage(1);
+    setStatusFilter('all');
+    setSearch('');
+    load();
+  }, [load]);
+
+  const students = data?.students || [];
+
+  const counts = {
+    all: students.length,
+    attempted: students.filter((s) => s.status !== 'Not Started').length,
+    not_attempted: students.filter((s) => s.status === 'Not Started').length,
+    passed: students.filter((s) => s.status === 'Passed').length,
+    failed: students.filter((s) => s.status === 'Failed').length,
   };
 
-  useEffect(() => { setPPage(1); load(1); }, [load]);
+  const filteredStudents = students.filter((s) => {
+    if (statusFilter === 'passed' && s.status !== 'Passed') return false;
+    if (statusFilter === 'failed' && s.status !== 'Failed') return false;
+    if (statusFilter === 'attempted' && s.status === 'Not Started') return false;
+    if (statusFilter === 'not_attempted' && s.status !== 'Not Started') return false;
 
-  const chartData = data
-    ? [
-        { status: 'Not Started', count: data.not_started },
-        { status: 'Submitted', count: data.submitted },
-        { status: 'Approved', count: data.approved },
-      ]
-    : [];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
-  const statusColors: Record<string, string> = {
-    'Not Started': '#94A3B8',
-    Submitted: '#F59E0B',
-    Approved: '#22C55E',
-  };
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const paginatedStudents = filteredStudents.slice((pPage - 1) * PAGE_SIZE, pPage * PAGE_SIZE);
+
+  const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
+    { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
+    { id: 'attempted', label: 'Attempted', count: counts.attempted, activeColor: 'bg-indigo-600 text-white' },
+    { id: 'not_attempted', label: 'Not Started', count: counts.not_attempted, activeColor: 'bg-slate-600 text-white' },
+    { id: 'passed', label: 'Passed', count: counts.passed, activeColor: 'bg-emerald-600 text-white' },
+    { id: 'failed', label: 'Failed', count: counts.failed, activeColor: 'bg-rose-600 text-white' },
+  ];
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
-      <div className="flex flex-wrap gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
@@ -580,69 +1615,290 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
 
       {loading ? <LoadingState /> : !data ? <EmptyState /> : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-            <StatCard label="Total Students" value={data.total ?? 0} />
-            <StatCard label="Not Started" value={data.not_started} />
-            <StatCard label="Submitted" value={data.submitted} />
-            <StatCard label="Approved" value={data.approved} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            <StatCard
+              label="Enrolled"
+              value={data.enrolled ?? data.total ?? 0}
+              actionLabel="View All"
+              colorScheme="blue"
+              onClick={() => { setStatusFilter('all'); setPPage(1); }}
+            />
+            <StatCard
+              label="Attempted"
+              value={data.attempted ?? data.submitted ?? 0}
+              actionLabel="View List"
+              colorScheme="indigo"
+              onClick={() => { setStatusFilter('attempted'); setPPage(1); }}
+            />
+            <StatCard
+              label="Not Started"
+              value={data.not_attempted ?? data.not_started ?? 0}
+              actionLabel="View List"
+              colorScheme="default"
+              onClick={() => { setStatusFilter('not_attempted'); setPPage(1); }}
+            />
+            <StatCard
+              label="Passed"
+              value={data.passed ?? data.approved ?? 0}
+              actionLabel="View List"
+              colorScheme="emerald"
+              onClick={() => { setStatusFilter('passed'); setPPage(1); }}
+            />
+            <StatCard
+              label="Failed"
+              value={data.failed ?? 0}
+              actionLabel="View List"
+              colorScheme="rose"
+              onClick={() => { setStatusFilter('failed'); setPPage(1); }}
+            />
+            <StatCard
+              label="Avg Score"
+              value={`${data.avg_score_pct ?? 0}%`}
+              colorScheme="amber"
+            />
           </div>
 
+          {/* Score Distribution Bar Chart */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs min-w-0">
-            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Project Status Distribution</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="#F1F5F9" vertical={false} />
-                <XAxis dataKey="status" tick={{ fontSize: 11 }} interval={0} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
-                <Tooltip />
-                <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={55}>
-                  {chartData.map((entry) => (
-                    <Cell key={entry.status} fill={statusColors[entry.status] ?? CHART_COLOR} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <h3 className="text-xs sm:text-sm font-semibold text-slate-700 mb-4">Score Distribution</h3>
+            {(!data.score_distribution || data.score_distribution.every((d) => d.count === 0)) ? (
+              <EmptyState message="No evaluated projects yet — score distribution will appear once submissions are graded" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.score_distribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={35} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]} maxBarSize={45}>
+                    {data.score_distribution.map((_, i) => (
+                      <Cell key={i} fill={DIST_COLORS[i % DIST_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
+          {/* Student Project Status Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Project Status</h3>
+              <div className="relative w-full sm:w-60 shrink-0">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search student name, email..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPPage(1);
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
+                {search && (
+                  <button
+                    onClick={() => { setSearch(''); setPPage(1); }}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
-            {data.students.length === 0 ? <EmptyState message="No students found" /> : (
+
+            {/* Filter Tabs */}
+            <div className="px-4 sm:px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+              {filterTabs.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setStatusFilter(tab.id);
+                      setPPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
+                      isActive
+                        ? `${tab.activeColor} shadow-xs`
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredStudents.length === 0 ? (
+              <EmptyState message="No students match the current filter or search query" />
+            ) : (
               <>
-                <div className="overflow-x-auto no-scrollbar w-full min-w-0">
+                {/* Mobile Card List (sm:hidden) */}
+                <div className="sm:hidden divide-y divide-slate-100">
+                  {paginatedStudents.map((s) => {
+                    const initials = s.name
+                      ? s.name
+                          .split(' ')
+                          .map((n: string) => n[0])
+                          .slice(0, 2)
+                          .join('')
+                          .toUpperCase()
+                      : '??';
+                    const attemptedCount = s.projects_attempted ?? (s.status !== 'Not Started' ? 1 : 0);
+                    const totalCount = data.total_projects ?? 1;
+
+                    return (
+                      <div key={s.id} className="p-3.5 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-purple-50 border border-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-slate-800 text-xs truncate">
+                                {s.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            <StatusBadge status={s.status} />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400 font-medium">Score:</span>
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  s.score_pct >= 60
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                }`}
+                              >
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">No score</span>
+                            )}
+                          </div>
+
+                          <div className="text-[11px] text-slate-600">
+                            {attemptedCount > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200/60">
+                                {attemptedCount} / {totalCount} attempted
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">0 / {totalCount} attempted</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 py-2 px-3 rounded-xl border border-indigo-200/60 transition-colors shadow-sm"
+                        >
+                          <FolderGit2 className="w-3.5 h-3.5" />
+                          <span>View Submissions & Breakdown</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-indigo-500 ml-auto" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop/Tablet Table View (hidden sm:block) */}
+                <div className="hidden sm:block overflow-x-auto no-scrollbar w-full min-w-0">
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
                         <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
-                        <th className="text-left px-3.5 sm:px-5 py-3 hidden sm:table-cell">Email</th>
-                        <th className="text-right sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
+                        <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {data.students.map((s) => (
+                      {paginatedStudents.map((s) => (
                         <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-3.5 sm:px-5 py-3 font-medium text-slate-800">
                             <p>{s.name}</p>
-                            <p className="text-[11px] text-slate-400 sm:hidden font-normal">{s.email}</p>
                           </td>
-                          <td className="px-3.5 sm:px-5 py-3 text-slate-500 hidden sm:table-cell">{s.email}</td>
-                          <td className="px-3.5 sm:px-5 py-3 text-right sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-slate-500">{s.email}</td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {(s.projects_attempted ?? (s.status !== 'Not Started' ? 1 : 0)) > 0 ? (
+                              <span className="font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200/60 text-xs inline-flex items-center gap-1">
+                                {data.total_projects && data.total_projects > 1
+                                  ? `${s.projects_attempted ?? 1} / ${data.total_projects} projects`
+                                  : `${s.projects_attempted ?? 1} ${(s.projects_attempted ?? 1) === 1 ? 'project' : 'projects'}`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">
+                                0 {data.total_projects && data.total_projects > 1 ? `/ ${data.total_projects}` : ''} projects
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left">
+                            {s.score_pct !== null && s.score_pct !== undefined ? (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                                s.score_pct >= 60 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}>
+                                {s.score_pct}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="px-3.5 sm:px-5 py-3 text-center sm:text-left"><StatusBadge status={s.status} /></td>
+                          <td className="px-3.5 sm:px-5 py-3 text-right">
+                            <button
+                              onClick={() => setSelectedStudent({ id: s.id, name: s.name, email: s.email })}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800 rounded-lg border border-indigo-200/80 transition-all shadow-sm"
+                              title="View student project submissions & evaluation feedback"
+                            >
+                              <FolderGit2 className="w-3.5 h-3.5" />
+                              <span>Submissions</span>
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {Math.ceil((data.total ?? 0) / 10) > 1 && (
+                {totalPages > 1 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{data.total} students · page {pPage} of {Math.ceil((data.total ?? 0) / 10)}</span>
-                    <PaginationControls page={pPage} totalPages={Math.ceil((data.total ?? 0) / 10)} onPageChange={handlePageChange} />
+                    <span>{filteredStudents.length} students · page {pPage} of {totalPages}</span>
+                    <PaginationControls page={pPage} totalPages={totalPages} onPageChange={setPPage} />
                   </div>
                 )}
               </>
             )}
           </div>
         </>
+      )}
+
+      {selectedStudent && (
+        <StudentSubmissionsDrawer
+          isOpen={Boolean(selectedStudent)}
+          onClose={() => setSelectedStudent(null)}
+          studentId={selectedStudent.id}
+          studentName={selectedStudent.name}
+          studentEmail={selectedStudent.email}
+          type="projects"
+          subjectId={subject}
+          topicId={topic}
+        />
       )}
     </div>
   );
@@ -661,6 +1917,21 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
   const [page, setPage] = useState(1);
   const pageSize = 5;
 
+  // Timeframe & Activity Report State
+  const [timeRange, setTimeRange] = useState<TimeRangePreset>('7d');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [activeView, setActiveView] = useState<'modules' | 'report'>('modules');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [reportData, setReportData] = useState<BatchReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [studentPage, setStudentPage] = useState(1);
+  const studentPageSize = 10;
+  const [exporting, setExporting] = useState(false);
+  const [drawerStudent, setDrawerStudent] = useState<BatchReportStudent | null>(null);
+  const [detailsModalStudent, setDetailsModalStudent] = useState<{ id: string; name: string } | null>(null);
+
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
     apiClient.get(`/facilitator/analytics/topics?subject_id=${subject}`)
@@ -668,7 +1939,7 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
       .catch(() => setTopics([]));
   }, [subject]);
 
-  const load = useCallback(async () => {
+  const loadBatchMetrics = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -685,117 +1956,651 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
     }
   }, [college, batch, subject, topic]);
 
-  useEffect(() => { setPage(1); load(); }, [load]);
+  const loadActivityReport = useCallback(async () => {
+    setReportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (college) params.set('college_id', college);
+      if (batch) params.set('batch', batch);
+      if (subject) params.set('subject_id', subject);
+      params.set('time_range', timeRange);
+      if (timeRange === 'custom') {
+        if (customStartDate) params.set('start_date', customStartDate);
+        if (customEndDate) params.set('end_date', customEndDate);
+      }
+      const res = await apiClient.get(`/facilitator/analytics/batch-report?${params}`);
+      setReportData(res.data.data);
+    } catch (err) {
+      console.error('Failed to load batch activity report:', err);
+      setReportData(null);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [college, batch, subject, timeRange, customStartDate, customEndDate]);
+
+  useEffect(() => {
+    setPage(1);
+    loadBatchMetrics();
+  }, [loadBatchMetrics]);
+
+  useEffect(() => {
+    setStudentPage(1);
+    loadActivityReport();
+  }, [loadActivityReport]);
+
+  const handleExportExcel = async () => {
+    if (!reportData || !reportData.students.length) return;
+    setExporting(true);
+    try {
+      const escapeCsv = (val: unknown) => {
+        if (val === null || val === undefined) return '';
+        let str = String(val);
+        // Neutralize spreadsheet formula execution (=, +, -, @, tabs, carriage returns)
+        if (/^[=+\-@\t\r]/.test(str)) {
+          str = `'${str}`;
+        }
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const headers = [
+        'Student Name',
+        'Email',
+        'Batch',
+        'Degree',
+        'College',
+        'Lessons XP (Period)',
+        'Lessons Completed (Period)',
+        'Exercises XP (Period)',
+        'Exercises Passed (Period)',
+        'Quizzes XP (Period)',
+        'Quizzes Attempted (Period)',
+        'Quizzes Passed (Period)',
+        'Avg Quiz Score % (Period)',
+        'Assignments XP (Period)',
+        'Assignments Attempted (Period)',
+        'Assignments Passed (Period)',
+        'Projects XP (Period)',
+        'Projects Attempted (Period)',
+        'Projects Passed (Period)',
+        'Total XP Earned (Period)',
+        'Overall Course Progress %',
+        'Last Active Date',
+        'Engagement Status',
+      ];
+
+      const rows = reportData.students.map((s) => [
+        escapeCsv(s.full_name),
+        escapeCsv(s.email),
+        escapeCsv(s.batch),
+        escapeCsv(s.degree),
+        escapeCsv(s.college_name),
+        s.weekly_lessons_xp,
+        s.weekly_lessons_completed,
+        s.weekly_exercises_xp,
+        s.weekly_exercises_passed,
+        s.weekly_quizzes_xp,
+        s.weekly_quizzes_attempted,
+        s.weekly_quizzes_passed ?? 0,
+        s.weekly_avg_quiz_score !== null ? `${Math.min(100, Math.max(0, s.weekly_avg_quiz_score))}%` : 'N/A',
+        s.weekly_assignments_xp,
+        s.weekly_assignments_attempted ?? s.weekly_assignments_submitted ?? 0,
+        s.weekly_assignments_passed ?? 0,
+        s.weekly_projects_xp,
+        s.weekly_projects_attempted ?? s.weekly_projects_submitted ?? 0,
+        s.weekly_projects_passed ?? s.weekly_projects_approved ?? 0,
+        s.weekly_xp_earned,
+        `${s.overall_subject_progress}%`,
+        s.last_active_at ? new Date(s.last_active_at).toLocaleString('en-IN') : 'Never',
+        s.engagement_status,
+      ]);
+
+      const rangeStr = `${new Date(reportData.period.start_date).toLocaleDateString()} to ${new Date(reportData.period.end_date).toLocaleDateString()}`;
+      const csvContent = '\uFEFF' + [
+        `# BATCH ACTIVITY REPORT - ${reportData.meta.subject_name || 'All Subjects'}`,
+        `# College: ${reportData.meta.college_name || 'All Colleges'} | Batch: ${reportData.meta.batch || 'All Batches'} | Timeframe: ${reportData.period.time_range} (${rangeStr})`,
+        `# Total Enrolled: ${reportData.summary.total_enrolled} | Active: ${reportData.summary.active_count} | Inactive: ${reportData.summary.inactive_count}`,
+        `# Generated: ${new Date().toLocaleString('en-IN')}`,
+        '',
+        headers.join(','),
+        ...rows.map((r) => r.join(',')),
+      ].join('\r\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      const cleanSubj = (reportData.meta.subject_name || 'Cohort').replace(/[^a-zA-Z0-9_-]/g, '_');
+      link.setAttribute('download', `Batch_Report_${cleanSubj}_${reportData.period.time_range}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export batch report:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const totalSubjects = data?.subjects?.length ?? 0;
   const totalPages = Math.ceil(totalSubjects / pageSize);
   const paginatedSubjects = data?.subjects?.slice((page - 1) * pageSize, page * pageSize) ?? [];
 
+  // Filter students for Student Cohort Activity Report View
+  const filteredStudents = (reportData?.students ?? []).filter((s) => {
+    if (statusFilter === 'active' && s.engagement_status !== 'Active') return false;
+    if (statusFilter === 'inactive' && s.engagement_status !== 'Inactive') return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      return (
+        s.full_name.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        s.batch.toLowerCase().includes(q) ||
+        s.college_name.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const totalStudentPages = Math.ceil(filteredStudents.length / studentPageSize);
+  const paginatedStudents = filteredStudents.slice((studentPage - 1) * studentPageSize, studentPage * studentPageSize);
+
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
-      <div className="flex flex-wrap gap-2.5 sm:gap-3">
+      {/* ── Filter Bar: College, Batch, Subject, Module ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
         <Select label="Module" value={topic} onChange={setTopic} options={topics} placeholder="All Modules" />
       </div>
 
-      {loading ? <LoadingState /> : !data ? <EmptyState /> : (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
-            <StatCard label="Students Enrolled" value={data.enrolled} />
-            <StatCard label="Active Students" value={data.active_students} sub="Online & active today" />
-            <StatCard label="Avg Batch Streak" value={`${data.avg_batch_streak} days`} />
-            <StatCard label="Avg Module Progress" value={`${data.avg_module_progress}%`} />
-            <StatCard label="Quiz Completion" value={`${data.quiz_completion_rate}%`} />
-            <StatCard label="Quiz Pass Rate" value={`${data.quiz_pass_rate}%`} />
-            <StatCard label="Assignment Completion" value={`${data.assignment_completion_rate}%`} />
-            <StatCard label="Project Completion" value={`${data.project_completion_rate}%`} />
+      {/* ── Timeframe & Report Action Bar ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold mr-1">
+            <Clock className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Timeframe:</span>
+          </div>
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl overflow-x-auto no-scrollbar">
+            {(['1d', '7d', '10d', '15d', '30d', 'custom'] as const).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setTimeRange(preset)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                  timeRange === preset
+                    ? 'bg-white text-indigo-600 shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {preset === '1d' ? 'Today (24h)' :
+                 preset === '7d' ? 'Past 7 Days' :
+                 preset === '10d' ? 'Past 10 Days' :
+                 preset === '15d' ? 'Past 15 Days' :
+                 preset === '30d' ? 'Past 30 Days' : 'Custom'}
+              </button>
+            ))}
           </div>
 
-          {totalSubjects > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-              <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Module-Level Breakdown</h3>
-                <span className="text-xs text-slate-400 font-medium">{totalSubjects} modules</span>
-              </div>
+          {timeRange === 'custom' && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-xs text-slate-400">to</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          )}
+        </div>
 
-              {/* Mobile Card View (No horizontal scrollbar) */}
-              <div className="divide-y divide-slate-100 md:hidden">
-                {paginatedSubjects.map((s) => (
-                  <div key={s.id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
-                    <p className="font-bold text-slate-800 text-sm">{s.name}</p>
-                    <div className="grid grid-cols-2 gap-2.5 text-xs">
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Quiz Completion</span>
-                        <RateBar value={s.quiz_completion} />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Pass Rate</span>
-                        <RateBar value={s.pass_rate} color="bg-green-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Assignment</span>
-                        <RateBar value={s.assignment_completion} color="bg-amber-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Project</span>
-                        <RateBar value={s.project_completion} color="bg-purple-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Lessons Read</span>
-                        <RateBar value={s.lesson_completion} color="bg-blue-500" />
-                      </div>
-                      <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Avg Progress</span>
-                        <RateBar value={s.module_progress} color="bg-indigo-600" />
-                      </div>
-                    </div>
-                  </div>
+        <div className="flex items-center gap-2.5 self-end md:self-auto w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setStudentPage(1); }}
+              placeholder="Search student or email..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={exporting || !reportData || !reportData.students.length}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer shrink-0"
+            title="Download CSV formatted for Microsoft Excel with UTF-8 BOM"
+          >
+            {exporting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">Export to Excel</span>
+            <span className="sm:hidden">Export</span>
+          </button>
+        </div>
+      </div>
+
+      {loading ? <LoadingState /> : !data ? <EmptyState /> : (
+        <>
+          {/* ── 8 StatCards (as shown in image) ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
+            <StatCard label="Students Enrolled" value={reportData?.summary.total_enrolled ?? data.enrolled} />
+            <StatCard
+              label="Active Students"
+              value={reportData?.summary.active_count ?? data.active_students}
+              sub={`In ${timeRange === '1d' ? '24h' : timeRange === 'custom' ? 'range' : timeRange}`}
+              colorScheme="emerald"
+            />
+            <StatCard label="Avg Batch Streak" value={`${data.avg_batch_streak} days`} />
+            <StatCard label="Avg Module Progress" value={`${data.avg_module_progress}%`} colorScheme="indigo" />
+            <StatCard label="Quiz Completion" value={`${data.quiz_completion_rate}%`} />
+            <StatCard label="Quiz Pass Rate" value={`${data.quiz_pass_rate}%`} colorScheme="emerald" />
+            <StatCard label="Assignment Completion" value={`${data.assignment_completion_rate}%`} colorScheme="amber" />
+            <StatCard label="Project Completion" value={`${data.project_completion_rate}%`} colorScheme="rose" />
+          </div>
+
+          {/* ── Section View Switcher ── */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 border-b border-slate-200 pb-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveView('modules')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeView === 'modules'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>📊 Module-Level Breakdown</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeView === 'modules' ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {totalSubjects}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('report')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeView === 'report'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>👥 Student Cohort Activity Report</span>
+                {reportData && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    activeView === 'report' ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {reportData.summary.total_enrolled}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {activeView === 'report' && reportData && (
+              <div className="flex items-center gap-1 text-xs self-end sm:self-auto">
+                {(['all', 'active', 'inactive'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => { setStatusFilter(st); setStudentPage(1); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-all cursor-pointer ${
+                      statusFilter === st
+                        ? st === 'active'
+                          ? 'bg-emerald-100 text-emerald-800 font-bold'
+                          : st === 'inactive'
+                          ? 'bg-rose-100 text-rose-800 font-bold'
+                          : 'bg-slate-800 text-white font-bold'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {st === 'all' ? `All (${reportData.summary.total_enrolled})` :
+                     st === 'active' ? `Active (${reportData.summary.active_count})` :
+                     `Inactive (${reportData.summary.inactive_count})`}
+                  </button>
                 ))}
               </div>
+            )}
+          </div>
 
-              {/* Desktop Table View */}
-              <div className="hidden md:block overflow-x-auto no-scrollbar w-full min-w-0">
-                <table className="w-full text-xs sm:text-sm">
-                  <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
-                    <tr>
-                      <th className="text-left px-4 sm:px-5 py-3">Module</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Quiz Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Pass Rate</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Assignment Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Project Completion</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Lessons Read</th>
-                      <th className="text-left px-4 sm:px-5 py-3">Avg Progress</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {paginatedSubjects.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-4 sm:px-5 py-3 font-medium text-slate-800">{s.name}</td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.quiz_completion} /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.pass_rate} color="bg-green-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.assignment_completion} color="bg-amber-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.project_completion} color="bg-purple-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.lesson_completion} color="bg-blue-500" /></td>
-                        <td className="px-4 sm:px-5 py-3"><RateBar value={s.module_progress} color="bg-indigo-600" /></td>
+          {/* ── View 1: Module-Level Breakdown (Original Screen) ── */}
+          {activeView === 'modules' && (
+            totalSubjects > 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
+                <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Module-Level Breakdown</h3>
+                  <span className="text-xs text-slate-400 font-medium">{totalSubjects} modules</span>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="divide-y divide-slate-100 md:hidden">
+                  {paginatedSubjects.map((s) => (
+                    <div key={s.id} className="p-4 space-y-3 hover:bg-slate-50/60 transition-colors">
+                      <p className="font-bold text-slate-800 text-sm">{s.name}</p>
+                      <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Quiz Completion</span>
+                          <RateBar value={s.quiz_completion} />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Pass Rate</span>
+                          <RateBar value={s.pass_rate} color="bg-green-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Assignment</span>
+                          <RateBar value={s.assignment_completion} color="bg-amber-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Project</span>
+                          <RateBar value={s.project_completion} color="bg-purple-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Lessons Read</span>
+                          <RateBar value={s.lesson_completion} color="bg-blue-500" />
+                        </div>
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Avg Progress</span>
+                          <RateBar value={s.module_progress} color="bg-indigo-600" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto no-scrollbar w-full min-w-0">
+                  <table className="w-full text-xs sm:text-sm">
+                    <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
+                      <tr>
+                        <th className="text-left px-4 sm:px-5 py-3">Module</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Quiz Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Pass Rate</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Assignment Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Project Completion</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Lessons Read</th>
+                        <th className="text-left px-4 sm:px-5 py-3">Avg Progress</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {paginatedSubjects.map((s) => (
+                        <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="px-4 sm:px-5 py-3 font-medium text-slate-800">{s.name}</td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.quiz_completion} /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.pass_rate} color="bg-green-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.assignment_completion} color="bg-amber-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.project_completion} color="bg-purple-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.lesson_completion} color="bg-blue-500" /></td>
+                          <td className="px-4 sm:px-5 py-3"><RateBar value={s.module_progress} color="bg-indigo-600" /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
+                    <span className="text-center sm:text-left">
+                      Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalSubjects)} of {totalSubjects} modules · page {page} of {totalPages}
+                    </span>
+                    <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500 text-xs sm:text-sm">
+                No modules found for the selected filter combination.
+              </div>
+            )
+          )}
+
+          {/* ── View 2: Student Cohort Activity Report ── */}
+          {activeView === 'report' && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
+              <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-50/50">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-800">
+                    Student Activity & Progress ({timeRange === '1d' ? 'Last 24 Hours' : timeRange === 'custom' ? 'Custom Range' : `Past ${timeRange}`})
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Itemized delta completions and cumulative progress for {reportData?.meta.subject_name || 'Cohort'}.
+                  </p>
+                </div>
+                <div className="text-xs text-slate-500 font-medium">
+                  Showing {filteredStudents.length} of {reportData?.students.length ?? 0} students
+                </div>
               </div>
 
-              {totalPages > 1 && (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                  <span className="text-center sm:text-left">
-                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalSubjects)} of {totalSubjects} modules · page {page} of {totalPages}
-                  </span>
-                  <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+              {reportLoading ? (
+                <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                  <span className="text-xs font-medium">Aggregating cohort activity...</span>
                 </div>
+              ) : filteredStudents.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs sm:text-sm">
+                  No students match the current filters or search query.
+                </div>
+              ) : (
+                <>
+                  {/* Mobile Student Cards (Responsive Touch-friendly) */}
+                  <div className="divide-y divide-slate-100 lg:hidden">
+                    {paginatedStudents.map((s) => {
+                      const initials = s.full_name
+                        .split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((n) => n[0].toUpperCase())
+                        .join('');
+
+                      const isSelected = drawerStudent?.student_id === s.student_id;
+
+                      return (
+                        <div
+                          key={s.student_id}
+                          onClick={() => setDrawerStudent(s)}
+                          className={`p-4 space-y-3 transition-colors cursor-pointer ${
+                            isSelected ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : 'hover:bg-indigo-50/40 active:bg-indigo-100/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="relative shrink-0">
+                                <div className="w-10 h-10 rounded-xl bg-slate-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                                  {initials || 'ST'}
+                                </div>
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                                    s.engagement_status === 'Active' ? 'bg-emerald-500' : 'bg-slate-300'
+                                  }`}
+                                  title={s.engagement_status}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-900 text-sm truncate">{s.full_name}</p>
+                                <p className="text-xs text-slate-500 truncate">{s.email}</p>
+                                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-400">
+                                  <span className="font-semibold text-slate-600">{s.college_code || s.college_name}</span>
+                                  <span>·</span>
+                                  <span>Batch {s.batch}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
+                          </div>
+
+                          {/* Progress Bar & Rate */}
+                          <div className="pt-1">
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                              <span className="font-medium">
+                                {s.overall_subject_progress >= 100
+                                  ? '100% Completed'
+                                  : `${s.overall_subject_progress}% Complete`}
+                              </span>
+                              <span className="font-semibold text-emerald-700">+{s.weekly_xp_earned} XP</span>
+                            </div>
+                            <RateBar value={s.overall_subject_progress} color="bg-indigo-600" />
+                            <div className="mt-1.5 text-[10px] text-slate-400 flex items-center justify-between">
+                              <span>Last active: {s.last_active_at ? new Date(s.last_active_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) : 'Never'}</span>
+                              <span className="text-indigo-600 font-medium">View activity details &rarr;</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop Table (High-signal 3 Columns) */}
+                  <div className="hidden lg:block overflow-x-auto no-scrollbar w-full min-w-0">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="text-left px-5 py-3 w-2/5">Student</th>
+                          <th className="text-left px-5 py-3 w-1/4">Cohort Batch</th>
+                          <th className="text-left px-5 py-3 w-1/3">Course Progress</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {paginatedStudents.map((s) => {
+                          const initials = s.full_name
+                            .split(' ')
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((n) => n[0].toUpperCase())
+                            .join('');
+
+                          const isSelected = drawerStudent?.student_id === s.student_id;
+
+                          return (
+                            <tr
+                              key={s.student_id}
+                              onClick={() => setDrawerStudent(s)}
+                              className={`transition-colors cursor-pointer group ${
+                                isSelected ? 'bg-indigo-50/70' : 'hover:bg-indigo-50/40'
+                              }`}
+                            >
+                              {/* Column 1: Student */}
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative shrink-0">
+                                    <div className="w-9 h-9 rounded-xl bg-slate-100 text-indigo-700 font-bold flex items-center justify-center text-xs group-hover:bg-indigo-100 transition-colors">
+                                      {initials || 'ST'}
+                                    </div>
+                                    <span
+                                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
+                                        s.engagement_status === 'Active' ? 'bg-emerald-500' : 'bg-slate-300'
+                                      }`}
+                                      title={s.engagement_status}
+                                    />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">
+                                      {s.full_name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Column 2: Cohort Batch */}
+                              <td className="px-5 py-3.5 text-slate-600">
+                                <span className="font-medium text-slate-800">Batch {s.batch}</span>
+                                <span className="block text-[11px] text-slate-400 truncate max-w-[220px]">
+                                  {s.college_code || s.college_name} {s.degree ? `· ${s.degree}` : ''}
+                                </span>
+                              </td>
+
+                              {/* Column 3: Course Progress */}
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1 font-medium">
+                                      <span>
+                                        {s.overall_subject_progress >= 100
+                                          ? '100% Completed'
+                                          : `${s.overall_subject_progress}% Complete`}
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                      <div
+                                        className="h-2 rounded-full bg-indigo-600 transition-all duration-300"
+                                        style={{ width: `${Math.min(100, Math.max(0, s.overall_subject_progress))}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {totalStudentPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
+                      <span className="text-center sm:text-left">
+                        Showing {(studentPage - 1) * studentPageSize + 1}–{Math.min(studentPage * studentPageSize, filteredStudents.length)} of {filteredStudents.length} students · page {studentPage} of {totalStudentPages}
+                      </span>
+                      <PaginationControls page={studentPage} totalPages={totalStudentPages} onPageChange={setStudentPage} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
         </>
+      )}
+
+      {/* Student Cohort Progress Drawer */}
+      <StudentCohortProgressDrawer
+        student={drawerStudent}
+        isOpen={!!drawerStudent}
+        onClose={() => setDrawerStudent(null)}
+        timeRangeLabel={
+          timeRange === '1d'
+            ? 'Last 24 Hours'
+            : timeRange === '7d'
+            ? 'Past 7 Days'
+            : timeRange === '10d'
+            ? 'Past 10 Days'
+            : timeRange === '15d'
+            ? 'Past 15 Days'
+            : timeRange === '30d'
+            ? 'Past 30 Days'
+            : 'Custom Period'
+        }
+        onOpenDetailsModal={(studentId, studentName) => {
+          setDetailsModalStudent({ id: studentId, name: studentName });
+        }}
+      />
+
+      {/* Syllabi and Module Submissions Modal */}
+      {detailsModalStudent && (
+        <StudentDetailsModal
+          isOpen={!!detailsModalStudent}
+          onClose={() => setDetailsModalStudent(null)}
+          studentId={detailsModalStudent.id}
+          studentName={detailsModalStudent.name}
+          subjectId={subject}
+          mode="all"
+        />
       )}
     </div>
   );
@@ -810,6 +2615,8 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
   const [batch, setBatch] = useState('');
   const [subject, setSubject] = useState('');
   const [topic, setTopic] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
+  const [inactiveFilter, setInactiveFilter] = useState('');
   const [topics, setTopics] = useState<{ id: string; name: string }[]>([]);
   const [data, setData] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -844,6 +2651,8 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
       if (batch) params.set('batch', batch);
       if (subject) params.set('subject_id', subject);
       if (topic) params.set('topic_id', topic);
+      if (activeFilter) params.set('active_filter', activeFilter);
+      if (inactiveFilter) params.set('inactive_filter', inactiveFilter);
       if (debouncedSearch) params.set('search', debouncedSearch);
       params.set('page', String(p));
       params.set('limit', String(STUDENTS_PAGE_SIZE));
@@ -858,7 +2667,7 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
     } finally {
       setLoading(false);
     }
-  }, [college, batch, subject, topic, debouncedSearch]);
+  }, [college, batch, subject, topic, activeFilter, inactiveFilter, debouncedSearch]);
 
   const handlePageChange = (p: number) => { setPage(p); load(p); };
 
@@ -868,14 +2677,48 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
-      <div className="flex flex-wrap gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-end gap-2 sm:gap-2.5 lg:gap-3">
         <Select label="College" value={college} onChange={setCollege} options={colleges} placeholder="All Colleges" />
         <Select label="Batch" value={batch} onChange={setBatch} options={batches} placeholder="All Batches" />
         <Select label="Subject" value={subject} onChange={setSubject} options={subjects} placeholder="All Subjects" />
         <Select label="Module" value={topic} onChange={setTopic} options={topics} placeholder="All Modules" />
+        <Select
+          label="Active Filter"
+          value={activeFilter}
+          onChange={(v) => {
+            setActiveFilter(v);
+            if (v) setInactiveFilter('');
+          }}
+          options={ACTIVE_OPTIONS}
+          placeholder="Select Active"
+          disabled={Boolean(inactiveFilter)}
+        />
+        <Select
+          label="Inactive Filter"
+          value={inactiveFilter}
+          onChange={(v) => {
+            setInactiveFilter(v);
+            if (v) setActiveFilter('');
+          }}
+          options={INACTIVE_OPTIONS}
+          placeholder="Select Inactive"
+          disabled={Boolean(activeFilter)}
+        />
+        {(activeFilter || inactiveFilter) && (
+          <button
+            onClick={() => {
+              setActiveFilter('');
+              setInactiveFilter('');
+            }}
+            className="col-span-2 sm:col-span-1 lg:col-auto text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 px-3 py-2 rounded-lg transition-colors min-h-[38px] flex items-center justify-center gap-1.5 shrink-0 border border-rose-200/70"
+            title="Reset active/inactive filters"
+          >
+            <X className="w-3.5 h-3.5" /> Reset Status
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-3 lg:gap-4">
         <StatCard label="Quizzes Attempted" value={aggregates.quizzes_attempted} sub={`out of ${total} students`} />
         <StatCard label="Assignments Submitted" value={aggregates.assignments_submitted} sub={`out of ${total} students`} />
         <StatCard label="Projects Completed" value={aggregates.projects_completed} sub={`out of ${total} students`} />
@@ -891,8 +2734,17 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
               placeholder="Search students..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[36px]"
+              className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[36px]"
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs w-4 h-4 flex items-center justify-center rounded-full hover:bg-slate-100"
+                title="Clear search"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
         
@@ -910,6 +2762,16 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">{s.name}</p>
                       <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                      {(() => {
+                        const hasActivity = (s.quiz_submitted_count || 0) > 0 || (s.assignment_submitted_count || 0) > 0 || (s.project_submitted_count || 0) > 0;
+                        const { text, isRecent } = formatLastActive(s.last_active_at, hasActivity);
+                        return (
+                          <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200/60 max-w-full">
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRecent ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                            <span className={`text-[10px] font-medium truncate ${isRecent ? 'text-emerald-700 font-semibold' : 'text-slate-500'}`}>{text}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <button
                       onClick={() => {
@@ -959,6 +2821,16 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
                       <td className="px-4 sm:px-5 py-3 whitespace-nowrap">
                         <p className="font-semibold text-slate-800">{s.name}</p>
                         <p className="text-[11px] text-slate-400">{s.email}</p>
+                        {(() => {
+                          const hasActivity = (s.quiz_submitted_count || 0) > 0 || (s.assignment_submitted_count || 0) > 0 || (s.project_submitted_count || 0) > 0;
+                          const { text, isRecent } = formatLastActive(s.last_active_at, hasActivity);
+                          return (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRecent ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                              <span className={`text-[10px] font-medium ${isRecent ? 'text-emerald-600 font-semibold' : 'text-slate-400'}`}>{text}</span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 sm:px-5 py-3 whitespace-nowrap">
                         <div className="inline-flex items-center gap-2 whitespace-nowrap">
@@ -1028,6 +2900,7 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
         onClose={() => setIsModalOpen(false)}
         studentId={selectedStudentId}
         studentName={selectedStudentName}
+        subjectId={subject || undefined}
       />
     </div>
   );

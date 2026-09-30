@@ -207,16 +207,35 @@ exports.selectSubjects = async (req, res) => {
   }
 };
 
-// 4. Facilitator College Selection Step
+// 4. Facilitator College & Subject Selection Step
 exports.selectFacilitatorColleges = async (req, res) => {
   const userId = req.user.id;
-  const { college_ids } = req.body;
+  const { college_ids, subject_id, subject_ids } = req.body;
 
   if (!Array.isArray(college_ids) || college_ids.length === 0) {
     return res
       .status(400)
       .json({ message: 'At least one college must be selected' });
   }
+
+  const chosenSubjectId = subject_id || (Array.isArray(subject_ids) && subject_ids.length > 0 ? subject_ids[0] : null);
+  if (!chosenSubjectId) {
+    return res
+      .status(400)
+      .json({ message: 'A subject must be selected' });
+  }
+
+  // Validate that the subject exists and is active/published
+  const validSubject = await pool.query(
+    'SELECT id FROM subjects WHERE id = $1 AND is_deleted = false AND is_published = true',
+    [chosenSubjectId],
+  );
+  if (validSubject.rows.length === 0) {
+    return res
+      .status(400)
+      .json({ message: 'Selected subject does not exist or is unavailable' });
+  }
+
   // Deduplicate: ON CONFLICT DO UPDATE cannot affect the same row twice in one statement
   const uniqueCollegeIds = [...new Set(college_ids)];
 
@@ -224,31 +243,52 @@ exports.selectFacilitatorColleges = async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // 1. Assign colleges
     await client.query(
       'UPDATE facilitator_colleges SET is_deleted = true WHERE facilitator_id = $1 AND is_deleted = false',
       [userId],
     );
 
-    // Upsert: reactivate any previously soft-deleted assignments instead of
-    // inserting a duplicate row (which would violate the unique constraint).
-    const insertQuery = `
+    const insertCollegesQuery = `
       INSERT INTO facilitator_colleges (facilitator_id, college_id)
       SELECT $1, unnest($2::uuid[])
       ON CONFLICT (facilitator_id, college_id)
       DO UPDATE SET is_deleted = false, updated_at = CURRENT_TIMESTAMP
     `;
-    await client.query(insertQuery, [userId, uniqueCollegeIds]);
+    await client.query(insertCollegesQuery, [userId, uniqueCollegeIds]);
 
+    // 2. Assign subject
+    await client.query(
+      'UPDATE facilitator_subjects SET is_deleted = true WHERE facilitator_id = $1 AND is_deleted = false',
+      [userId],
+    );
+
+    const insertSubjectQuery = `
+      INSERT INTO facilitator_subjects (facilitator_id, subject_id)
+      VALUES ($1, $2)
+      ON CONFLICT (facilitator_id, subject_id)
+      DO UPDATE SET is_deleted = false, updated_at = CURRENT_TIMESTAMP
+    `;
+    await client.query(insertSubjectQuery, [userId, chosenSubjectId]);
+
+    // 3. Mark onboarding step as done
     await client.query(
       "UPDATE users SET onboarding_step = 'done', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
       [userId],
     );
 
     await client.query('COMMIT');
-    logAction({ req, action: 'UPDATE', entityType: 'facilitator_college', entityId: userId, details: { college_ids } });
+    logAction({
+      req,
+      action: 'UPDATE',
+      entityType: 'facilitator_onboarding',
+      entityId: userId,
+      details: { college_ids: uniqueCollegeIds, subject_id: chosenSubjectId },
+    });
+
     res.json({
       success: true,
-      message: 'Colleges assigned! Awaiting admin verification.',
+      message: 'Colleges and subject assigned! Awaiting admin verification.',
       next_step: 'dashboard',
     });
   } catch (err) {
@@ -256,7 +296,7 @@ exports.selectFacilitatorColleges = async (req, res) => {
     console.error('Facilitator Onboarding Error:', err);
     res
       .status(500)
-      .json({ message: 'Failed to save colleges' });
+      .json({ message: 'Failed to save onboarding selections' });
   } finally {
     client.release();
   }

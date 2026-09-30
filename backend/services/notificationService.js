@@ -21,7 +21,7 @@ function setIo(io) {
  * @param {string} opts.body        - detail text
  * @param {string} [opts.link]      - optional client-side route to navigate to
  */
-async function notify({ userId, type, title, body, link = null }) {
+async function notify({ userId, type, title, body, link = null, meta = null }) {
   try {
     const { rows } = await pool.query(
       `INSERT INTO notifications (user_id, type, title, body, link)
@@ -35,6 +35,13 @@ async function notify({ userId, type, title, body, link = null }) {
     // Real-time push to the user's personal socket room
     if (_io) {
       _io.to(`user:${userId}`).emit('notification:new', notification);
+      if (type === 'new_assignment') {
+        _io.to(`user:${userId}`).emit('assignment:created', {
+          title,
+          link,
+          ...meta,
+        });
+      }
     }
 
     return notification;
@@ -48,7 +55,7 @@ async function notify({ userId, type, title, body, link = null }) {
 /**
  * Notify all students belonging to a college.
  */
-async function notifyCollege({ collegeId, type, title, body, link = null }) {
+async function notifyCollege({ collegeId, type, title, body, link = null, meta = null }) {
   try {
     const { rows } = await pool.query(
       `SELECT u.id FROM users u
@@ -56,7 +63,7 @@ async function notifyCollege({ collegeId, type, title, body, link = null }) {
        WHERE sp.college_id = $1 AND u.role_id = (SELECT id FROM roles WHERE role_key = 'STUDENT')`,
       [collegeId],
     );
-    await Promise.all(rows.map(({ id }) => notify({ userId: id, type, title, body, link })));
+    await Promise.all(rows.map(({ id }) => notify({ userId: id, type, title, body, link, meta })));
   } catch (err) {
     console.error('[notifyCollege] Failed:', err.message);
   }

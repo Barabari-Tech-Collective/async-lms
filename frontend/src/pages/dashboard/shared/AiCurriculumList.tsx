@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router';
 import {
   Loader2,
   Trash2,
   Search,
   Plus,
   Pencil,
+  Sparkles,
 } from 'lucide-react';
 import { aiCurriculumApi } from '@/features/aiCurriculum/aiCurriculumApi';
 import type { AiCourse, CourseStatus } from '@/features/aiCurriculum/types';
@@ -36,8 +37,9 @@ const STATUS_STYLES: Record<
   published: { label: 'Published', className: 'bg-blue-100 text-blue-700' },
 };
 
-const STATUS_TABS: { label: string; value: CourseStatus | 'all' }[] = [
+const STATUS_TABS: { label: string; value: CourseStatus | 'all' | 'pending_changes' }[] = [
   { label: 'All', value: 'all' },
+  { label: 'Pending Changes', value: 'pending_changes' },
   { label: 'Draft', value: 'draft' },
   { label: 'In Review', value: 'in_review' },
   { label: 'Changes Requested', value: 'changes_requested' },
@@ -73,10 +75,7 @@ function CourseCard({
   const dotColor = DOT_COLORS[index % DOT_COLORS.length];
   const status = STATUS_STYLES[course.status] ?? STATUS_STYLES.draft;
 
-  const editPath =
-    isAdmin && course.status === 'in_review'
-      ? `${base}/ai-curriculum/${course.id}/review`
-      : `${base}/ai-curriculum/${course.id}/edit`;
+  const editPath = `${base}/ai-curriculum/${course.id}/edit`;
 
   const canDelete =
     course.status !== 'published' &&
@@ -108,7 +107,7 @@ function CourseCard({
   if (course.role_focus) tags.push(course.role_focus);
 
   return (
-    <div className='bg-white border border-slate-200 rounded-2xl p-5 flex flex-col hover:shadow-sm transition-shadow h-full'>
+    <div className='bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col hover:shadow-sm transition-shadow h-full'>
       {/* Top row */}
       <div className='flex items-center justify-between mb-4'>
         <div className={`w-3 h-3 rounded-full ${dotColor}`} />
@@ -154,36 +153,70 @@ function CourseCard({
       </div>
 
       {/* Status badge */}
-      <div className='mt-3 mb-1'>
+      <div className='mt-3 mb-1 flex items-center gap-1.5 flex-wrap'>
         <span
           className={`inline-flex text-[10px] font-bold px-2 py-0.5 rounded-full ${status.className}`}
         >
           {status.label}
         </span>
+
+        {course.status === 'published' && Boolean(course.has_unpublished_changes) && (
+          <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs animate-pulse'>
+            <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+            New Changes Added
+          </span>
+        )}
+
+        {course.subject_id && course.status === 'in_review' && (
+          <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-800 border border-orange-300 shadow-2xs'>
+            <span className='w-1.5 h-1.5 rounded-full bg-orange-500' />
+            Revisions In Review
+          </span>
+        )}
       </div>
 
       {/* Actions */}
-      <div className='mt-3 flex items-center gap-2.5'>
-        <button
-          onClick={() => navigate(editPath)}
-          className='flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-slate-200 rounded-full text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors'
-        >
-          <Pencil className='w-4 h-4 text-slate-400' />
-          Edit
-        </button>
-        {canDelete && (
+      <div className='mt-3.5 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch gap-2'>
+        {isAdmin && course.status === 'in_review' && (
           <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className='p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors shrink-0'
+            onClick={() => navigate(`${base}/ai-curriculum/${course.id}/review`)}
+            className='w-full sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-yellow-500 text-white rounded-full text-xs sm:text-[13px] font-semibold hover:bg-yellow-600 transition-colors shadow-xs whitespace-nowrap min-h-[38px]'
           >
-            {deleting ? (
-              <Loader2 className='w-4.5 h-4.5 animate-spin' />
-            ) : (
-              <Trash2 className='w-4.5 h-4.5' />
-            )}
+            Review Course
           </button>
         )}
+        {isAdmin && course.status === 'published' && Boolean(course.has_unpublished_changes) && (
+          <button
+            onClick={() => navigate(`${base}/ai-curriculum/${course.id}/review`)}
+            className='w-full sm:flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-500 text-white rounded-full text-xs sm:text-[13px] font-semibold hover:bg-amber-600 transition-colors shadow-xs whitespace-nowrap min-h-[38px]'
+          >
+            <Sparkles className='w-3.5 h-3.5 shrink-0' />
+            <span>Review Changes</span>
+          </button>
+        )}
+        <div className='flex items-center gap-2 w-full sm:flex-1'>
+          <button
+            onClick={() => navigate(editPath)}
+            className='flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-slate-200 rounded-full text-xs sm:text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap min-h-[38px]'
+          >
+            <Pencil className='w-3.5 h-3.5 text-slate-400 shrink-0' />
+            <span>Edit</span>
+          </button>
+          {canDelete && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className='p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center border border-slate-100 sm:border-transparent'
+              title='Delete Course'
+            >
+              {deleting ? (
+                <Loader2 className='w-4 h-4 animate-spin' />
+              ) : (
+                <Trash2 className='w-4 h-4' />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -199,28 +232,34 @@ export default function AiCurriculumList() {
     ? '/dashboard/curriculum-developer'
     : '/dashboard/facilitator';
 
+  const location = useLocation();
   const [courses, setCourses] = useState<AiCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<CourseStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<CourseStatus | 'all' | 'pending_changes'>('all');
+
+  const loadCourses = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const res = await aiCurriculumApi.list();
+      setCourses(res.data.data);
+    } catch {
+      toast.error('Failed to load courses');
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    aiCurriculumApi
-      .list()
-      .then((res) => {
-        if (!cancelled) setCourses(res.data.data);
-      })
-      .catch(() => {
-        if (!cancelled) toast.error('Failed to load courses');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadCourses(true);
+  }, [loadCourses, location.key]);
+
+  // Refetch when browser window regains focus
+  useEffect(() => {
+    const handleFocus = () => loadCourses(false);
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadCourses]);
 
   const filtered = courses.filter((c) => {
     const matchesSearch =
@@ -228,7 +267,12 @@ export default function AiCurriculumList() {
       c.title.toLowerCase().includes(search.toLowerCase()) ||
       c.role_focus.toLowerCase().includes(search.toLowerCase()) ||
       c.domain.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'all'
+        ? true
+        : statusFilter === 'pending_changes'
+        ? Boolean(c.has_unpublished_changes)
+        : c.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
@@ -238,6 +282,9 @@ export default function AiCurriculumList() {
   // Count per status for tab badges
   const countByStatus = courses.reduce<Record<string, number>>((acc, c) => {
     acc[c.status] = (acc[c.status] ?? 0) + 1;
+    if (c.has_unpublished_changes) {
+      acc['pending_changes'] = (acc['pending_changes'] ?? 0) + 1;
+    }
     return acc;
   }, {});
 

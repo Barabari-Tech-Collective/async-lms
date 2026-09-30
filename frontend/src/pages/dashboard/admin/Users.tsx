@@ -67,10 +67,17 @@ interface UserRow {
   progress_percent?: number;
   facilitator_college_ids?: string[];
   facilitator_college_names?: string[];
+  facilitator_subject_ids?: string[];
+  facilitator_subject_names?: string[];
   domain?: string | null;
   role_focus?: string | null;
   is_verified: boolean;
   created_at: string;
+}
+
+interface Subject {
+  id: string;
+  name: string;
 }
 
 interface CollegesResponse {
@@ -84,6 +91,7 @@ interface EditForm {
   year: string;
   college_id: string;
   facilitator_college_ids: string[];
+  facilitator_subject_ids: string[];
   domain?: string;
   role_focus?: string;
 }
@@ -92,6 +100,7 @@ const Users = () => {
   const currentUser = useAppSelector(selectUser);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [colleges, setColleges] = useState<College[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,20 +131,23 @@ const Users = () => {
     year: '',
     college_id: '',
     facilitator_college_ids: [],
+    facilitator_subject_ids: [],
     domain: '',
     role_focus: '',
   });
 
   const fetchUsers = async () => {
     try {
-      const [usersRes, collegesRes] = await Promise.all([
+      const [usersRes, collegesRes, subjectsRes] = await Promise.all([
         apiClient.get<UserRow[]>('/users'),
         apiClient.get<CollegesResponse>('/colleges'),
+        apiClient.get<{ success: boolean; data: Subject[] }>('/subjects/published'),
       ]);
 
       const currentId = String(currentUser?.id ?? '');
       setUsers(usersRes.data.filter((u) => String(u.id) !== currentId));
       setColleges(collegesRes.data?.data || []);
+      setSubjects(subjectsRes.data?.data || subjectsRes.data || []);
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to load users'));
     } finally {
@@ -195,6 +207,7 @@ const Users = () => {
       year: user.year ? String(user.year) : '',
       college_id: user.college_id || '',
       facilitator_college_ids: user.facilitator_college_ids || [],
+      facilitator_subject_ids: user.facilitator_subject_ids || [],
       domain: user.domain || '',
       role_focus: user.role_focus || '',
     });
@@ -212,6 +225,15 @@ const Users = () => {
       facilitator_college_ids: prev.facilitator_college_ids.includes(collegeId)
         ? prev.facilitator_college_ids.filter((id) => id !== collegeId)
         : [...prev.facilitator_college_ids, collegeId],
+    }));
+  };
+
+  const toggleFacilitatorSubject = (subjectId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      facilitator_subject_ids: prev.facilitator_subject_ids.includes(subjectId)
+        ? prev.facilitator_subject_ids.filter((id) => id !== subjectId)
+        : [...prev.facilitator_subject_ids, subjectId],
     }));
   };
 
@@ -237,6 +259,10 @@ const Users = () => {
         facilitator_college_ids:
           editingUser.role === 'facilitator'
             ? form.facilitator_college_ids
+            : undefined,
+        facilitator_subject_ids:
+          editingUser.role === 'facilitator'
+            ? form.facilitator_subject_ids
             : undefined,
         domain:
           editingUser.role === 'curriculum_developer' ? form.domain || null : undefined,
@@ -749,6 +775,22 @@ const Users = () => {
                     </div>
                   </div>
 
+                  {/* Assigned Subjects */}
+                  <div className='text-[11px] bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1.5'>
+                    <span className='text-[10px] font-bold uppercase text-slate-400 block'>Assigned Subjects</span>
+                    <div className='flex flex-wrap gap-1'>
+                      {user.facilitator_subject_names && user.facilitator_subject_names.length > 0 ? (
+                        user.facilitator_subject_names.map((name) => (
+                          <Badge key={`${user.id}-sub-${name}`} className='bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold text-[10px]'>
+                            {name}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className='text-xs text-slate-400 italic'>No subjects assigned</span>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Joined Date & Actions */}
                   <div className='flex items-center justify-between pt-1 border-t border-slate-50'>
                     <p className='text-[10px] text-slate-400 font-medium'>
@@ -784,14 +826,14 @@ const Users = () => {
                 </div>
               ))}
             </div>
-
-            {/* Desktop Table View */}
+              {/* Desktop Table View */}
             <div className='hidden md:block overflow-x-auto no-scrollbar w-full min-w-0'>
               <Table className='w-full text-xs sm:text-sm'>
                 <TableHeader className='bg-slate-50 border-b border-slate-100'>
                   <TableRow>
                     <TableHead className='font-bold uppercase text-[11px] py-3.5 pl-4 sm:pl-6'>Facilitator</TableHead>
                     <TableHead className='font-bold uppercase text-[11px] py-3.5'>Assigned Colleges</TableHead>
+                    <TableHead className='font-bold uppercase text-[11px] py-3.5'>Assigned Subjects</TableHead>
                     <TableHead className='font-bold uppercase text-[11px] py-3.5'>Joined</TableHead>
                     <TableHead className='font-bold uppercase text-[11px] py-3.5'>Status</TableHead>
                     <TableHead className='text-right font-bold uppercase text-[11px] py-3.5 pr-4 sm:pr-6'>Actions</TableHead>
@@ -814,6 +856,19 @@ const Users = () => {
                             ))
                           ) : (
                             <span className='text-xs text-slate-400 italic'>No colleges assigned</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className='py-3.5'>
+                        <div className='flex flex-wrap gap-1'>
+                          {user.facilitator_subject_names && user.facilitator_subject_names.length > 0 ? (
+                            user.facilitator_subject_names.map((name) => (
+                              <Badge key={`${user.id}-sub-${name}`} className='bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold text-[11px]'>
+                                {name}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className='text-xs text-slate-400 italic'>No subjects assigned</span>
                           )}
                         </div>
                       </TableCell>
@@ -1415,33 +1470,68 @@ const Users = () => {
               )}
 
               {editingUser.role === 'facilitator' && (
-                <div className='space-y-2'>
-                  <Label className='text-xs font-semibold text-slate-600'>Assigned Colleges</Label>
-                  <small className='block text-xs text-slate-400'>
-                    Tap to toggle college assignment
-                  </small>
-                  <div className='max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 bg-slate-50/50 custom-scrollbar'>
-                    {colleges.map((college) => {
-                      const isSelected = form.facilitator_college_ids.includes(
-                        college.id,
-                      );
-                      return (
-                        <button
-                          key={college.id}
-                          type='button'
-                          className={`w-full rounded-xl border px-3 py-2.5 text-left text-xs sm:text-sm font-medium transition-colors ${
-                            isSelected
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-800 font-semibold'
-                              : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                          }`}
-                          onClick={() => toggleFacilitatorCollege(college.id)}
-                        >
-                          {college.name}
-                        </button>
-                      );
-                    })}
+                <>
+                  <div className='space-y-2'>
+                    <Label className='text-xs font-semibold text-slate-600'>Assigned Colleges</Label>
+                    <small className='block text-xs text-slate-400'>
+                      Tap to toggle college assignment
+                    </small>
+                    <div className='max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 bg-slate-50/50 custom-scrollbar'>
+                      {colleges.map((college) => {
+                        const isSelected = form.facilitator_college_ids.includes(
+                          college.id,
+                        );
+                        return (
+                          <button
+                            key={college.id}
+                            type='button'
+                            className={`w-full rounded-xl border px-3 py-2.5 text-left text-xs sm:text-sm font-medium transition-colors ${
+                              isSelected
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800 font-semibold'
+                                : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                            }`}
+                            onClick={() => toggleFacilitatorCollege(college.id)}
+                          >
+                            {college.name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Assigned Subjects (Add / Remove) */}
+                  <div className='space-y-2'>
+                    <Label className='text-xs font-semibold text-slate-600'>Assigned Subjects</Label>
+                    <small className='block text-xs text-slate-400'>
+                      Tap to add or remove subjects assigned to this facilitator
+                    </small>
+                    <div className='max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 bg-slate-50/50 custom-scrollbar'>
+                      {subjects.length === 0 ? (
+                        <p className='text-xs text-slate-400 p-2 text-center'>No active subjects found</p>
+                      ) : (
+                        subjects.map((subject) => {
+                          const isSelected = form.facilitator_subject_ids.includes(
+                            subject.id,
+                          );
+                          return (
+                            <button
+                              key={subject.id}
+                              type='button'
+                              className={`w-full rounded-xl border px-3 py-2.5 text-left text-xs sm:text-sm font-medium transition-colors ${
+                                isSelected
+                                  ? 'border-indigo-300 bg-indigo-50 text-indigo-800 font-semibold'
+                                  : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                              }`}
+                              onClick={() => toggleFacilitatorSubject(subject.id)}
+                            >
+                              {subject.name}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           )}

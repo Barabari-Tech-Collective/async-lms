@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
-import { Eye, FileText } from 'lucide-react';
+import { Eye, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import SubmissionsModal from './SubmissionsModal';
 import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 type Props = {
+  tab?: 'assignments' | 'projects';
   search: string;
   selectedCollege: string;
   selectedDomain: string;
@@ -20,7 +21,8 @@ type Assignment = {
   title: string;
   course?: string;
   college_name?: string;
-  type: 'unit' | 'college';
+  type: 'unit' | 'college' | 'capstone';
+  evaluator_type?: string;
   batches_count?: number;
   submissions_count?: number;
   status: string;
@@ -29,12 +31,37 @@ type Assignment = {
 
 const PAGE_SIZE = 10;
 
+function getPageNumbers(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  if (currentPage <= 2) {
+    return [1, 2, 3, '...', totalPages];
+  }
+  if (currentPage >= totalPages - 1) {
+    return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+  }
+  return [1, '...', currentPage, '...', totalPages];
+}
+
+const formatCourseName = (course?: string) => {
+  if (!course) return 'General Domain';
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(course);
+  return isUuid ? 'College Assignment' : course;
+};
+
 const EvaluationTable = ({
+  tab = 'assignments',
   search,
   selectedCollege,
   selectedDomain,
   selectedBatch,
 }: Props) => {
+  const location = useLocation();
+  const basePath = location.pathname.includes('/dashboard/admin')
+    ? '/dashboard/admin'
+    : '/dashboard/facilitator';
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [submissionsOpen, setSubmissionsOpen] = useState(false);
@@ -49,7 +76,9 @@ const EvaluationTable = ({
   const fetchAssignments = async () => {
     try {
       setLoading(true);
+      setAssignments([]);
       const params: Record<string, string | number> = {
+        tab,
         page,
         pageSize: PAGE_SIZE,
       };
@@ -68,21 +97,22 @@ const EvaluationTable = ({
         setTotal(res.data.pagination?.total ?? res.data.data.length);
       }
     } catch (err) {
-      toast.error(getErrorMessage(err, 'Failed to fetch assignments'));
+      setAssignments([]);
+      toast.error(getErrorMessage(err, tab === 'projects' ? 'Failed to fetch projects' : 'Failed to fetch assignments'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Reset to page 1 whenever filters/search change (a filter change can
-  // easily land the current page past the new, smaller result set).
+  // Reset to page 1 whenever filters/search/tab change
   useEffect(() => {
     setPage(1);
-  }, [search, selectedCollege, selectedDomain, selectedBatch]);
+    setAssignments([]);
+  }, [tab, search, selectedCollege, selectedDomain, selectedBatch]);
 
   useEffect(() => {
     fetchAssignments();
-  }, [search, selectedCollege, selectedDomain, selectedBatch, page]);
+  }, [tab, search, selectedCollege, selectedDomain, selectedBatch, page]);
 
   if (loading) {
     return (
@@ -116,7 +146,9 @@ const EvaluationTable = ({
       <div className='md:hidden divide-y divide-slate-100'>
         {assignments.length === 0 ? (
           <div className='py-12 text-center text-slate-500 text-xs sm:text-sm'>
-            No assignments found matching filters.
+            {tab === 'projects'
+              ? 'No projects found matching filters.'
+              : 'No assignments found matching filters.'}
           </div>
         ) : (
           assignments.map((item, index) => (
@@ -136,16 +168,23 @@ const EvaluationTable = ({
                     </p>
                   </div>
                 </div>
-                <div className='flex items-center gap-1.5 shrink-0'>
+                <div className='flex items-center gap-1.5 shrink-0 flex-wrap justify-end'>
                   <span
                     className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
                       item.type === 'unit'
                         ? 'bg-indigo-100 text-indigo-700'
-                        : 'bg-amber-100 text-amber-700'
+                        : item.type === 'capstone'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-emerald-100 text-emerald-700'
                     }`}
                   >
-                    {item.type === 'unit' ? 'Curriculum' : 'College'}
+                    {item.type === 'unit' ? 'Curriculum' : item.type === 'capstone' ? 'Capstone' : 'College'}
                   </span>
+                  {item.evaluator_type && (
+                    <span className='px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-600 uppercase border border-slate-200/60'>
+                      {item.evaluator_type}
+                    </span>
+                  )}
                   <StatusBadge status={item.status} />
                 </div>
               </div>
@@ -154,7 +193,7 @@ const EvaluationTable = ({
               <div className='text-[11px] bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 space-y-1'>
                 <div className='flex items-center justify-between gap-2'>
                   <span className='font-semibold text-slate-800 truncate'>
-                    {item.course || 'General Domain'}
+                    {formatCourseName(item.course)}
                   </span>
                   {item.college_name && (
                     <span className='text-slate-500 font-medium shrink-0 max-w-[140px] truncate' title={item.college_name}>
@@ -190,7 +229,7 @@ const EvaluationTable = ({
                   <Eye size={13} /> Submissions
                 </button>
                 <Link
-                  to={`/dashboard/facilitator/results/${item.id}`}
+                  to={`${basePath}/results/${item.id}`}
                   className='inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 font-semibold px-2.5 py-1.5 rounded-lg transition'
                   title='View Evaluation Results'
                 >
@@ -209,7 +248,7 @@ const EvaluationTable = ({
             <tr>
               <th className='px-3.5 sm:px-4 py-3 text-left font-semibold'>#</th>
               <th className='px-3.5 sm:px-4 py-3 text-left font-semibold'>
-                Assignment Name
+                {tab === 'projects' ? 'Project Name' : 'Assignment Name'}
               </th>
               <th className='px-3.5 sm:px-4 py-3 text-left font-semibold'>Type</th>
               <th className='px-3.5 sm:px-4 py-3 text-left font-semibold'>
@@ -223,68 +262,87 @@ const EvaluationTable = ({
           </thead>
 
           <tbody className='[&>tr:first-child]:border-t-0'>
-            {assignments.map((item, index) => (
-              <tr
-                key={`${item.id}-${item.evaluation_id ?? 'none'}-${index}`}
-                className='border-t border-slate-100 hover:bg-slate-50/60 transition'
-              >
-                <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
-                  {index + 1}
-                </td>
-                <td className='px-3.5 sm:px-4 py-3 font-medium text-slate-800 text-xs sm:text-sm'>
-                  {item.title}
-                </td>
-                <td className='px-3.5 sm:px-4 py-3'>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                      item.type === 'unit'
-                        ? 'bg-indigo-100 text-indigo-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    {item.type === 'unit' ? 'Curriculum' : 'College'}
-                  </span>
-                </td>
-                <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
-                  {item.course}
-                </td>
-                <td className='px-3.5 sm:px-4 py-3 text-slate-700 text-xs sm:text-sm'>
-                  {item.college_name}
-                </td>
-                <td className='px-3.5 sm:px-4 py-3 text-slate-700 font-medium text-xs sm:text-sm'>
-                  {item.submissions_count}
-                </td>
-                <td className='px-3.5 sm:px-4 py-3'>
-                  <div className='flex flex-col gap-1'>
-                    <StatusBadge status={item.status} />
-                  </div>
-                </td>
-                <td className='px-3.5 sm:px-4 py-3 text-right'>
-                  <div className='flex items-center justify-end gap-1.5 sm:gap-2'>
-                    <button
-                      onClick={() => {
-                        setSubmissionsAssignment({
-                          id: item.id,
-                          title: item.title,
-                        });
-                        setSubmissionsOpen(true);
-                      }}
-                      className='inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 transition hover:bg-slate-50 min-h-[30px]'
-                      title='View student submissions'
-                    >
-                      <Eye size={13} /> Submissions
-                    </button>
-                    <Link
-                      to={`/dashboard/facilitator/results/${item.id}`}
-                      className='inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition min-h-[30px]'
-                      title='View Evaluation Results'
-                    >
-                      <FileText size={14} /> View Results
-                    </Link>
-                  </div>
+            {assignments.length === 0 ? (
+              <tr>
+                <td colSpan={8} className='py-12 text-center text-slate-500 text-xs sm:text-sm'>
+                  {tab === 'projects'
+                    ? 'No projects found matching filters.'
+                    : 'No assignments found matching filters.'}
                 </td>
               </tr>
-            ))}
+            ) : (
+              assignments.map((item, index) => (
+                <tr
+                  key={`${item.id}-${item.evaluation_id ?? 'none'}-${index}`}
+                  className='border-t border-slate-100 hover:bg-slate-50/60 transition'
+                >
+                  <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
+                    {(page - 1) * PAGE_SIZE + index + 1}
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3 font-medium text-slate-800 text-xs sm:text-sm'>
+                    {item.title}
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3'>
+                    <div className='flex items-center gap-1.5 flex-wrap'>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          item.type === 'unit'
+                            ? 'bg-indigo-100 text-indigo-700'
+                            : item.type === 'capstone'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        {item.type === 'unit' ? 'Curriculum' : item.type === 'capstone' ? 'Capstone' : 'College'}
+                      </span>
+                      {item.evaluator_type && (
+                        <span className='px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-600 uppercase border border-slate-200/60'>
+                          {item.evaluator_type}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3 text-slate-500 text-xs sm:text-sm'>
+                    {formatCourseName(item.course)}
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3 text-slate-700 text-xs sm:text-sm'>
+                    {item.college_name}
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3 text-slate-700 font-medium text-xs sm:text-sm'>
+                    {item.submissions_count}
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3'>
+                    <div className='flex flex-col gap-1'>
+                      <StatusBadge status={item.status} />
+                    </div>
+                  </td>
+                  <td className='px-3.5 sm:px-4 py-3 text-right'>
+                    <div className='flex items-center justify-end gap-1.5 sm:gap-2'>
+                      <button
+                        onClick={() => {
+                          setSubmissionsAssignment({
+                            id: item.id,
+                            title: item.title,
+                          });
+                          setSubmissionsOpen(true);
+                        }}
+                        className='inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 transition hover:bg-slate-50 min-h-[30px]'
+                        title='View student submissions'
+                      >
+                        <Eye size={13} /> Submissions
+                      </button>
+                      <Link
+                        to={`${basePath}/results/${item.id}`}
+                        className='inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition min-h-[30px]'
+                        title='View Evaluation Results'
+                      >
+                        <FileText size={14} /> View Results
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -295,23 +353,40 @@ const EvaluationTable = ({
             Showing {(page - 1) * PAGE_SIZE + 1}–
             {Math.min(page * PAGE_SIZE, total)} of {total}
           </span>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-1 sm:gap-1.5'>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className='px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 min-h-[32px]'
+              className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1'
             >
-              Previous
+              <ChevronLeft size={14} />
+              <span>Previous</span>
             </button>
-            <span className='text-slate-500 px-1 font-medium'>
-              Page {page} of {totalPages}
-            </span>
+
+            {getPageNumbers(page, totalPages).map((p, i) => (
+              <button
+                key={i}
+                onClick={() => typeof p === 'number' && setPage(p)}
+                disabled={p === '...'}
+                className={`min-w-[32px] h-[32px] px-2 flex items-center justify-center rounded-lg border text-xs sm:text-sm transition font-medium ${
+                  p === page
+                    ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
+                    : p === '...'
+                    ? 'border-transparent text-slate-400 cursor-default'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className='px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 min-h-[32px]'
+              className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1'
             >
-              Next
+              <span>Next</span>
+              <ChevronRight size={14} />
             </button>
           </div>
         </div>

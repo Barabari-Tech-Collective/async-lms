@@ -70,8 +70,12 @@ exports.getUserProfile = async (req, res) => {
          COALESCE(c.id, fc_c.id) AS college_id,
          COALESCE(c.name, fc_c.name) AS college_name,
          COALESCE((SELECT SUM(points) FROM public.points_log WHERE user_id = u.id), 0)::integer AS total_points,
-         COALESCE(us.current_streak, 0) AS current_streak,
+         CASE 
+           WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN COALESCE(us.current_streak, 0)
+           ELSE 0 
+         END AS current_streak,
          COALESCE(us.longest_streak, 0) AS longest_streak,
+         (us.last_activity::date = CURRENT_DATE) AS practiced_today,
          (SELECT COUNT(*) FROM public.user_badges WHERE user_id = u.id)::integer AS badge_count
        FROM public.users u
        LEFT JOIN public.roles r ON r.id = u.role_id
@@ -83,7 +87,7 @@ exports.getUserProfile = async (req, res) => {
        WHERE u.id = $1
        GROUP BY u.id, u.full_name, u.email, r.role_key, u.domain, u.role_focus, u.created_at,
          sp.degree, sp.year, sp.current_academic_year, c.id, c.name, fc_c.id, fc_c.name,
-         us.current_streak, us.longest_streak`,
+         us.current_streak, us.longest_streak, us.last_activity`,
       [userId],
     );
 
@@ -234,7 +238,9 @@ exports.getAllUsers = async (req, res) => {
         COALESCE(student_meta.total_subtopics, 0) as total_subtopics,
         COALESCE(student_meta.progress_percent, 0) as progress_percent,
         COALESCE(facilitator_meta.college_ids, '{}'::uuid[]) as facilitator_college_ids,
-        COALESCE(facilitator_meta.college_names, '{}'::text[]) as facilitator_college_names
+        COALESCE(facilitator_meta.college_names, '{}'::text[]) as facilitator_college_names,
+        COALESCE(facilitator_subject_meta.subject_ids, '{}'::uuid[]) as facilitator_subject_ids,
+        COALESCE(facilitator_subject_meta.subject_names, '{}'::text[]) as facilitator_subject_names
       FROM public.users u
       LEFT JOIN public.roles r ON r.id = u.role_id
       LEFT JOIN public.student_profiles sp ON u.id = sp.user_id
@@ -351,6 +357,14 @@ exports.getAllUsers = async (req, res) => {
         INNER JOIN public.colleges c2 ON c2.id = fc.college_id
         WHERE fc.facilitator_id = u.id AND fc.is_deleted = false
       ) as facilitator_meta ON r.role_key = 'FACILITATOR'
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY_AGG(fs.subject_id ORDER BY s2.name) as subject_ids,
+          ARRAY_AGG(s2.name ORDER BY s2.name) as subject_names
+        FROM public.facilitator_subjects fs
+        INNER JOIN public.subjects s2 ON s2.id = fs.subject_id
+        WHERE fs.facilitator_id = u.id AND fs.is_deleted = false AND s2.is_deleted = false
+      ) as facilitator_subject_meta ON r.role_key = 'FACILITATOR'
       WHERE u.deleted_at IS NULL
       ORDER BY u.created_at DESC
       LIMIT 1000
@@ -395,7 +409,7 @@ exports.getUserById = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, degree, year, college_id, is_verified, facilitator_college_ids, domain, role_focus } = req.body;
+    const { full_name, degree, year, college_id, is_verified, facilitator_college_ids, facilitator_subject_ids, domain, role_focus } = req.body;
 
     const client = await pool.connect();
     try {
@@ -451,22 +465,40 @@ exports.updateUser = async (req, res) => {
 
       // 3. Update Facilitator Colleges if applicable
       if (user.role === 'facilitator' && Array.isArray(facilitator_college_ids)) {
+        const uniqueCollegeIds = [...new Set(facilitator_college_ids)];
         await client.query(
           'UPDATE public.facilitator_colleges SET is_deleted = true WHERE facilitator_id = $1 AND is_deleted = false',
           [id]
         );
-        if (facilitator_college_ids.length > 0) {
+        if (uniqueCollegeIds.length > 0) {
           await client.query(
             `INSERT INTO public.facilitator_colleges (facilitator_id, college_id)
              SELECT $1, unnest($2::uuid[])
              ON CONFLICT (facilitator_id, college_id) DO UPDATE SET is_deleted = false`,
-            [id, facilitator_college_ids]
+            [id, uniqueCollegeIds]
+          );
+        }
+      }
+
+      // 4. Update Facilitator Subjects if applicable (Add & Remove with Deduplication)
+      if (user.role === 'facilitator' && Array.isArray(facilitator_subject_ids)) {
+        const uniqueSubjectIds = [...new Set(facilitator_subject_ids)];
+        await client.query(
+          'UPDATE public.facilitator_subjects SET is_deleted = true WHERE facilitator_id = $1 AND is_deleted = false',
+          [id]
+        );
+        if (uniqueSubjectIds.length > 0) {
+          await client.query(
+            `INSERT INTO public.facilitator_subjects (facilitator_id, subject_id)
+             SELECT $1, unnest($2::uuid[])
+             ON CONFLICT (facilitator_id, subject_id) DO UPDATE SET is_deleted = false`,
+            [id, uniqueSubjectIds]
           );
         }
       }
 
       await client.query('COMMIT');
-      logAction({ req, action: 'UPDATE', entityType: 'user', entityId: id, details: { full_name, degree, year, college_id, is_verified, facilitator_college_ids, domain, role_focus } });
+      logAction({ req, action: 'UPDATE', entityType: 'user', entityId: id, details: { full_name, degree, year, college_id, is_verified, facilitator_college_ids, facilitator_subject_ids, domain, role_focus } });
       res.json(user);
     } catch (error) {
       await client.query('ROLLBACK');
@@ -573,6 +605,15 @@ exports.deleteUser = async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
+
+    // Soft delete any facilitator subject mappings
+    await pool.query(
+      `UPDATE facilitator_subjects SET is_deleted = true WHERE facilitator_id = $1`,
+      [id]
+    ).catch((err) => {
+      console.error('Failed to soft-delete facilitator_subjects on user delete:', err.message);
+    });
+
     res.json({ success: true, message: 'User moved to recycle bin' });
   } catch (err) {
     console.error('Delete User Error:', err.message);
@@ -625,11 +666,19 @@ exports.restoreUser = async (req, res) => {
       return res.status(404).json({ message: 'User not found in recycle bin' });
     }
 
-    // Reactivate any facilitator college mappings if applicable
+    // Reactivate any facilitator college & subject mappings if applicable
     await pool.query(
       `UPDATE facilitator_colleges SET is_deleted = false WHERE facilitator_id = $1`,
       [id]
-    ).catch(() => {});
+    ).catch((err) => {
+      console.error('Failed to reactivate facilitator_colleges on user restore:', err.message);
+    });
+    await pool.query(
+      `UPDATE facilitator_subjects SET is_deleted = false WHERE facilitator_id = $1`,
+      [id]
+    ).catch((err) => {
+      console.error('Failed to reactivate facilitator_subjects on user restore:', err.message);
+    });
 
     res.json({ success: true, message: 'User restored successfully' });
   } catch (err) {

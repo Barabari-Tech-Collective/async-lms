@@ -1377,7 +1377,21 @@ export function RightSidebar({
     <div className='bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden sticky top-4 max-h-[calc(100vh-120px)]'>
       {/* Subtopic header */}
       <div className='px-4 py-3 border-b border-slate-100 shrink-0'>
-        <p className='text-[13px] font-bold text-slate-800 truncate'>{selectedLesson.title}</p>
+        <div className='flex items-center justify-between gap-2'>
+          <p className='text-[13px] font-bold text-slate-800 truncate'>{selectedLesson.title}</p>
+          {selectedLesson.is_new && (
+            <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
+              <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
+              New Subtopic
+            </span>
+          )}
+          {selectedLesson.is_modified && (
+            <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+              <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+              Edited Subtopic
+            </span>
+          )}
+        </div>
         <div className='flex items-center gap-3 mt-0.5'>
           <span className='text-[11px] text-slate-400'>{selectedLesson.duration_mins ?? 20} min</span>
           <span className={`text-[11px] font-semibold ${selectedLesson.video_url ? 'text-green-500' : 'text-slate-300'}`}>
@@ -1391,6 +1405,13 @@ export function RightSidebar({
           </span>
         </div>
       </div>
+
+      {selectedLesson.is_new && (
+        <div className='bg-emerald-50/80 border-b border-emerald-200/80 px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-900'>
+          <Sparkles className='w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse' />
+          <span>This is a <strong>newly added subtopic</strong> not yet published to live students.</span>
+        </div>
+      )}
 
       <TabStrip active={tab} onTab={setTab} />
 

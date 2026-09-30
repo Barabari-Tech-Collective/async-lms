@@ -99,6 +99,7 @@ export interface Exercise {
   test_cases?: TestCase[];
   tasks?: ExerciseTask[];
   rubric?: any;
+  is_completed?: boolean;
 }
 
 export type SubmissionType = 'file' | 'github' | 'docs' | 'figma' | 'excel' | 'url';
@@ -220,7 +221,7 @@ export interface CollegeAssignment {
   submission_file_name?: string | null;
   submitted_at?: string | null;
   test_cases?: AssignmentTestCase[];
-  rubric?: { name: string; score: number }[];
+  rubric?: any;
   evaluator_type?: string | null;
   assignment_description?: string | null;
   status?: string;
@@ -244,6 +245,9 @@ export interface Assignment {
   submission_link?: string | null;
   submission_file_url?: string | null;
   submission_file_name?: string | null;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
   // Enriched fields from student assignments API
   unit_id?: string;
   unit_title?: string;
@@ -279,6 +283,9 @@ export interface CapstoneProject {
   title: string;
   instructions?: string | null;
   max_score: number;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
 }
 
 export interface Topic {
@@ -443,7 +450,7 @@ export type AssignmentLifecycleStatus = 'pending' | 'pending_evaluation' | 'eval
 export interface StudentAssignmentOverviewItem {
   id: string;
   title: string;
-  type: 'CURRICULUM' | 'COLLEGE';
+  type: 'CURRICULUM' | 'COLLEGE' | 'CAPSTONE' | 'PROJECT';
   course_name: string;
   subject_slug?: string | null;
   topic_title?: string | null;
@@ -461,6 +468,17 @@ export interface StudentAssignmentOverviewItem {
 }
 
 export interface StudentAssignmentsOverviewResponse {
+  success: boolean;
+  data: StudentAssignmentOverviewItem[];
+  counts: {
+    total: number;
+    pending: number;
+    pending_evaluation: number;
+    evaluated: number;
+  };
+}
+
+export interface StudentProjectsOverviewResponse {
   success: boolean;
   data: StudentAssignmentOverviewItem[];
   counts: {

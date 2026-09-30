@@ -6,6 +6,7 @@ export interface User {
   is_verified: boolean;
   college_id?: string | number;
   college_ids?: (string | number)[];
+  subject_ids?: string[];
   college_is_verified?: boolean;
   college_name?: string;
   degree?: string;
@@ -15,6 +16,9 @@ export interface User {
   onboarding_step: string;
   must_change_password?: boolean;
   current_streak?: number;
+  longest_streak?: number;
+  practiced_today?: boolean;
+  streak_in_jeopardy?: boolean;
   total_points?: number;
 }
 

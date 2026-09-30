@@ -20,6 +20,8 @@ import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
+import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
+import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
 
 /* =======================
    Course-wide "next item" navigation
@@ -67,6 +69,9 @@ interface AssignmentDetail {
   title: string;
   instructions?: string;
   max_score: number;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
   unit_title?: string;
   subject_title?: string;
   submission_link?: string | null;
@@ -143,14 +148,27 @@ export default function AssignmentView() {
   }, [assignmentId]);
 
   const handleSubmit = async () => {
-    if (!link.trim()) {
-      toast.error('Please enter a submission link');
+    const clean = link.trim();
+    if (!clean) {
+      toast.error('Please enter your GitHub repository link');
       return;
     }
+
+    const lower = clean.toLowerCase();
+    if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
+      toast.error('Google Drive links are not accepted. Please provide a public GitHub repository link.');
+      return;
+    }
+
+    if (!lower.includes('github.com')) {
+      toast.error('Only public GitHub repository links (https://github.com/...) are accepted for automated evaluation.');
+      return;
+    }
+
     try {
-      new URL(link.trim());
+      new URL(clean);
     } catch {
-      toast.error('Please enter a valid URL');
+      toast.error('Please enter a valid URL (e.g. https://github.com/username/project)');
       return;
     }
 
@@ -221,6 +239,11 @@ export default function AssignmentView() {
               {assignment.unit_title}
             </Badge>
           )}
+          {assignment.evaluator_type && (
+            <Badge className='bg-indigo-50 text-indigo-700 border-indigo-200 text-xs font-semibold uppercase'>
+              {assignment.evaluator_type} Evaluator
+            </Badge>
+          )}
           {isSubmitted && (
             <Badge className='bg-emerald-50 text-emerald-700 border-none text-xs'>
               <CheckCircle2 className='h-3 w-3 mr-1' />
@@ -259,6 +282,23 @@ export default function AssignmentView() {
         </div>
       </Card>
 
+      {/* Grading Rubric */}
+      {assignment.rubric && (
+        <AssignmentRubricsViewer
+          rubric={assignment.rubric}
+          maxScore={assignment.max_score}
+        />
+      )}
+
+      {/* Test Cases */}
+      {assignment.test_cases && (
+        <AssignmentTestCasesViewer
+          testCases={assignment.test_cases}
+          evaluatorType={assignment.evaluator_type}
+          isStaff={false}
+        />
+      )}
+
       {/* Submission */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0'>
         <div className='px-4 sm:px-8 pt-5 sm:pt-6'>
@@ -267,8 +307,8 @@ export default function AssignmentView() {
           </p>
           <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>
             {isSubmitted
-              ? 'Already submitted — you can update your link below'
-              : 'Paste the link to your solution (GitHub, Google Drive, etc.)'}
+              ? 'Already submitted — you can update your GitHub link below'
+              : 'Paste your public GitHub repository link (e.g. https://github.com/username/project)'}
           </p>
         </div>
         <div className='px-4 py-5 sm:px-8 sm:py-6 space-y-4'>
@@ -295,7 +335,7 @@ export default function AssignmentView() {
               <Input
                 type='url'
                 disabled={isSubmitted}
-                placeholder='https://github.com/your-repo'
+                placeholder='https://github.com/username/project'
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
                 className='pl-9 h-11 text-sm'
