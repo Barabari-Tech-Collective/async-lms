@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles, Eye } from 'lucide-react';
+import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles, Eye, ClipboardList } from 'lucide-react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
@@ -88,7 +88,7 @@ export default function CreateAssignment() {
   const dashboardType = location.pathname.includes('/dashboard/admin') ? 'admin' : 'facilitator';
   const basePath = `/dashboard/${dashboardType}`;
 
-  // ΓöÇΓöÇ Basic Information ΓöÇΓöÇ
+  // ─── Basic Information ───
   const queryParams = new URLSearchParams(location.search);
   const editId = editData.editId || queryParams.get('editId') || null;
   const [loadingAssignment, setLoadingAssignment] = useState<boolean>(!!editId);
@@ -107,25 +107,25 @@ export default function CreateAssignment() {
   const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
   const [availableTopics, setAvailableTopics] = useState<{value: string, label: string}[]>([]);
 
-  // ΓöÇΓöÇ Colleges & Evaluators from API ΓöÇΓöÇ
+  // ─── Colleges & Evaluators from API ───
   const [colleges, setColleges] = useState<College[]>([]);
   const [evaluators, setEvaluators] = useState<{id: string; name: string}[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // ΓöÇΓöÇ Instruction Document Upload ΓöÇΓöÇ
+  // ─── Instruction Document Upload ───
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUrl, setInstructionUrl] = useState(editData.instruction_file_url || '');
   const [instructionName, setInstructionName] = useState(editData.instruction_file_name || '');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ΓöÇΓöÇ Evaluation Setup ΓöÇΓöÇ
+  // ─── Evaluation Setup ───
   const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
   const [aiEvaluationType, setAiEvaluationType] = useState(editData.aiEvaluationType || '');
   const [weightage, setWeightage] = useState(editData.weightage || '100');
   const [enablePlagiarism, setEnablePlagiarism] = useState(editData.enablePlagiarism || false);
 
-  // ΓöÇΓöÇ Rubrics & Test Cases State ΓöÇΓöÇ
+  // ─── Rubrics & Test Cases State ───
   const [rubrics, setRubrics] = useState<RubricItem[]>(editData.rubricsList || []);
   const [rubricJson, setRubricJson] = useState<string>(
     editData.rubric
@@ -152,10 +152,10 @@ export default function CreateAssignment() {
   const [rubricViewMode, setRubricViewMode] = useState<'json' | 'builder'>(editData.rubricsList?.length ? 'builder' : 'json');
   const [generatingRubric, setGeneratingRubric] = useState(false);
 
-  // ΓöÇΓöÇ Editor Type ΓöÇΓöÇ
+  // ─── Editor Type ───
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
 
-  // ΓöÇΓöÇ Test Cases ΓöÇΓöÇ
+  // ─── Test Cases ───
   const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
   const [testCasesJson, setTestCasesJson] = useState<string>(
     editData.test_cases
@@ -203,7 +203,7 @@ export default function CreateAssignment() {
     }
   };
 
-  // ΓöÇΓöÇ Load Reference Data on Mount ΓöÇΓöÇ
+  // ─── Load Reference Data on Mount ───
   useEffect(() => {
     apiClient
       .get<{ data: College[] }>('/facilitator/colleges')
@@ -221,7 +221,7 @@ export default function CreateAssignment() {
       .catch((error) => console.error('Failed to load courses', error));
   }, []);
 
-  // ΓöÇΓöÇ Load Assignment Details on Edit ΓöÇΓöÇ
+  // ─── Load Assignment Details on Edit ───
   useEffect(() => {
     if (!editId) return;
 
@@ -338,7 +338,7 @@ export default function CreateAssignment() {
     }
   }, [availableTopics, topicId]);
 
-  // ΓöÇΓöÇ AI Auto-Generate Handlers ΓöÇΓöÇ
+  // ─── AI Auto-Generate Handlers ───
   const handleGenerateTestCases = async () => {
     const instructionsText = assignmentDescription.trim() || description.trim();
     if (!title.trim() || !instructionsText) {
@@ -434,7 +434,7 @@ export default function CreateAssignment() {
     }
   };
 
-  // ΓöÇΓöÇ Submission Settings ΓöÇΓöÇ
+  // ─── Submission Settings ───
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<string[]>(
     editData.allowed_submission_types || editData.allowedSubmissionTypes || [
       'file',
@@ -464,7 +464,7 @@ export default function CreateAssignment() {
     setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
   };
 
-  // ΓöÇΓöÇ Rubrics helpers ΓöÇΓöÇ
+  // ─── Rubrics helpers ───
   const totalScore = rubrics.reduce((sum, r) => sum + r.maxScore, 0);
 
   const addRubric = () => {
@@ -484,7 +484,7 @@ export default function CreateAssignment() {
     );
   };
 
-  // ΓöÇΓöÇ Test Cases helpers ΓöÇΓöÇ
+  // ─── Test Cases helpers ───
   const totalTestCaseScore = testCases.reduce((sum, tc) => sum + tc.score, 0);
 
   const addTestCase = () => {
@@ -506,7 +506,7 @@ export default function CreateAssignment() {
 
   const isCodeEvaluator = ['JS', 'PYTHON', 'JAVA'].includes(aiEvaluationType);
 
-  // ΓöÇΓöÇ Validation & Submit ΓöÇΓöÇ
+  // ─── Validation & Submit ───
   const handleCreate = async () => {
     const missing: string[] = [];
 
@@ -636,7 +636,7 @@ export default function CreateAssignment() {
   return (
     <div className='min-h-screen bg-slate-50/60'>
       <div className='max-w-3xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
-        {/* ΓöÇΓöÇ Page Header ΓöÇΓöÇ */}
+        {/* ─── Page Header ─── */}
         <div className='flex items-center gap-3'>
           <button
             className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
@@ -663,7 +663,7 @@ export default function CreateAssignment() {
         </div>
 
         {/* ================================================================
-            SECTION 1 ΓÇö Basic Information
+            SECTION 1 — Basic Information
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -826,7 +826,7 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 2 ΓÇö Evaluation Setup
+            SECTION 2 — Evaluation Setup
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -952,10 +952,10 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 3 ΓÇö Test Cases & Evaluation Rubrics
+            SECTION 3 — Test Cases & Evaluation Rubrics
         ================================================================ */}
 
-        {/* ΓöÇΓöÇ Test Cases Card ΓöÇΓöÇ */}
+        {/* ─── Test Cases Card ─── */}
         <Card className='border-none shadow-sm overflow-hidden bg-white'>
           <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
@@ -1137,14 +1137,14 @@ export default function CreateAssignment() {
           </CardContent>
         </Card>
 
-        {/* ΓöÇΓöÇ Evaluation Rubrics Card ΓöÇΓöÇ */}
+        {/* ─── Evaluation Rubrics Card ─── */}
         <Card className='border-none shadow-sm overflow-hidden bg-white'>
           <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
               <div>
                 <div className='flex items-center gap-2'>
                   <div className='w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold'>
-                    ≡ƒôï
+                    <ClipboardList className='w-4 h-4' />
                   </div>
                   <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
                 </div>
@@ -1320,7 +1320,7 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 4 ΓÇö Submission Settings
+            SECTION 4 — Submission Settings
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
@@ -1350,43 +1350,81 @@ export default function CreateAssignment() {
                   id: 'file',
                   title: 'Document / File Upload',
                   desc: 'Direct file upload: PDF, DOCX, XLSX, TXT, ZIP',
-                  emoji: '≡ƒôü',
-                  color: 'blue',
+                  iconBg: 'bg-blue-50 text-blue-600 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <path d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z' />
+                      <polyline points='14 2 14 8 20 8' />
+                      <path d='M12 18v-6' />
+                      <path d='M9 15l3-3 3 3' />
+                    </svg>
+                  ),
                 },
                 {
                   id: 'github',
                   title: 'GitHub / Git Repository',
                   desc: 'Public code repository: GitHub, GitLab, Bitbucket',
-                  emoji: '≡ƒÉÖ',
-                  color: 'slate',
+                  iconBg: 'bg-slate-900 text-white border-slate-800',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='currentColor'>
+                      <path fillRule='evenodd' clipRule='evenodd' d='M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z' />
+                    </svg>
+                  ),
                 },
                 {
                   id: 'docs',
                   title: 'Google Docs / Office 365',
                   desc: 'Cloud document links with sharing permissions',
-                  emoji: '≡ƒôä',
-                  color: 'sky',
+                  iconBg: 'bg-blue-50 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#4285F4' />
+                      <path d='M14 2V8H20L14 2Z' fill='#A1C2FA' />
+                      <path d='M8 12.5H16M8 16.5H13' stroke='white' strokeWidth='1.5' strokeLinecap='round' />
+                    </svg>
+                  ),
                 },
                 {
                   id: 'figma',
                   title: 'Figma Design / Prototype',
                   desc: 'Figma files, interactive prototypes, or FigJam boards',
-                  emoji: '≡ƒÄ¿',
-                  color: 'purple',
+                  iconBg: 'bg-purple-50 border-purple-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 38 57' fill='none'>
+                      <path d='M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z' fill='#1ABCFE' />
+                      <path d='M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z' fill='#0ACF83' />
+                      <path d='M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z' fill='#FF7262' />
+                      <path d='M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z' fill='#F24E1E' />
+                      <path d='M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z' fill='#A259FF' />
+                    </svg>
+                  ),
                 },
                 {
                   id: 'excel',
                   title: 'Google Sheets / Excel Online',
                   desc: 'Cloud spreadsheets for data and financial models',
-                  emoji: '≡ƒôè',
-                  color: 'emerald',
+                  iconBg: 'bg-emerald-50 border-emerald-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#0F9D58' />
+                      <path d='M14 2V8H20L14 2Z' fill='#87CEAC' />
+                      <rect x='7.5' y='11.5' width='9' height='7' rx='0.5' stroke='white' strokeWidth='1.2' fill='none' />
+                      <path d='M7.5 14H16.5M12 11.5V18.5' stroke='white' strokeWidth='1.2' />
+                    </svg>
+                  ),
                 },
                 {
                   id: 'url',
                   title: 'General URL / Live App',
                   desc: 'Deployed web applications, portfolios, or external links',
-                  emoji: '≡ƒîÉ',
-                  color: 'amber',
+                  iconBg: 'bg-amber-50 text-amber-600 border-amber-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <circle cx='12' cy='12' r='10' />
+                      <line x1='2' y1='12' x2='22' y2='12' />
+                      <path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' />
+                    </svg>
+                  ),
                 },
               ].map((item) => {
                 const isSelected = allowedSubmissionTypes.includes(item.id);
@@ -1400,8 +1438,8 @@ export default function CreateAssignment() {
                         : 'border-slate-200 bg-white hover:border-slate-300 opacity-60 hover:opacity-80'
                     }`}
                   >
-                    <div className='text-2xl shrink-0 p-1.5 rounded-lg bg-white shadow-xs border border-slate-100'>
-                      {item.emoji}
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-xs ${item.iconBg}`}>
+                      {item.renderIcon()}
                     </div>
                     <div className='flex-1 min-w-0'>
                       <div className='flex items-center justify-between gap-1'>
