@@ -573,9 +573,12 @@ exports.publishCourse = async (req, res) => {
         // Assignment per unit (= ai topic)
         if (aiTopic.assignment) {
           const asgn = typeof aiTopic.assignment === 'string' ? JSON.parse(aiTopic.assignment) : aiTopic.assignment;
+          const allowedTypes = Array.isArray(asgn.allowed_submission_types) && asgn.allowed_submission_types.length > 0
+            ? asgn.allowed_submission_types
+            : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
           await client.query(
-            `INSERT INTO assignments (unit_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
-            [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100],
+            `INSERT INTO assignments (unit_id, title, instructions, max_score, allowed_submission_types) VALUES ($1,$2,$3,$4,$5)`,
+            [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes)],
           );
         }
 

@@ -79,7 +79,8 @@ The JSON keys use "modules/topics/lessons" as internal names but they map to Top
           "assignment": {
             "title": "Assignment title — a graded practical task covering this entire unit",
             "instructions": "Clear step-by-step instructions: what to build/submit, format, criteria",
-            "max_score": 100
+            "max_score": 100,
+            "allowed_submission_types": ["file", "github", "docs", "figma", "excel", "url"]
           },
           "quiz_questions": [
             {

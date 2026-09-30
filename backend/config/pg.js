@@ -217,7 +217,13 @@ pool.on('error', (err, client) => {
       ADD COLUMN IF NOT EXISTS test_cases JSONB DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS rubric JSONB,
       ADD COLUMN IF NOT EXISTS evaluator_type TEXT,
-      ADD COLUMN IF NOT EXISTS assignment_description TEXT
+      ADD COLUMN IF NOT EXISTS assignment_description TEXT,
+      ADD COLUMN IF NOT EXISTS allowed_submission_types JSONB DEFAULT '["file", "github", "docs", "figma", "excel", "url"]'::jsonb;
+    `);
+
+    await client.query(`
+      ALTER TABLE assignments
+      ADD COLUMN IF NOT EXISTS allowed_submission_types JSONB DEFAULT '["github", "url"]'::jsonb;
     `);
 
     await client.query(`
@@ -242,12 +248,24 @@ pool.on('error', (err, client) => {
         id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         assignment_id         UUID NOT NULL REFERENCES college_assignments(id) ON DELETE CASCADE,
         student_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        submission_type       TEXT DEFAULT 'file',
         submission_link       TEXT,
         submission_file_url   TEXT,
         submission_file_name  TEXT,
         submitted_at          TIMESTAMPTZ DEFAULT NOW(),
         updated_at            TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+
+    await client.query(`
+      ALTER TABLE college_assignment_submissions 
+      ADD COLUMN IF NOT EXISTS submission_type TEXT DEFAULT 'file',
+      ADD COLUMN IF NOT EXISTS submission_file_name TEXT;
+
+      ALTER TABLE assignment_submissions 
+      ADD COLUMN IF NOT EXISTS submission_type TEXT DEFAULT 'github',
+      ADD COLUMN IF NOT EXISTS submission_file_url TEXT,
+      ADD COLUMN IF NOT EXISTS submission_file_name TEXT;
     `);
 
     // Add unique constraint separately to be safe from existing tables
@@ -262,7 +280,8 @@ pool.on('error', (err, client) => {
       END $$
     `);
     await client.query(
-      `CREATE INDEX IF NOT EXISTS idx_college_assignments_college_id ON college_assignments(college_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_college_assignments_college_id ON college_assignments(college_id);
+       CREATE INDEX IF NOT EXISTS idx_cas_submission_type ON college_assignment_submissions(submission_type);`,
     );
 
     await client.query(`

@@ -2021,6 +2021,7 @@ exports.createAssignment = async (req, res) => {
       evaluator_type,
       test_cases,
       rubric,
+      allowed_submission_types,
     } = req.body;
 
     if (!unit_id || !title) {
@@ -2031,8 +2032,8 @@ exports.createAssignment = async (req, res) => {
     }
 
     const query = `
-      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric, allowed_submission_types)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
 
@@ -2052,6 +2053,15 @@ exports.createAssignment = async (req, res) => {
       } catch (e) {}
     }
 
+    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+      typesArray = allowed_submission_types;
+    } else if (typeof allowed_submission_types === 'string') {
+      try {
+        typesArray = JSON.parse(allowed_submission_types);
+      } catch (e) {}
+    }
+
     const result = await pool.query(query, [
       unit_id,
       title,
@@ -2060,6 +2070,7 @@ exports.createAssignment = async (req, res) => {
       evaluator_type || null,
       testCasesObj ? JSON.stringify(testCasesObj) : null,
       rubricObj ? JSON.stringify(rubricObj) : null,
+      JSON.stringify(typesArray),
     ]);
 
     logAction({
@@ -2094,6 +2105,7 @@ exports.updateAssignment = async (req, res) => {
       test_cases,
       evaluator_type,
       rubric,
+      allowed_submission_types,
     } = req.body;
 
     const updates = [];
@@ -2115,6 +2127,18 @@ exports.updateAssignment = async (req, res) => {
     if (evaluator_type !== undefined) {
       updates.push(`evaluator_type = $${paramCount++}`);
       values.push(evaluator_type);
+    }
+    if (allowed_submission_types !== undefined) {
+      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+        typesArray = allowed_submission_types;
+      } else if (typeof allowed_submission_types === 'string') {
+        try {
+          typesArray = JSON.parse(allowed_submission_types);
+        } catch (e) {}
+      }
+      updates.push(`allowed_submission_types = $${paramCount++}`);
+      values.push(JSON.stringify(typesArray));
     }
     if (test_cases !== undefined) {
       let testCasesObj = test_cases;
