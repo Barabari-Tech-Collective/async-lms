@@ -9,6 +9,7 @@ const { notify } = require('../services/notificationService');
 const { getTotalXP } = require('../services/xpService');
 const { calculateSubjectProgress, syncUserSubjectProgress } = require('../utils/progress');
 const { presignS3Url } = require('../utils/s3');
+const { storeFile } = require('../services/fileStorageService');
 
 const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 // ============================================
@@ -2400,6 +2401,10 @@ exports.getAssignmentById = async (req, res) => {
       row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
     }
 
+    if (row.submission_file_url) {
+      row.submission_file_url = await presignS3Url(row.submission_file_url);
+    }
+
     res.json({ success: true, data: row });
   } catch (error) {
     console.error('Error fetching assignment:', error);
@@ -2454,18 +2459,13 @@ exports.submitAssignment = async (req, res) => {
 
     // Validation per type
     if (submission_type === 'file') {
-      if (!submission_file_url && req.file) {
-        const path = require('path');
-        const fs = require('fs');
-        const uploadDir = path.join(__dirname, '../uploads/submissions');
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        const fileName = `${Date.now()}-${req.file.originalname}`;
-        const filePath = path.join(uploadDir, fileName);
-        fs.writeFileSync(filePath, req.file.buffer);
-        submission_file_url = `/uploads/submissions/${fileName}`;
-        submission_file_name = req.file.originalname;
+      if (req.file) {
+        const stored = await storeFile(req.file, {
+          s3KeyPrefix: 'course-submissions',
+          localSubPath: 'submissions',
+        });
+        submission_file_url = stored.url;
+        submission_file_name = stored.name;
       }
 
       if (!submission_file_url) {

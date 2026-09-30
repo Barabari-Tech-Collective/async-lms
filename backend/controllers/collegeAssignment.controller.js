@@ -868,7 +868,7 @@ exports.submitCollegeAssignment = async (req, res) => {
   try {
     // 1. Verify existence and allowed submission types
     const assignmentRes = await pool.query(
-      'SELECT id, allowed_submission_types FROM college_assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, college_id, allowed_submission_types FROM college_assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!assignmentRes.rowCount) {
@@ -878,6 +878,22 @@ exports.submitCollegeAssignment = async (req, res) => {
     }
 
     const assignment = assignmentRes.rows[0];
+
+    // Authorization: Verify student belongs to this assignment's college
+    if (req.user.role === 'student') {
+      const studentProfile = await pool.query(
+        'SELECT college_id FROM student_profiles WHERE user_id = $1',
+        [student_id],
+      );
+      const studentCollegeId = studentProfile.rows[0]?.college_id;
+      if (!studentCollegeId || String(studentCollegeId) !== String(assignment.college_id)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: Assignment does not belong to your college',
+        });
+      }
+    }
+
     const allowed = Array.isArray(assignment.allowed_submission_types) && assignment.allowed_submission_types.length > 0
       ? assignment.allowed_submission_types
       : ['file', 'github', 'docs', 'figma', 'excel', 'url'];

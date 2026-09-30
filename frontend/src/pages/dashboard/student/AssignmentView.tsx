@@ -266,29 +266,21 @@ export default function AssignmentView() {
 
     try {
       setSubmitting(true);
-      let fileUrl = assignment?.submission_file_url || null;
-      let fileName = assignment?.submission_file_name || null;
+      const formData = new FormData();
+      formData.append('submission_type', activeType);
 
-      if (activeType === 'file' && selectedFile) {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        const uploadRes = await apiClient.post<{ url: string; name: string }>(
-          '/college-assignments/upload-instruction',
-          formData
-        );
-        fileUrl = uploadRes.data.url;
-        fileName = uploadRes.data.name;
+      if (activeType === 'file') {
+        if (selectedFile) {
+          formData.append('submission_file', selectedFile);
+        }
+      } else {
+        formData.append('submission_link', solutionUrl.trim());
       }
 
       const res = await apiClient.post<{
         success: boolean;
         data: Partial<AssignmentDetail>;
-      }>(`/students/assignments/${assignmentId}/submit`, {
-        submission_type: activeType,
-        submission_link: activeType === 'file' ? null : solutionUrl.trim(),
-        submission_file_url: activeType === 'file' ? fileUrl : null,
-        submission_file_name: activeType === 'file' ? fileName : null,
-      });
+      }>(`/students/assignments/${assignmentId}/submit`, formData);
 
       setAssignment((prev) => (prev ? { ...prev, ...res.data.data } : prev));
       setSelectedFile(null);
