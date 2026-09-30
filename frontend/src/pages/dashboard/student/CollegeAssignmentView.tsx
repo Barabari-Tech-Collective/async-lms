@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ChevronLeft,
@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   ExternalLink,
   CheckCircle2,
-  Code2,
   Lock,
 } from 'lucide-react';
 import apiClient from '@/services/api';
@@ -49,6 +48,7 @@ const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
 export default function CollegeAssignmentView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [assignment, setAssignment] = useState<CollegeAssignment | null>(null);
   const [loading, setLoading] = useState(true);
