@@ -2420,7 +2420,7 @@ exports.submitAssignment = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
-    let { submission_type = 'github', submission_link, submission_file_url, submission_file_name } = req.body || {};
+    let { submission_type = 'github', submission_link } = req.body || {};
 
     // Verify the student is enrolled and fetch the assignment + allowed submission types
     const enrolled = await pool.query(
@@ -2457,6 +2457,10 @@ exports.submitAssignment = async (req, res) => {
       });
     }
 
+    let cleanLink = null;
+    let cleanFileUrl = null;
+    let cleanFileName = null;
+
     // Validation per type
     if (submission_type === 'file') {
       if (req.file) {
@@ -2464,15 +2468,25 @@ exports.submitAssignment = async (req, res) => {
           s3KeyPrefix: 'course-submissions',
           localSubPath: 'submissions',
         });
-        submission_file_url = stored.url;
-        submission_file_name = stored.name;
-      }
-
-      if (!submission_file_url) {
-        return res.status(400).json({
-          success: false,
-          message: 'Please upload a document file',
-        });
+        cleanFileUrl = stored.url;
+        cleanFileName = stored.name;
+      } else {
+        // If not attaching a new file, check if student already has a valid file submission they are preserving
+        const existingSub = await pool.query(
+          `SELECT submission_file_url, submission_file_name 
+           FROM assignment_submissions 
+           WHERE assignment_id = $1 AND user_id = $2 AND submission_type = 'file'`,
+          [id, userId],
+        );
+        if (existingSub.rows.length > 0 && existingSub.rows[0].submission_file_url) {
+          cleanFileUrl = existingSub.rows[0].submission_file_url;
+          cleanFileName = existingSub.rows[0].submission_file_name;
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: 'Please upload a document file',
+          });
+        }
       }
     } else {
       if (!submission_link || !submission_link.trim()) {
@@ -2489,11 +2503,8 @@ exports.submitAssignment = async (req, res) => {
           message: 'Please enter a valid URL (e.g. starting with https://)',
         });
       }
+      cleanLink = submission_link.trim();
     }
-
-    const cleanLink = submission_type === 'file' ? null : submission_link.trim();
-    const cleanFileUrl = submission_type === 'file' ? submission_file_url : null;
-    const cleanFileName = submission_type === 'file' ? (submission_file_name || 'Uploaded File') : null;
 
     const result = await pool.query(
       `INSERT INTO assignment_submissions

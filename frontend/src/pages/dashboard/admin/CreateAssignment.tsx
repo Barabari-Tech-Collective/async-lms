@@ -242,7 +242,21 @@ export default function CreateAssignment() {
         }
         if (d.topic_id) setTopicId(String(d.topic_id));
         if (d.due_date) {
-          setDeadline(d.due_date.split('T')[0]);
+          try {
+            const dt = new Date(d.due_date);
+            if (!isNaN(dt.getTime())) {
+              const year = dt.getFullYear();
+              const month = String(dt.getMonth() + 1).padStart(2, '0');
+              const day = String(dt.getDate()).padStart(2, '0');
+              const hours = String(dt.getHours()).padStart(2, '0');
+              const minutes = String(dt.getMinutes()).padStart(2, '0');
+              setDeadline(`${year}-${month}-${day}T${hours}:${minutes}`);
+            } else {
+              setDeadline(d.due_date.slice(0, 16));
+            }
+          } catch {
+            setDeadline(d.due_date.slice(0, 16));
+          }
         }
         if (d.evaluator_type) setAiEvaluationType(d.evaluator_type);
         if (d.instruction_file_url) setInstructionUrl(d.instruction_file_url);
@@ -250,6 +264,9 @@ export default function CreateAssignment() {
         if (d.allowed_submission_types && Array.isArray(d.allowed_submission_types)) {
           setAllowedSubmissionTypes(d.allowed_submission_types);
         }
+        if (d.weightage || d.max_score) setWeightage(String(d.weightage || d.max_score));
+        if (typeof d.enable_plagiarism === 'boolean') setEnablePlagiarism(d.enable_plagiarism);
+        if (d.editor_type === 'rich' || d.editor_type === 'markdown') setEditorType(d.editor_type);
 
         // Test Cases
         if (d.test_cases) {
@@ -345,6 +362,10 @@ export default function CreateAssignment() {
       toast.error('Please provide an Assignment Title and Description / Instructions first');
       return;
     }
+    if (!aiEvaluationType) {
+      toast.error('Please select an Evaluation Type before generating test cases');
+      return;
+    }
 
     setGeneratingTestCases(true);
     try {
@@ -358,7 +379,7 @@ export default function CreateAssignment() {
       const res = await apiClient.post<{ success: boolean; testCases: string }>('/evaluations/generate-test-cases', {
         title: title.trim(),
         instructions: instructionsText,
-        evaluatorType: aiEvaluationType || 'JS',
+        evaluatorType: aiEvaluationType,
         rubric: rubricPayload,
       });
 
@@ -536,8 +557,10 @@ export default function CreateAssignment() {
       if (testCaseViewMode === 'json' && testCasesJson.trim()) {
         try {
           finalTestCases = JSON.parse(testCasesJson);
-        } catch {
-          finalTestCases = testCasesJson.trim();
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Test Cases: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
         }
       } else {
         finalTestCases = testCases.map((t) => ({ input: t.input, output: t.output, score: t.score }));
@@ -547,19 +570,23 @@ export default function CreateAssignment() {
       if (rubricViewMode === 'json' && rubricJson.trim()) {
         try {
           finalRubric = JSON.parse(rubricJson);
-        } catch {
-          finalRubric = rubrics.map((r) => ({ name: r.criteria, score: r.maxScore, description: r.description }));
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Rubrics: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
         }
       } else {
         finalRubric = rubrics.map((r) => ({ name: r.criteria, score: r.maxScore, description: r.description }));
       }
+
+      const formattedDueDate = deadline ? new Date(deadline).toISOString() : null;
 
       let resId = editId;
       if (editId) {
         await apiClient.put(`/college-assignments/${editId}`, {
           title: title.trim(),
           description: description.trim() || null,
-          due_date: deadline || null,
+          due_date: formattedDueDate,
           course: course || null,
           topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
@@ -576,7 +603,7 @@ export default function CreateAssignment() {
           college_ids: selectedColleges,
           title: title.trim(),
           description: description.trim() || null,
-          due_date: deadline || null,
+          due_date: formattedDueDate,
           course: course || null,
           topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
@@ -815,7 +842,7 @@ export default function CreateAssignment() {
               <div className='space-y-1.5'>
                 <Label className='text-xs sm:text-sm text-slate-600'>Deadline</Label>
                 <Input
-                  type='date'
+                  type='datetime-local'
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
                   className='text-xs sm:text-sm h-10'
