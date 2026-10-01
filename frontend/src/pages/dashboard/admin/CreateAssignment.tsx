@@ -1,17 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import {
-  ArrowLeft,
-  Upload,
-  Loader2,
-  FileText,
-  X,
-  ChevronDown,
-  Wand2,
-  Eye,
-  Terminal,
-  ListChecks,
-} from 'lucide-react';
+import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles, Eye, ClipboardList } from 'lucide-react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
@@ -20,7 +9,7 @@ import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -41,71 +30,55 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 
 /* ======================
-   Encoding & JSON Helpers
+   Editor Toggle
 ====================== */
 
-const utf8_to_b64 = (str: string) => {
-  return window.btoa(unescape(encodeURIComponent(str)));
-};
-
-const b64_to_utf8 = (str: string) => {
-  return decodeURIComponent(escape(window.atob(str)));
-};
-
-const getInitialTestCases = (testCasesData: any) => {
-  if (!testCasesData) return '';
-  let obj = testCasesData;
-  if (typeof obj === 'string') {
-    try {
-      obj = JSON.parse(obj);
-    } catch {
-      return obj;
-    }
-  }
-  if (obj && obj.specFile) {
-    try {
-      return b64_to_utf8(obj.specFile);
-    } catch {
-      return JSON.stringify(obj, null, 2);
-    }
-  }
-  return typeof obj === 'object' ? JSON.stringify(obj, null, 2) : obj;
-};
-
-const getInitialRubric = (rubricData: any) => {
-  if (!rubricData) return '';
-  if (typeof rubricData === 'string') {
-    try {
-      const parsed = JSON.parse(rubricData);
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return rubricData;
-    }
-  }
-  return typeof rubricData === 'object' ? JSON.stringify(rubricData, null, 2) : rubricData;
-};
+function EditorToggle({
+  value,
+  onChange,
+}: {
+  value: 'rich' | 'markdown';
+  onChange: (v: 'rich' | 'markdown') => void;
+}) {
+  return (
+    <div className='flex items-center gap-1 border border-slate-200 rounded-md p-0.5 bg-slate-50'>
+      <button
+        type='button'
+        onClick={() => onChange('rich')}
+        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${value === 'rich' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+      >
+        Rich Text
+      </button>
+      <button
+        type='button'
+        onClick={() => onChange('markdown')}
+        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${value === 'markdown' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+      >
+        Markdown
+      </button>
+    </div>
+  );
+}
 
 /* ======================
    Types
+====================== */
+
+interface RubricItem {
+  id: number;
+  criteria: string;
+  description: string;
+  maxScore: number;
+}
+
+/* ======================
+   Component
 ====================== */
 
 interface College {
   id: string;
   name: string;
 }
-
-const DEFAULT_EVALUATORS = [
-  { id: 'JS', name: 'JS Evaluator' },
-  { id: 'VISUAL', name: 'Visual / DOM Evaluator' },
-  { id: 'PYTHON', name: 'Python Evaluator' },
-  { id: 'REACT', name: 'React Evaluator' },
-  { id: 'FULLSTACK', name: 'Full Stack Evaluator' },
-  { id: 'AI', name: 'Backend API Evaluator' },
-];
-
-/* ======================
-   Component
-====================== */
 
 export default function CreateAssignment() {
   const navigate = useNavigate();
@@ -114,14 +87,16 @@ export default function CreateAssignment() {
 
   const dashboardType = location.pathname.includes('/dashboard/admin') ? 'admin' : 'facilitator';
   const basePath = `/dashboard/${dashboardType}`;
-  const managementPath = dashboardType === 'admin' ? `${basePath}/assignment-management` : `${basePath}/assignments`;
 
-  // ── Basic Information ──
-  const editId = editData.editId || null;
+  // ─── Basic Information ───
+  const queryParams = new URLSearchParams(location.search);
+  const editId = editData.editId || queryParams.get('editId') || null;
+  const [loadingAssignment, setLoadingAssignment] = useState<boolean>(!!editId);
+
   const [title, setTitle] = useState(editData.title || '');
   const [description, setDescription] = useState(editData.description || '');
   const [course, setCourse] = useState(editData.course || '');
-  const [college] = useState(editData.collegeId || '');
+  const [college, setCollege] = useState(editData.collegeId || '');
   const [selectedColleges, setSelectedColleges] = useState<string[]>(
     editData.collegeId ? [editData.collegeId] : []
   );
@@ -129,48 +104,77 @@ export default function CreateAssignment() {
   const [deadline, setDeadline] = useState(editData.deadline || '');
 
   // Dynamic subjects (courses) and topics
-  const [availableCourses, setAvailableCourses] = useState<{ value: string; label: string; slug: string }[]>([]);
-  const [availableTopics, setAvailableTopics] = useState<{ value: string; label: string }[]>([]);
+  const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
+  const [availableTopics, setAvailableTopics] = useState<{value: string, label: string}[]>([]);
 
-  // ── Colleges & Evaluators from API ──
+  // ─── Colleges & Evaluators from API ───
   const [colleges, setColleges] = useState<College[]>([]);
-  const [evaluatorsList, setEvaluatorsList] = useState<{ id: string; name: string }[]>(DEFAULT_EVALUATORS);
+  const [evaluators, setEvaluators] = useState<{id: string; name: string}[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Instruction Document Upload ──
+  // ─── Instruction Document Upload ───
+  const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUrl, setInstructionUrl] = useState(editData.instruction_file_url || '');
   const [instructionName, setInstructionName] = useState(editData.instruction_file_name || '');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Evaluation Setup ──
-  const [assignmentDescription, setAssignmentDescription] = useState(
-    editData.assignmentDescription || editData.assignment_description || ''
-  );
-  const [aiEvaluationType, setAiEvaluationType] = useState(
-    editData.aiEvaluationType || editData.evaluator_type || ''
-  );
+  // ─── Evaluation Setup ───
+  const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
+  const [aiEvaluationType, setAiEvaluationType] = useState(editData.aiEvaluationType || '');
   const [weightage, setWeightage] = useState(editData.weightage || '100');
   const [enablePlagiarism, setEnablePlagiarism] = useState(editData.enablePlagiarism || false);
 
-  // ── Editor Type ──
+  // ─── Rubrics & Test Cases State ───
+  const [rubrics, setRubrics] = useState<RubricItem[]>(editData.rubricsList || []);
+  const [rubricJson, setRubricJson] = useState<string>(
+    editData.rubric
+      ? typeof editData.rubric === 'string'
+        ? editData.rubric
+        : JSON.stringify(editData.rubric, null, 2)
+      : JSON.stringify(
+          [
+            {
+              name: 'Code Correctness',
+              description: 'Fulfills primary requirements and handles edge cases.',
+              weight: 50,
+            },
+            {
+              name: 'Structure & Quality',
+              description: 'Clean formatting, modular architecture, and standards.',
+              weight: 50,
+            },
+          ],
+          null,
+          2
+        )
+  );
+  const [rubricViewMode, setRubricViewMode] = useState<'json' | 'builder'>(editData.rubricsList?.length ? 'builder' : 'json');
+  const [generatingRubric, setGeneratingRubric] = useState(false);
+
+  // ─── Editor Type ───
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
 
-  // ── Test Cases & Rubrics (JSON / Spec Text) ──
-  const [testCases, setTestCases] = useState<string>(
-    getInitialTestCases(editData.test_cases || editData.testCasesList)
+  // ─── Test Cases ───
+  const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
+  const [testCasesJson, setTestCasesJson] = useState<string>(
+    editData.test_cases
+      ? typeof editData.test_cases === 'string'
+        ? editData.test_cases
+        : JSON.stringify(editData.test_cases, null, 2)
+      : JSON.stringify(
+          {
+            evaluationMode: 'script',
+            expectedLogs: ['Hello World'],
+          },
+          null,
+          2
+        )
   );
-  const [rubric, setRubric] = useState<string>(
-    getInitialRubric(editData.rubric || editData.rubricsList)
-  );
+  const [testCaseViewMode, setTestCaseViewMode] = useState<'json' | 'builder'>(editData.testCasesList?.length ? 'builder' : 'json');
   const [generatingTestCases, setGeneratingTestCases] = useState(false);
-  const [generatingRubric, setGeneratingRubric] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // ── Submission Settings ──
-  const [allowGithubLink, setAllowGithubLink] = useState(editData.allowGithubLink ?? true);
-
-  // Upload handler
   const handleFileUpload = async (file: File) => {
     const allowed = ['.pdf', '.docx', '.txt', '.doc'];
     const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -179,6 +183,7 @@ export default function CreateAssignment() {
       return;
     }
 
+    setInstructionFile(file);
     setUploading(true);
     try {
       const formData = new FormData();
@@ -192,12 +197,13 @@ export default function CreateAssignment() {
       toast.success('Instruction document uploaded!');
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to upload document'));
+      setInstructionFile(null);
     } finally {
       setUploading(false);
     }
   };
 
-  // Initial Data Fetching
+  // ─── Load Reference Data on Mount ───
   useEffect(() => {
     apiClient
       .get<{ data: College[] }>('/facilitator/colleges')
@@ -206,16 +212,8 @@ export default function CreateAssignment() {
 
     apiClient
       .get<{ data: { id: string; name: string }[] }>('/evaluations/evaluators')
-      .then((res) => {
-        const fetched = res.data.data || (res.data as any) || [];
-        if (Array.isArray(fetched) && fetched.length > 0) {
-          const map = new Map<string, string>();
-          DEFAULT_EVALUATORS.forEach((ev) => map.set(ev.id, ev.name));
-          fetched.forEach((ev: any) => map.set(ev.id, ev.name || ev.id));
-          setEvaluatorsList(Array.from(map.entries()).map(([id, name]) => ({ id, name })));
-        }
-      })
-      .catch((error) => console.warn('Could not load evaluators:', error));
+      .then((res) => setEvaluators(res.data.data || (res.data as any) || []))
+      .catch((error) => toast.error(getErrorMessage(error, 'Failed to load evaluators')));
 
     apiClient
       .get<{ data: any[] }>('/college-assignments/courses')
@@ -223,7 +221,115 @@ export default function CreateAssignment() {
       .catch((error) => console.error('Failed to load courses', error));
   }, []);
 
-  // Fetch Topics on Course Change
+  // ─── Load Assignment Details on Edit ───
+  useEffect(() => {
+    if (!editId) return;
+
+    setLoadingAssignment(true);
+    apiClient
+      .get<{ success: boolean; data: any }>(`/college-assignments/${editId}`)
+      .then((res) => {
+        const d = res.data.data;
+        if (!d) return;
+
+        if (d.title) setTitle(d.title);
+        if (d.description) setDescription(d.description);
+        if (d.assignment_description) setAssignmentDescription(d.assignment_description);
+        if (d.course) setCourse(d.course);
+        if (d.college_id) {
+          setCollege(String(d.college_id));
+          setSelectedColleges([String(d.college_id)]);
+        }
+        if (d.topic_id) setTopicId(String(d.topic_id));
+        if (d.due_date) {
+          try {
+            const dt = new Date(d.due_date);
+            if (!isNaN(dt.getTime())) {
+              const year = dt.getFullYear();
+              const month = String(dt.getMonth() + 1).padStart(2, '0');
+              const day = String(dt.getDate()).padStart(2, '0');
+              const hours = String(dt.getHours()).padStart(2, '0');
+              const minutes = String(dt.getMinutes()).padStart(2, '0');
+              setDeadline(`${year}-${month}-${day}T${hours}:${minutes}`);
+            } else {
+              setDeadline(d.due_date.slice(0, 16));
+            }
+          } catch {
+            setDeadline(d.due_date.slice(0, 16));
+          }
+        }
+        if (d.evaluator_type) setAiEvaluationType(d.evaluator_type);
+        if (d.instruction_file_url) setInstructionUrl(d.instruction_file_url);
+        if (d.instruction_file_name) setInstructionName(d.instruction_file_name);
+        if (d.allowed_submission_types && Array.isArray(d.allowed_submission_types)) {
+          setAllowedSubmissionTypes(d.allowed_submission_types);
+        }
+        if (d.weightage || d.max_score) setWeightage(String(d.weightage || d.max_score));
+        if (typeof d.enable_plagiarism === 'boolean') setEnablePlagiarism(d.enable_plagiarism);
+        if (d.editor_type === 'rich' || d.editor_type === 'markdown') setEditorType(d.editor_type);
+
+        // Test Cases
+        if (d.test_cases) {
+          let parsedTc: any = d.test_cases;
+          if (typeof parsedTc === 'string') {
+            try { parsedTc = JSON.parse(parsedTc); } catch {}
+          }
+          if (Array.isArray(parsedTc) && parsedTc.length > 0) {
+            setTestCases(parsedTc.map((tc: any, i: number) => ({
+              id: Date.now() + i,
+              input: tc.input ?? '',
+              output: tc.output ?? '',
+              score: Number(tc.score) || 10,
+            })));
+            setTestCasesJson(JSON.stringify(parsedTc, null, 2));
+            setTestCaseViewMode('builder');
+          } else if (typeof parsedTc === 'object' && parsedTc !== null) {
+            setTestCasesJson(JSON.stringify(parsedTc, null, 2));
+            setTestCaseViewMode('json');
+          }
+        }
+
+        // Rubrics
+        if (d.rubric) {
+          let parsedRubric: any = d.rubric;
+          if (typeof parsedRubric === 'string') {
+            try { parsedRubric = JSON.parse(parsedRubric); } catch {}
+          }
+          if (Array.isArray(parsedRubric) && parsedRubric.length > 0) {
+            setRubrics(parsedRubric.map((r: any, i: number) => ({
+              id: Date.now() + i,
+              criteria: r.name || r.criteria || '',
+              description: r.description || '',
+              maxScore: Number(r.score || r.weight || r.maxScore) || 10,
+            })));
+            setRubricJson(JSON.stringify(parsedRubric, null, 2));
+            setRubricViewMode('builder');
+          } else if (typeof parsedRubric === 'object' && parsedRubric !== null) {
+            setRubricJson(JSON.stringify(parsedRubric, null, 2));
+            setRubricViewMode('json');
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load assignment details for editing', err);
+      })
+      .finally(() => {
+        setLoadingAssignment(false);
+      });
+  }, [editId]);
+
+  // Normalize course value to UUID when availableCourses loads
+  useEffect(() => {
+    if (!course || availableCourses.length === 0) return;
+    const match = availableCourses.find(
+      (c) => c.value === course || c.label.toLowerCase() === course.toLowerCase() || c.slug === course
+    );
+    if (match && match.value !== course) {
+      setCourse(match.value);
+    }
+  }, [availableCourses, course]);
+
+  // Fetch topics when course changes
   useEffect(() => {
     if (!course) {
       setAvailableTopics([]);
@@ -231,117 +337,197 @@ export default function CreateAssignment() {
     }
     apiClient
       .get<{ data: any[] }>(`/college-assignments/courses/${course}/topics`)
-      .then((res) => setAvailableTopics(res.data.data || []))
+      .then((res) => {
+        const topics = res.data.data || [];
+        setAvailableTopics(topics);
+      })
       .catch((error) => console.error('Failed to load topics', error));
   }, [course]);
 
-  // If editId is provided and details are missing, fetch complete assignment
+  // Normalize topicId when availableTopics loads
   useEffect(() => {
-    if (!editId) return;
-    apiClient
-      .get<{ success: boolean; data: any }>(`/college-assignments/${editId}`)
-      .then((res) => {
-        const d = res.data?.data;
-        if (!d) return;
-        if (d.title && !title) setTitle(d.title);
-        if (d.description && !description) setDescription(d.description);
-        if (d.assignment_description && !assignmentDescription) {
-          setAssignmentDescription(d.assignment_description);
-        }
-        if (d.course && !course) setCourse(d.course);
-        if (d.due_date && !deadline) {
-          setDeadline(d.due_date ? d.due_date.substring(0, 16) : '');
-        }
-        if (d.instruction_file_url && !instructionUrl) {
-          setInstructionUrl(d.instruction_file_url);
-          setInstructionName(d.instruction_file_name || 'Instruction Document');
-        }
-        if (d.evaluator_type && !aiEvaluationType) {
-          setAiEvaluationType(d.evaluator_type);
-        }
-        if (d.test_cases && !testCases) {
-          setTestCases(getInitialTestCases(d.test_cases));
-        }
-        if (d.rubric && !rubric) {
-          setRubric(getInitialRubric(d.rubric));
-        }
-      })
-      .catch((err) => {
-        console.warn('Could not load full assignment details:', err);
-      });
-  }, [editId]);
+    if (!topicId || availableTopics.length === 0) return;
+    const match = availableTopics.find(
+      (t) => t.value === topicId || t.label.toLowerCase() === topicId.toLowerCase()
+    );
+    if (match && match.value !== topicId) {
+      setTopicId(match.value);
+    }
+  }, [availableTopics, topicId]);
 
-  // ── Auto-Generate Test Cases ──
+  // ─── AI Auto-Generate Handlers ───
   const handleGenerateTestCases = async () => {
-    const rawInstructions = assignmentDescription.trim() || description.trim();
-    if (!title.trim() || !rawInstructions) {
-      toast.error('Assignment Title and Instructions are required to generate test cases.');
+    const instructionsText = assignmentDescription.trim() || description.trim();
+    if (!title.trim() || !instructionsText) {
+      toast.error('Please provide an Assignment Title and Description / Instructions first');
       return;
     }
+    if (!aiEvaluationType) {
+      toast.error('Please select an Evaluation Type before generating test cases');
+      return;
+    }
+
     setGeneratingTestCases(true);
     try {
-      let parsedRubric = null;
-      if (rubric.trim()) {
-        try {
-          parsedRubric = JSON.parse(rubric);
-        } catch {
-          // ignore parsing error for prompt rubric
-        }
+      let rubricPayload: any = null;
+      try {
+        rubricPayload = JSON.parse(rubricJson);
+      } catch {
+        rubricPayload = rubrics.map((r) => ({ name: r.criteria, description: r.description, weight: r.maxScore }));
       }
 
-      const res = await apiClient.post<{ success: boolean; testCases: string }>(
-        '/evaluations/generate-test-cases',
-        {
-          title: title.trim(),
-          instructions: rawInstructions,
-          evaluatorType: aiEvaluationType === 'none' ? '' : aiEvaluationType,
-          rubric: parsedRubric,
-        }
-      );
-      if (res.data?.success && res.data.testCases) {
-        setTestCases(res.data.testCases);
+      const res = await apiClient.post<{ success: boolean; testCases: string }>('/evaluations/generate-test-cases', {
+        title: title.trim(),
+        instructions: instructionsText,
+        evaluatorType: aiEvaluationType,
+        rubric: rubricPayload,
+      });
+
+      if (res.data.success && res.data.testCases) {
+        setTestCasesJson(res.data.testCases);
+        try {
+          const parsed = JSON.parse(res.data.testCases);
+          if (Array.isArray(parsed)) {
+            setTestCases(
+              parsed.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                input: typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
+                output: typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output || item.expected || ''),
+                score: Number(item.score || item.points || 10),
+              }))
+            );
+          } else if (parsed.testCases && Array.isArray(parsed.testCases)) {
+            setTestCases(
+              parsed.testCases.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                input: typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
+                output: typeof item.expected === 'object' ? JSON.stringify(item.expected) : String(item.expected || item.output || ''),
+                score: Number(item.score || 10),
+              }))
+            );
+          }
+        } catch {}
         toast.success('Test cases generated successfully!');
-      } else {
-        toast.error('No test cases returned from generator.');
       }
     } catch (error: any) {
-      toast.error(getErrorMessage(error, 'Failed to generate test cases'));
+      toast.error(error?.response?.data?.message || 'Failed to generate test cases');
     } finally {
       setGeneratingTestCases(false);
     }
   };
 
-  // ── Auto-Generate Rubric ──
   const handleGenerateRubric = async () => {
-    const rawInstructions = assignmentDescription.trim() || description.trim();
-    if (!title.trim() || !rawInstructions) {
-      toast.error('Assignment Title and Instructions are required to generate a rubric.');
+    const instructionsText = assignmentDescription.trim() || description.trim();
+    if (!title.trim() || !instructionsText) {
+      toast.error('Please provide an Assignment Title and Description / Instructions first');
       return;
     }
+
     setGeneratingRubric(true);
     try {
-      const res = await apiClient.post<{ success: boolean; rubric: string }>(
-        '/evaluations/generate-rubric',
-        {
-          title: title.trim(),
-          instructions: rawInstructions,
-          evaluatorType: aiEvaluationType === 'none' ? '' : aiEvaluationType,
-        }
-      );
-      if (res.data?.success && res.data.rubric) {
-        setRubric(res.data.rubric);
+      const res = await apiClient.post<{ success: boolean; rubric: string }>('/evaluations/generate-rubric', {
+        title: title.trim(),
+        instructions: instructionsText,
+        evaluatorType: aiEvaluationType || 'JS',
+      });
+
+      if (res.data.success && res.data.rubric) {
+        setRubricJson(res.data.rubric);
+        try {
+          const parsed = JSON.parse(res.data.rubric);
+          if (Array.isArray(parsed)) {
+            setRubrics(
+              parsed.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                criteria: item.name || item.criteria || `Criterion ${idx + 1}`,
+                description: item.description || '',
+                maxScore: Number(item.weight || item.score || item.maxScore || 10),
+              }))
+            );
+          }
+        } catch {}
         toast.success('Rubric generated successfully!');
-      } else {
-        toast.error('No rubric returned from generator.');
       }
     } catch (error: any) {
-      toast.error(getErrorMessage(error, 'Failed to generate rubric'));
+      toast.error(error?.response?.data?.message || 'Failed to generate rubric');
     } finally {
       setGeneratingRubric(false);
     }
   };
 
-  // ── Validation & Submit ──
+  // ─── Submission Settings ───
+  const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<string[]>(
+    editData.allowed_submission_types || editData.allowedSubmissionTypes || [
+      'file',
+      'github',
+      'docs',
+      'figma',
+      'excel',
+      'url',
+    ]
+  );
+
+  const toggleSubmissionType = (typeId: string) => {
+    setAllowedSubmissionTypes((prev) => {
+      if (prev.includes(typeId)) {
+        if (prev.length <= 1) {
+          toast.error('At least one submission method must be enabled');
+          return prev;
+        }
+        return prev.filter((t) => t !== typeId);
+      } else {
+        return [...prev, typeId];
+      }
+    });
+  };
+
+  const selectAllSubmissionTypes = () => {
+    setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+  };
+
+  // ─── Rubrics helpers ───
+  const totalScore = rubrics.reduce((sum, r) => sum + r.maxScore, 0);
+
+  const addRubric = () => {
+    setRubrics((prev) => [
+      ...prev,
+      { id: Date.now(), criteria: '', description: '', maxScore: 10 },
+    ]);
+  };
+
+  const removeRubric = (id: number) => {
+    setRubrics((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const updateRubric = (id: number, field: keyof RubricItem, value: string | number) => {
+    setRubrics((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+  };
+
+  // ─── Test Cases helpers ───
+  const totalTestCaseScore = testCases.reduce((sum, tc) => sum + tc.score, 0);
+
+  const addTestCase = () => {
+    setTestCases((prev) => [
+      ...prev,
+      { id: Date.now(), input: '', output: '', score: 10 },
+    ]);
+  };
+
+  const removeTestCase = (id: number) => {
+    setTestCases((prev) => prev.filter((tc) => tc.id !== id));
+  };
+
+  const updateTestCase = (id: number, field: keyof typeof testCases[0], value: string | number) => {
+    setTestCases((prev) =>
+      prev.map((tc) => (tc.id === id ? { ...tc, [field]: value } : tc))
+    );
+  };
+
+  const isCodeEvaluator = ['JS', 'PYTHON', 'JAVA'].includes(aiEvaluationType);
+
+  // ─── Validation & Submit ───
   const handleCreate = async () => {
     const missing: string[] = [];
 
@@ -350,130 +536,117 @@ export default function CreateAssignment() {
     if (editId ? !college : selectedColleges.length === 0) missing.push('College');
     if (!topicId) missing.push('Subject');
     if (!deadline) missing.push('Deadline');
+    if (allowedSubmissionTypes.length === 0) missing.push('At least one Submission Method');
 
     if (missing.length > 0) {
-      toast.error(`Please fill in: ${missing.join(', ')}`, {
-        duration: 4000,
-        style: { maxWidth: 480 },
-      });
+      toast.error(
+        `Please fill in: ${missing.join(', ')}`,
+        {
+          duration: 4000,
+          style: {
+            maxWidth: 480,
+          },
+        },
+      );
       return;
-    }
-
-    // Format & validate test cases
-    let finalTestCases = testCases.trim();
-    const upperType = (aiEvaluationType || '').toUpperCase();
-    if (
-      upperType === 'REACT' ||
-      upperType === 'AI' ||
-      upperType === 'FULLSTACK' ||
-      upperType === 'BACKEND'
-    ) {
-      const isJs = !finalTestCases.startsWith('{') && !finalTestCases.startsWith('[');
-      if (isJs && finalTestCases) {
-        try {
-          const specFileB64 = utf8_to_b64(finalTestCases);
-          finalTestCases = JSON.stringify({ specFile: specFileB64, testCases: [] }, null, 2);
-        } catch (e) {
-          toast.error('Failed to encode test spec file');
-          return;
-        }
-      }
-    }
-
-    if (finalTestCases) {
-      try {
-        JSON.parse(finalTestCases);
-      } catch (e) {
-        toast.error('Test Cases must be valid JSON or JavaScript Spec');
-        return;
-      }
-    }
-
-    if (rubric.trim()) {
-      try {
-        JSON.parse(rubric);
-      } catch (e) {
-        toast.error('Rubric must be valid JSON');
-        return;
-      }
     }
 
     setSubmitting(true);
     try {
+      let finalTestCases: any = null;
+      if (testCaseViewMode === 'json' && testCasesJson.trim()) {
+        try {
+          finalTestCases = JSON.parse(testCasesJson);
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Test Cases: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        finalTestCases = testCases.map((t) => ({ input: t.input, output: t.output, score: t.score }));
+      }
+
+      let finalRubric: any = null;
+      if (rubricViewMode === 'json' && rubricJson.trim()) {
+        try {
+          finalRubric = JSON.parse(rubricJson);
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Rubrics: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        finalRubric = rubrics.map((r) => ({ name: r.criteria, score: r.maxScore, description: r.description }));
+      }
+
+      const formattedDueDate = deadline ? new Date(deadline).toISOString() : null;
+
       let resId = editId;
-      const effectiveEvaluator =
-        !aiEvaluationType || aiEvaluationType === 'none' ? null : aiEvaluationType;
-
-      const payload = {
-        title: title.trim(),
-        description: description.trim() || null,
-        due_date: deadline || null,
-        course: course || null,
-        topic_id: topicId || null,
-        instruction_file_url: instructionUrl || null,
-        instruction_file_name: instructionName || null,
-        test_cases: finalTestCases || null,
-        rubric: rubric.trim() || null,
-        evaluator_type: effectiveEvaluator,
-        assignment_description: assignmentDescription.trim() || null,
-      };
-
       if (editId) {
-        await apiClient.put(`/college-assignments/${editId}`, payload);
+        await apiClient.put(`/college-assignments/${editId}`, {
+          title: title.trim(),
+          description: description.trim() || null,
+          due_date: formattedDueDate,
+          course: course || null,
+          topic_id: topicId || null,
+          instruction_file_url: instructionUrl || null,
+          instruction_file_name: instructionName || null,
+          test_cases: finalTestCases,
+          rubric: finalRubric,
+          evaluator_type: aiEvaluationType || null,
+          assignment_description: assignmentDescription.trim() || null,
+          allowed_submission_types: allowedSubmissionTypes,
+        });
         toast.success('Assignment updated successfully!');
       } else {
         const res = await apiClient.post('/college-assignments', {
-          ...payload,
           college_ids: selectedColleges,
+          title: title.trim(),
+          description: description.trim() || null,
+          due_date: formattedDueDate,
+          course: course || null,
+          topic_id: topicId || null,
+          instruction_file_url: instructionUrl || null,
+          instruction_file_name: instructionName || null,
+          test_cases: finalTestCases,
+          rubric: finalRubric,
+          evaluator_type: aiEvaluationType || null,
+          assignment_description: assignmentDescription.trim() || null,
+          allowed_submission_types: allowedSubmissionTypes,
         });
         resId = res.data.data.id;
         toast.success('Assignment created successfully!');
       }
-
-      // Calculate total marks for success page
-      let parsedRubricsArray: any[] = [];
-      try {
-        if (rubric.trim()) parsedRubricsArray = JSON.parse(rubric);
-      } catch {}
-
-      const totalCalculatedMarks = Array.isArray(parsedRubricsArray)
-        ? parsedRubricsArray.reduce(
-            (sum, r) => sum + (Number(r.weight) || Number(r.score) || Number(r.maxScore) || 0),
-            0
-          )
-        : Number(weightage) || 100;
 
       navigate(`${basePath}/assignment-success`, {
         state: {
           editId: resId,
           title,
           description,
-          course: availableCourses.find((c) => c.value === course)?.label || course,
+          course: availableCourses.find(c => c.value === course)?.label || course,
           college: editId
-            ? colleges.find((c) => String(c.id) === college)?.name || college
-            : selectedColleges.length === colleges.length
+            ? (colleges.find((c) => String(c.id) === college)?.name || college)
+            : (selectedColleges.length === colleges.length
               ? 'All Colleges'
               : selectedColleges
                   .map((id) => colleges.find((c) => String(c.id) === id)?.name)
                   .filter(Boolean)
-                  .join(', '),
+                  .join(', ')),
           collegeId: editId ? college : selectedColleges[0],
-          topicId: availableTopics.find((t) => t.value === topicId)?.label || topicId,
+          topicId: availableTopics.find(t => t.value === topicId)?.label || topicId,
           deadline,
           assignmentDescription,
-          aiEvaluationType: effectiveEvaluator,
+          aiEvaluationType,
           weightage,
           enablePlagiarism,
-          allowGithubLink,
-          totalMarks: totalCalculatedMarks || Number(weightage) || 100,
-          rubrics: Array.isArray(parsedRubricsArray)
-            ? parsedRubricsArray.map((r) => ({
-                name: r.name || r.criteria,
-                score: r.weight || r.score || r.maxScore || 0,
-              }))
-            : [],
-          test_cases: finalTestCases,
-          rubric: rubric.trim(),
+          allowed_submission_types: allowedSubmissionTypes,
+          totalMarks: isCodeEvaluator ? totalTestCaseScore : totalScore,
+          rubricsList: rubrics,
+          testCasesList: testCases,
+          rubrics: rubrics.map((r) => ({
+            name: r.criteria,
+            score: r.maxScore,
+          })),
         },
       });
     } catch (error) {
@@ -483,25 +656,6 @@ export default function CreateAssignment() {
     }
   };
 
-  // Parse preview data
-  let previewTestCasesObj = null;
-  if (testCases.trim()) {
-    try {
-      previewTestCasesObj = JSON.parse(testCases.trim());
-    } catch {
-      previewTestCasesObj = testCases.trim();
-    }
-  }
-
-  let previewRubricObj = null;
-  if (rubric.trim()) {
-    try {
-      previewRubricObj = JSON.parse(rubric.trim());
-    } catch {
-      previewRubricObj = null;
-    }
-  }
-
   /* ======================
      Render
   ====================== */
@@ -509,20 +663,28 @@ export default function CreateAssignment() {
   return (
     <div className='min-h-screen bg-slate-50/60'>
       <div className='max-w-3xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
-        {/* ── Page Header ── */}
+        {/* ─── Page Header ─── */}
         <div className='flex items-center gap-3'>
           <button
             className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
-            onClick={() => navigate(managementPath)}
+            onClick={() => navigate(`${basePath}/assignment-management`)}
           >
             <ArrowLeft className='w-5 h-5' />
           </button>
           <div className='min-w-0'>
-            <h1 className='text-lg sm:text-xl font-bold text-slate-900 truncate'>
-              {editId ? 'Edit Assignment' : 'Create Assignment'}
-            </h1>
+            <div className='flex items-center gap-2'>
+              <h1 className='text-lg sm:text-xl font-bold text-slate-900 truncate'>
+                {editId ? 'Edit Assignment' : 'Create Assignment'}
+              </h1>
+              {loadingAssignment && (
+                <div className='flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs font-medium'>
+                  <Loader2 className='w-3 h-3 animate-spin' />
+                  <span>Loading details...</span>
+                </div>
+              )}
+            </div>
             <p className='text-xs sm:text-sm text-slate-500 truncate'>
-              Set up automated evaluations, test cases, and rubrics for college students
+              {editId ? 'Update details, evaluation rules, and submissions' : 'Set up a new assignment for a branch'}
             </p>
           </div>
         </div>
@@ -531,144 +693,154 @@ export default function CreateAssignment() {
             SECTION 1 — Basic Information
         ================================================================ */}
         <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-              Basic Information
-            </CardTitle>
+          <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Basic Information</CardTitle>
           </CardHeader>
+
           <CardContent className='space-y-3.5 sm:space-y-4 px-4 sm:px-6 pb-4 sm:pb-6'>
             {/* Assignment Title */}
             <div className='space-y-1.5'>
-              <Label className='text-xs sm:text-sm text-slate-600'>
-                Assignment Title <span className='text-red-500'>*</span>
-              </Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Assignment Title</Label>
               <Input
-                placeholder='e.g., Array Manipulation with Methods'
+                placeholder='e.g. React Hooks Unit Test 3'
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className='text-xs sm:text-sm h-10'
               />
             </div>
 
-            {/* Course & College Row */}
+            {/* Description */}
+            <div className='space-y-1.5'>
+              <div className='flex items-center justify-between flex-wrap gap-2'>
+                <Label className='text-xs sm:text-sm text-slate-600'>Description</Label>
+                <EditorToggle value={editorType} onChange={setEditorType} />
+              </div>
+              {editorType === 'rich' ? (
+                <RichTextEditor
+                  minHeight='80px'
+                  placeholder='Describe the assignment objectives...'
+                  value={description}
+                  onChange={setDescription}
+                />
+              ) : (
+                <MarkdownEditor
+                  minHeight='80px'
+                  placeholder='Describe the assignment objectives...'
+                  value={description}
+                  onChange={setDescription}
+                />
+              )}
+            </div>
+
+            {/* Course & College */}
             <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
-              {/* Course (Subject) */}
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>
-                  Course <span className='text-red-500'>*</span>
-                </Label>
-                <Select value={course} onValueChange={setCourse}>
+                <Label className='text-xs sm:text-sm text-slate-600'>Course</Label>
+                <Select value={course} onValueChange={(val) => { setCourse(val); setTopicId(''); }}>
                   <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
                     <SelectValue placeholder='Select Course' />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableCourses?.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
-                      </SelectItem>
+                    {availableCourses.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* College Dropdown (Multi-select) */}
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>
-                  Target Colleges <span className='text-red-500'>*</span>
-                </Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>College</Label>
                 {editId ? (
                   <Input
+                    value={colleges.find((c) => String(c.id) === (selectedColleges[0] || college))?.name || (editData.college || college || 'Loading...')}
                     disabled
-                    value={colleges.find((c) => String(c.id) === college)?.name || college || 'Assigned College'}
-                    className='text-xs sm:text-sm h-10 bg-slate-50'
+                    className="bg-slate-100/80 border-slate-200 text-slate-500 font-medium text-xs sm:text-sm h-10"
                   />
                 ) : (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button
-                        type='button'
-                        className='w-full flex items-center justify-between text-xs sm:text-sm h-10 px-3 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition outline-none'
+                      <Button
+                        variant="outline"
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs sm:text-sm font-normal bg-white border border-slate-200 rounded-md shadow-xs hover:bg-slate-50 focus:outline-none text-left text-slate-700 h-10"
                       >
-                        <span className='truncate'>
+                        <span className="truncate">
                           {selectedColleges.length === 0
                             ? 'Select Colleges'
                             : selectedColleges.length === colleges.length
                               ? 'All Colleges'
-                              : `${selectedColleges.length} Colleges selected`}
+                              : selectedColleges.length <= 2
+                                ? selectedColleges
+                                    .map((id) => colleges.find((c) => String(c.id) === id)?.name)
+                                    .filter(Boolean)
+                                    .join(', ')
+                                : `${selectedColleges.length} Colleges Selected`}
                         </span>
-                        <ChevronDown className='w-4 h-4 text-slate-400 shrink-0' />
-                      </button>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                      </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className='w-72 max-h-60 overflow-y-auto p-1'>
+                    <DropdownMenuContent className="w-[300px] sm:w-[340px] max-h-[300px] overflow-y-auto bg-white border border-slate-200 rounded-md shadow-lg p-1 z-50">
                       <DropdownMenuItem
-                        className='flex items-center gap-2 cursor-pointer text-xs font-semibold'
                         onSelect={(e) => {
-                          e.preventDefault();
+                          e.preventDefault(); // Keep dropdown open
                           if (selectedColleges.length === colleges.length) {
                             setSelectedColleges([]);
                           } else {
                             setSelectedColleges(colleges.map((c) => String(c.id)));
                           }
                         }}
+                        className="flex items-center gap-2.5 px-2.5 py-1.5 text-xs sm:text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
                       >
                         <Checkbox
-                          checked={colleges.length > 0 && selectedColleges.length === colleges.length}
-                          className='pointer-events-none'
+                          checked={selectedColleges.length === colleges.length && colleges.length > 0}
+                          className="pointer-events-none"
                         />
-                        Select All
+                        <span className="font-medium text-slate-700">All Colleges</span>
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {colleges.map((col) => {
-                        const colId = String(col.id);
-                        const isChecked = selectedColleges.includes(colId);
-                        return (
-                          <DropdownMenuItem
-                            key={colId}
-                            className='flex items-center gap-2 cursor-pointer text-xs'
-                            onSelect={(e) => {
-                              e.preventDefault();
-                              if (isChecked) {
-                                setSelectedColleges(selectedColleges.filter((id) => id !== colId));
-                              } else {
-                                setSelectedColleges([...selectedColleges, colId]);
-                              }
-                            }}
-                          >
-                            <Checkbox checked={isChecked} className='pointer-events-none' />
-                            <span className='truncate'>{col.name}</span>
-                          </DropdownMenuItem>
-                        );
-                      })}
+                      <DropdownMenuSeparator className="bg-slate-100 my-1 h-px" />
+                      {colleges?.map((c) => (
+                        <DropdownMenuItem
+                          key={c.id}
+                          onSelect={(e) => {
+                            e.preventDefault(); // Keep dropdown open
+                            setSelectedColleges((prev) =>
+                              prev.includes(String(c.id))
+                                ? prev.filter((item) => item !== String(c.id))
+                                : [...prev, String(c.id)]
+                            );
+                          }}
+                          className="flex items-center gap-2.5 px-2.5 py-1.5 text-xs sm:text-sm cursor-pointer rounded-sm hover:bg-slate-50 focus:bg-slate-100"
+                        >
+                          <Checkbox
+                            checked={selectedColleges.includes(String(c.id))}
+                            className="pointer-events-none"
+                          />
+                          <span className="text-slate-700">{c.name}</span>
+                        </DropdownMenuItem>
+                      ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
               </div>
             </div>
 
-            {/* Subject (Topic) & Deadline Row */}
+            {/* Subject, Deadline */}
             <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>
-                  Subject (Topic) <span className='text-red-500'>*</span>
-                </Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Subject</Label>
                 <Select value={topicId} onValueChange={setTopicId} disabled={!course}>
                   <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
-                    <SelectValue placeholder={course ? 'Select Topic' : 'Select a course first'} />
+                    <SelectValue placeholder={course ? 'Select Subject' : 'Select a course first'} />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableTopics?.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
+                    {availableTopics.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>
-                  Deadline <span className='text-red-500'>*</span>
-                </Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Deadline</Label>
                 <Input
                   type='datetime-local'
                   value={deadline}
@@ -681,99 +853,56 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 2 — Evaluation & Instructions Setup
+            SECTION 2 — Evaluation Setup
         ================================================================ */}
         <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <div className='flex items-center justify-between'>
-              <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-                Instructions & Evaluator Configuration
-              </CardTitle>
-              {/* Editor Switcher */}
-              <div className='flex items-center gap-1 border border-slate-200 rounded-md p-0.5 bg-slate-50'>
-                <button
-                  type='button'
-                  onClick={() => setEditorType('rich')}
-                  className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                    editorType === 'rich'
-                      ? 'bg-white text-slate-800 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  Rich Text
-                </button>
-                <button
-                  type='button'
-                  onClick={() => setEditorType('markdown')}
-                  className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                    editorType === 'markdown'
-                      ? 'bg-white text-slate-800 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  Markdown
-                </button>
-              </div>
-            </div>
+          <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
+            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Setup</CardTitle>
           </CardHeader>
-          <CardContent className='space-y-4 px-4 sm:px-6 pb-4 sm:pb-6'>
-            {/* Instruction Document Upload */}
+
+          <CardContent className='space-y-3.5 sm:space-y-4 px-4 sm:px-6 pb-4 sm:pb-6'>
+            {/* Instruction Document */}
             <div className='space-y-1.5'>
-              <Label className='text-xs sm:text-sm text-slate-600'>
-                Instruction Document (Optional)
-              </Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Instruction Document</Label>
               <input
                 ref={fileInputRef}
                 type='file'
-                accept='.pdf,.docx,.txt,.doc'
+                accept='.pdf,.docx,.doc,.txt'
                 className='hidden'
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) handleFileUpload(f);
                 }}
               />
-
-              {instructionUrl ? (
-                <div className='flex items-center justify-between p-3 bg-blue-50/60 rounded-xl border border-blue-200'>
-                  <div className='flex items-center gap-2.5 min-w-0'>
-                    <FileText className='w-5 h-5 text-blue-600 shrink-0' />
-                    <div className='min-w-0'>
-                      <p className='text-xs sm:text-sm font-medium text-slate-800 truncate'>
-                        {instructionName || 'Instruction Document'}
-                      </p>
-                      <a
-                        href={instructionUrl}
-                        target='_blank'
-                        rel='noreferrer'
-                        className='text-[11px] text-blue-600 hover:underline'
-                      >
-                        View uploaded file
-                      </a>
-                    </div>
+              {instructionFile ? (
+                <div className='flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4'>
+                  <FileText className='w-7 h-7 sm:w-8 sm:h-8 text-blue-500 shrink-0' />
+                  <div className='flex-1 min-w-0'>
+                    <p className='text-xs sm:text-sm font-medium text-slate-700 truncate'>{instructionFile.name}</p>
+                    <p className='text-[10px] sm:text-xs text-slate-400'>
+                      {uploading ? 'Uploading...' : 'Uploaded successfully'}
+                    </p>
                   </div>
-                  <button
-                    className='p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-white transition shrink-0'
-                    onClick={() => {
-                      setInstructionUrl('');
-                      setInstructionName('');
-                    }}
-                  >
-                    <X className='w-4 h-4' />
-                  </button>
-                </div>
-              ) : uploading ? (
-                <div className='border-2 border-dashed border-slate-200 rounded-xl p-5 text-center'>
-                  <Loader2 className='w-6 h-6 text-blue-600 mx-auto animate-spin mb-1' />
-                  <p className='text-xs text-slate-500'>Uploading document...</p>
+                  {uploading ? (
+                    <Loader2 className='w-5 h-5 text-blue-500 animate-spin shrink-0' />
+                  ) : (
+                    <button
+                      className='text-slate-400 hover:text-red-500 transition shrink-0 p-1.5'
+                      onClick={() => {
+                        setInstructionFile(null);
+                        setInstructionUrl('');
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                    >
+                      <X className='w-4 h-4' />
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div
-                  className='border-2 border-dashed border-slate-200 rounded-xl p-5 sm:p-6 text-center hover:border-blue-400 transition cursor-pointer bg-slate-50/40'
+                  className='border-2 border-dashed border-slate-200 rounded-xl p-5 sm:p-8 text-center hover:border-blue-400 transition cursor-pointer'
                   onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onDrop={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -781,54 +910,44 @@ export default function CreateAssignment() {
                     if (f) handleFileUpload(f);
                   }}
                 >
-                  <Upload className='w-6 h-6 text-slate-400 mx-auto mb-1.5' />
-                  <p className='text-xs sm:text-sm text-slate-600 font-medium'>
-                    Drag & drop instruction document or click to browse
-                  </p>
-                  <p className='text-[10px] sm:text-xs text-slate-400 mt-0.5'>Supports PDF, DOCX, TXT</p>
+                  <Upload className='w-6 h-6 sm:w-8 sm:h-8 text-slate-300 mx-auto mb-2' />
+                  <p className='text-xs sm:text-sm text-slate-500'>Drag & drop instruction file or click to browse</p>
+                  <p className='text-[10px] sm:text-xs text-slate-400 mt-1'>Supports PDF, DOCX, TXT</p>
                 </div>
               )}
             </div>
 
-            {/* Assignment Description / Instructions */}
+            {/* Assignment Description */}
             <div className='space-y-1.5'>
-              <Label className='text-xs sm:text-sm text-slate-600'>
-                Assignment Description & Instructions <span className='text-red-500'>*</span>
-              </Label>
+              <Label className='text-xs sm:text-sm text-slate-600'>Assignment Description</Label>
               {editorType === 'rich' ? (
                 <RichTextEditor
-                  minHeight='120px'
-                  placeholder='Detailed instructions, expected behavior, requirements, and examples for students...'
+                  minHeight='100px'
+                  placeholder='Describe the assignment objectives, requirements, and expectations...'
                   value={assignmentDescription}
                   onChange={setAssignmentDescription}
                 />
               ) : (
                 <MarkdownEditor
-                  minHeight='120px'
-                  placeholder='Detailed instructions, expected behavior, requirements, and examples for students...'
+                  minHeight='100px'
+                  placeholder='Describe the assignment objectives, requirements, and expectations...'
                   value={assignmentDescription}
                   onChange={setAssignmentDescription}
                 />
               )}
             </div>
 
-            {/* Evaluator Type & Weightage */}
+            {/* AI Evaluation Type & Weightage */}
             <div className='grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4'>
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>
-                  Evaluator Type (Auto-Grading)
-                </Label>
-                <Select
-                  value={aiEvaluationType || 'none'}
-                  onValueChange={(val) => setAiEvaluationType(val === 'none' ? '' : val)}
-                >
-                  <SelectTrigger className='w-full text-xs sm:text-sm h-10 bg-white'>
-                    <SelectValue placeholder='Select Evaluator' />
+                <Label className='text-xs sm:text-sm text-slate-600'>Evaluator</Label>
+                <Select value={aiEvaluationType} onValueChange={setAiEvaluationType}>
+                  <SelectTrigger className='w-full text-xs sm:text-sm h-10'>
+                    <SelectValue placeholder='Select' />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value='none'>None (Manual Grading)</SelectItem>
-                    {evaluatorsList.map((ev) => (
-                      <SelectItem key={ev.id} value={ev.id}>
+                    {evaluators?.map((ev) => (
+                      <SelectItem key={ev.id} value={String(ev.id)}>
                         {ev.name}
                       </SelectItem>
                     ))}
@@ -837,25 +956,22 @@ export default function CreateAssignment() {
               </div>
 
               <div className='space-y-1.5'>
-                <Label className='text-xs sm:text-sm text-slate-600'>Weightage / Maximum Score</Label>
+                <Label className='text-xs sm:text-sm text-slate-600'>Weightage (%)</Label>
                 <Input
                   type='number'
                   placeholder='100'
                   value={weightage}
                   onChange={(e) => setWeightage(e.target.value)}
                   className='text-xs sm:text-sm h-10'
-                  min='1'
                 />
               </div>
             </div>
 
             {/* Plagiarism Check Toggle */}
-            <div className='flex items-center justify-between py-2 gap-3 border-t border-slate-100 pt-3'>
+            <div className='flex items-center justify-between py-2 gap-3'>
               <div className='min-w-0 flex-1'>
                 <p className='text-xs sm:text-sm font-medium text-slate-900'>Enable Plagiarism Check</p>
-                <p className='text-[10px] sm:text-xs text-slate-500'>
-                  AI will cross-check submissions for code and text similarity
-                </p>
+                <p className='text-[10px] sm:text-xs text-slate-500'>AI will cross-check submissions for similarity</p>
               </div>
               <Switch checked={enablePlagiarism} onCheckedChange={setEnablePlagiarism} />
             </div>
@@ -863,129 +979,511 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 3 — Test Cases Configuration (JSON / Spec)
+            SECTION 3 — Test Cases & Evaluation Rubrics
         ================================================================ */}
-        <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
-              <div className='flex items-center gap-2'>
-                <div className='w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600'>
-                  <Terminal className='w-4 h-4' />
+
+        {/* ─── Test Cases Card ─── */}
+        <Card className='border-none shadow-sm overflow-hidden bg-white'>
+          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <div className='w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-mono text-xs font-bold'>
+                    &gt;_
+                  </div>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Test Cases</CardTitle>
                 </div>
-                <div>
-                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-                    Test Cases (JSON / Spec)
-                  </CardTitle>
-                  <CardDescription className='text-xs text-slate-500'>
-                    Automated testing rules matching your selected evaluator
-                  </CardDescription>
-                </div>
+                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules matching your selected evaluator</p>
               </div>
 
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateTestCases}
-                disabled={generatingTestCases || !aiEvaluationType || aiEvaluationType === 'none'}
-                className='h-8 text-xs font-semibold bg-indigo-50/80 text-indigo-600 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-700 shadow-xs'
-              >
-                {generatingTestCases ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5 text-indigo-500' />
-                )}
-                ✨ Auto-Generate Test Cases
-              </Button>
+              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
+                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('json')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    JSON / Spec
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('builder')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Builder
+                  </button>
+                </div>
+
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateTestCases}
+                  disabled={generatingTestCases}
+                  className='h-8 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800 font-semibold gap-1.5 shadow-2xs'
+                >
+                  {generatingTestCases ? (
+                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-3.5 h-3.5 text-indigo-600' />
+                  )}
+                  Auto-Generate Test Cases
+                </Button>
+              </div>
             </div>
           </CardHeader>
 
-          <CardContent className='space-y-2 px-4 sm:px-6 pb-4 sm:pb-6'>
-            <textarea
-              value={testCases}
-              onChange={(e) => setTestCases(e.target.value)}
-              placeholder={`{\n  "evaluationMode": "script",\n  "expectedLogs": ["Hello World"]\n}`}
-              rows={7}
-              className='w-full rounded-xl border border-slate-200 p-3.5 font-mono text-xs sm:text-sm text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition'
-            />
-            <p className='text-[11px] text-slate-400'>
-              Note: For React, Fullstack, or Backend assignments, you can also paste JavaScript test
-              spec files directly. It will be packaged automatically upon save.
-            </p>
+          <CardContent className='p-4 sm:p-6 space-y-3'>
+            {testCaseViewMode === 'json' ? (
+              <div className='space-y-2'>
+                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all'>
+                  <textarea
+                    value={testCasesJson}
+                    onChange={(e) => setTestCasesJson(e.target.value)}
+                    rows={8}
+                    placeholder={`{\n  "evaluationMode": "script",\n  "expectedLogs": ["Hello World"]\n}`}
+                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
+                  />
+                </div>
+                <p className='text-[11px] text-slate-400'>
+                  Note: For React, Fullstack, or Backend assignments, you can also paste JavaScript test spec files directly. It will be packaged automatically upon save.
+                </p>
+              </div>
+            ) : (
+              <div className='space-y-3'>
+                <div className='flex items-center justify-between pb-1'>
+                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
+                    <span>Total:</span>
+                    <span className='text-indigo-600'>{totalTestCaseScore} Points</span>
+                  </div>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='gap-1.5 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 font-semibold'
+                    onClick={addTestCase}
+                  >
+                    <Plus className='w-3.5 h-3.5' /> Add Test Case
+                  </Button>
+                </div>
+
+                {testCases.length === 0 ? (
+                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
+                    <p className='text-xs text-slate-500'>No test cases added yet.</p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleGenerateTestCases}
+                      className='text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium'
+                    >
+                      <Sparkles className='w-3.5 h-3.5 mr-1 text-indigo-500' /> Auto-Generate with AI
+                    </Button>
+                  </div>
+                ) : (
+                  <div className='space-y-2.5'>
+                    {/* Desktop Column Headers */}
+                    <div className='hidden sm:grid sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+                      <span>Input (Arguments)</span>
+                      <span>Expected Output</span>
+                      <span className='text-center'>Score</span>
+                      <span></span>
+                    </div>
+
+                    {testCases.map((tc, idx) => (
+                      <div
+                        key={tc.id}
+                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
+                      >
+                        {/* Mobile Header */}
+                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
+                          <span className='text-xs font-semibold text-slate-700'>Test Case #{idx + 1}</span>
+                          <button
+                            type='button'
+                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                            onClick={() => removeTestCase(tc.id)}
+                            title='Delete test case'
+                          >
+                            <Trash2 className='w-4 h-4' />
+                          </button>
+                        </div>
+
+                        {/* Row Layout */}
+                        <div className='grid grid-cols-1 sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 items-center'>
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Input (Arguments)</span>
+                            <Input
+                              value={tc.input}
+                              onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 5, 10'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Expected Output</span>
+                            <Input
+                              value={tc.output}
+                              onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 15'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Score (pts)</span>
+                            <Input
+                              type='number'
+                              value={tc.score}
+                              onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
+                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              min={0}
+                            />
+                          </div>
+
+                          <div className='hidden sm:flex items-center justify-center'>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                              onClick={() => removeTestCase(tc.id)}
+                              title='Delete test case'
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ─── Evaluation Rubrics Card ─── */}
+        <Card className='border-none shadow-sm overflow-hidden bg-white'>
+          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <div className='w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold'>
+                    <ClipboardList className='w-4 h-4' />
+                  </div>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
+                </div>
+                <p className='text-xs text-slate-500 mt-0.5'>Weighted grading criteria for AI or manual grading</p>
+              </div>
+
+              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
+                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
+                  <button
+                    type='button'
+                    onClick={() => setRubricViewMode('json')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rubricViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    JSON
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setRubricViewMode('builder')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rubricViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Builder
+                  </button>
+                </div>
+
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateRubric}
+                  disabled={generatingRubric}
+                  className='h-8 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 font-semibold gap-1.5 shadow-2xs'
+                >
+                  {generatingRubric ? (
+                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-3.5 h-3.5 text-emerald-600' />
+                  )}
+                  Auto-Generate Rubric
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className='p-4 sm:p-6 space-y-3'>
+            {rubricViewMode === 'json' ? (
+              <div className='space-y-2'>
+                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-100 transition-all'>
+                  <textarea
+                    value={rubricJson}
+                    onChange={(e) => setRubricJson(e.target.value)}
+                    rows={8}
+                    placeholder={`[\n  {\n    "name": "Code Correctness",\n    "description": "Fulfills primary requirements and handles edge cases.",\n    "weight": 50\n  }\n]`}
+                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
+                  />
+                </div>
+                <p className='text-[11px] text-slate-400'>
+                  The sum of criteria weights should equal 100 for percentage-based grading.
+                </p>
+              </div>
+            ) : (
+              <div className='space-y-3'>
+                <div className='flex items-center justify-between pb-1'>
+                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
+                    <span>Total:</span>
+                    <span className='text-emerald-600'>{totalScore} Points</span>
+                  </div>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='gap-1.5 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 h-8 font-semibold'
+                    onClick={addRubric}
+                  >
+                    <Plus className='w-3.5 h-3.5' /> Add Criteria
+                  </Button>
+                </div>
+
+                {rubrics.length === 0 ? (
+                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
+                    <p className='text-xs text-slate-500'>No rubric criteria added yet.</p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleGenerateRubric}
+                      className='text-xs bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 font-medium'
+                    >
+                      <Sparkles className='w-3.5 h-3.5 mr-1 text-emerald-600' /> Auto-Generate Rubric with AI
+                    </Button>
+                  </div>
+                ) : (
+                  <div className='space-y-2.5'>
+                    {/* Desktop Column Headers */}
+                    <div className='hidden sm:grid sm:grid-cols-[1.2fr_2fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+                      <span>Criterion Name</span>
+                      <span>Description</span>
+                      <span className='text-center'>Max Score</span>
+                      <span></span>
+                    </div>
+
+                    {rubrics.map((rubric, idx) => (
+                      <div
+                        key={rubric.id}
+                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
+                      >
+                        {/* Mobile Header */}
+                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
+                          <span className='text-xs font-semibold text-slate-700'>Criterion #{idx + 1}</span>
+                          <button
+                            type='button'
+                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                            onClick={() => removeRubric(rubric.id)}
+                            title='Delete criterion'
+                          >
+                            <Trash2 className='w-4 h-4' />
+                          </button>
+                        </div>
+
+                        {/* Row Layout */}
+                        <div className='grid grid-cols-1 sm:grid-cols-[1.2fr_2fr_90px_36px] gap-2.5 items-center'>
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Criterion</span>
+                            <Input
+                              value={rubric.criteria}
+                              onChange={(e) => updateRubric(rubric.id, 'criteria', e.target.value)}
+                              className='text-xs font-semibold h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              placeholder='e.g. Code Structure'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Description</span>
+                            <Input
+                              value={rubric.description}
+                              onChange={(e) => updateRubric(rubric.id, 'description', e.target.value)}
+                              className='text-xs h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              placeholder='e.g. Fulfills primary requirements...'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Max Score</span>
+                            <Input
+                              type='number'
+                              value={rubric.maxScore}
+                              onChange={(e) => updateRubric(rubric.id, 'maxScore', Number(e.target.value))}
+                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              min={0}
+                            />
+                          </div>
+
+                          <div className='hidden sm:flex items-center justify-center'>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                              onClick={() => removeRubric(rubric.id)}
+                              title='Delete criterion'
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* ================================================================
-            SECTION 4 — Evaluation Rubrics Configuration (JSON)
-        ================================================================ */}
-        <Card className='border-none shadow-sm'>
-          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
-              <div className='flex items-center gap-2'>
-                <div className='w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600'>
-                  <ListChecks className='w-4 h-4' />
-                </div>
-                <div>
-                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-                    Evaluation Rubrics (JSON)
-                  </CardTitle>
-                  <CardDescription className='text-xs text-slate-500'>
-                    Weighted grading criteria for AI or manual grading
-                  </CardDescription>
-                </div>
-              </div>
-
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateRubric}
-                disabled={generatingRubric || !aiEvaluationType || aiEvaluationType === 'none'}
-                className='h-8 text-xs font-semibold bg-emerald-50/80 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 shadow-xs'
-              >
-                {generatingRubric ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5 text-emerald-600' />
-                )}
-                ✨ Auto-Generate Rubric
-              </Button>
-            </div>
-          </CardHeader>
-
-          <CardContent className='space-y-2 px-4 sm:px-6 pb-4 sm:pb-6'>
-            <textarea
-              value={rubric}
-              onChange={(e) => setRubric(e.target.value)}
-              placeholder={`[\n  {\n    "name": "Code Correctness",\n    "description": "Fulfills primary requirements and handles edge cases.",\n    "weight": 50\n  }\n]`}
-              rows={7}
-              className='w-full rounded-xl border border-slate-200 p-3.5 font-mono text-xs sm:text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition'
-            />
-            <p className='text-[11px] text-slate-400'>
-              The sum of criteria weights should equal 100 for percentage-based grading.
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* ================================================================
-            SECTION 5 — Submission Settings
+            SECTION 4 — Submission Settings
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-              Submission Settings
-            </CardTitle>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
+              <div>
+                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Allowed Submission Methods</CardTitle>
+                <p className='text-xs text-slate-500 mt-0.5'>Choose which formats learners can submit for this assignment</p>
+              </div>
+              <div className='flex items-center gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={selectAllSubmissionTypes}
+                  className='text-xs h-8 text-blue-600 border-blue-200 hover:bg-blue-50'
+                >
+                  Select All
+                </Button>
+              </div>
+            </div>
           </CardHeader>
 
-          <CardContent className='space-y-1 px-4 sm:px-6 pb-4 sm:pb-6'>
-            <div className='flex items-center justify-between py-2.5 sm:py-3 gap-3'>
-              <div className='min-w-0 flex-1'>
-                <p className='text-xs sm:text-sm font-medium text-slate-900'>Allow GitHub Link</p>
-                <p className='text-[10px] sm:text-xs text-slate-500'>
-                  Students can submit a GitHub repository URL or commit
-                </p>
-              </div>
-              <Switch checked={allowGithubLink} onCheckedChange={setAllowGithubLink} />
+          <CardContent className='px-4 sm:px-6 pb-4 sm:pb-6'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2'>
+              {[
+                {
+                  id: 'file',
+                  title: 'Document / File Upload',
+                  desc: 'Direct file upload: PDF, DOCX, XLSX, TXT, ZIP',
+                  iconBg: 'bg-blue-50 text-blue-600 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <path d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z' />
+                      <polyline points='14 2 14 8 20 8' />
+                      <path d='M12 18v-6' />
+                      <path d='M9 15l3-3 3 3' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'github',
+                  title: 'GitHub / Git Repository',
+                  desc: 'Public code repository: GitHub, GitLab, Bitbucket',
+                  iconBg: 'bg-slate-900 text-white border-slate-800',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='currentColor'>
+                      <path fillRule='evenodd' clipRule='evenodd' d='M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'docs',
+                  title: 'Google Docs / Office 365',
+                  desc: 'Cloud document links with sharing permissions',
+                  iconBg: 'bg-blue-50 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#4285F4' />
+                      <path d='M14 2V8H20L14 2Z' fill='#A1C2FA' />
+                      <path d='M8 12.5H16M8 16.5H13' stroke='white' strokeWidth='1.5' strokeLinecap='round' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'figma',
+                  title: 'Figma Design / Prototype',
+                  desc: 'Figma files, interactive prototypes, or FigJam boards',
+                  iconBg: 'bg-purple-50 border-purple-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 38 57' fill='none'>
+                      <path d='M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z' fill='#1ABCFE' />
+                      <path d='M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z' fill='#0ACF83' />
+                      <path d='M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z' fill='#FF7262' />
+                      <path d='M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z' fill='#F24E1E' />
+                      <path d='M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z' fill='#A259FF' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'excel',
+                  title: 'Google Sheets / Excel Online',
+                  desc: 'Cloud spreadsheets for data and financial models',
+                  iconBg: 'bg-emerald-50 border-emerald-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#0F9D58' />
+                      <path d='M14 2V8H20L14 2Z' fill='#87CEAC' />
+                      <rect x='7.5' y='11.5' width='9' height='7' rx='0.5' stroke='white' strokeWidth='1.2' fill='none' />
+                      <path d='M7.5 14H16.5M12 11.5V18.5' stroke='white' strokeWidth='1.2' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'url',
+                  title: 'General URL / Live App',
+                  desc: 'Deployed web applications, portfolios, or external links',
+                  iconBg: 'bg-amber-50 text-amber-600 border-amber-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <circle cx='12' cy='12' r='10' />
+                      <line x1='2' y1='12' x2='22' y2='12' />
+                      <path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' />
+                    </svg>
+                  ),
+                },
+              ].map((item) => {
+                const isSelected = allowedSubmissionTypes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => toggleSubmissionType(item.id)}
+                    className={`relative flex items-start gap-3 p-3.5 rounded-xl border-2 transition-all cursor-pointer select-none ${
+                      isSelected
+                        ? 'border-blue-600 bg-blue-50/40 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-slate-300 opacity-60 hover:opacity-80'
+                    }`}
+                  >
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-xs ${item.iconBg}`}>
+                      {item.renderIcon()}
+                    </div>
+                    <div className='flex-1 min-w-0'>
+                      <div className='flex items-center justify-between gap-1'>
+                        <h4 className='text-xs sm:text-sm font-semibold text-slate-900 truncate'>{item.title}</h4>
+                        <div
+                          className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                            isSelected ? 'bg-blue-600 text-white' : 'border border-slate-300'
+                          }`}
+                        >
+                          {isSelected && <Check className='w-2.5 h-2.5 stroke-[3]' />}
+                        </div>
+                      </div>
+                      <p className='text-[11px] text-slate-500 leading-tight mt-0.5'>{item.desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -1004,27 +1502,19 @@ export default function CreateAssignment() {
 
           <div className='flex items-center gap-2.5'>
             <Button
-              type='button'
               variant='outline'
-              className='flex-1 sm:flex-none px-6 h-10 text-xs sm:text-sm'
-              onClick={() => navigate(managementPath)}
+              className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
+              onClick={() => navigate(`${basePath}/assignment-management`)}
             >
               Cancel
             </Button>
             <Button
-              type='button'
-              className='flex-1 sm:flex-none px-6 bg-blue-600 hover:bg-blue-700 h-10 text-xs sm:text-sm shadow-xs font-semibold'
+              className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm font-semibold'
               onClick={handleCreate}
               disabled={submitting}
             >
               {submitting && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}
-              {submitting
-                ? editId
-                  ? 'Updating...'
-                  : 'Creating...'
-                : editId
-                  ? 'Update Assignment'
-                  : 'Create Assignment'}
+              {submitting ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update Assignment' : 'Create Assignment')}
             </Button>
           </div>
         </div>
@@ -1040,8 +1530,26 @@ export default function CreateAssignment() {
           max_score: Number(weightage) || 100,
           evaluator_type:
             !aiEvaluationType || aiEvaluationType === 'none' ? null : aiEvaluationType,
-          test_cases: previewTestCasesObj,
-          rubric: previewRubricObj,
+          test_cases:
+            testCaseViewMode === 'json' && testCasesJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(testCasesJson);
+                  } catch {
+                    return testCasesJson;
+                  }
+                })()
+              : testCases,
+          rubric:
+            rubricViewMode === 'json' && rubricJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(rubricJson);
+                  } catch {
+                    return rubricJson;
+                  }
+                })()
+              : rubrics,
           subject_title: availableCourses.find((c) => c.value === course)?.label || course,
         }}
       />

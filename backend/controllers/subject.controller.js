@@ -314,7 +314,8 @@ exports.getCourseStructure = async (req, res) => {
         p.max_score AS capstone_max_score,
         p.evaluator_type AS capstone_evaluator_type,
         p.rubric AS capstone_rubric,
-        p.test_cases AS capstone_test_cases
+        p.test_cases AS capstone_test_cases,
+        p.allowed_submission_types AS capstone_allowed_submission_types
 
       FROM topics t
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
@@ -341,6 +342,18 @@ exports.getCourseStructure = async (req, res) => {
     // 3. Build hierarchy safely
     const topicsMap = new Map();
 
+    const parseSubmissionTypes = (val) => {
+      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (Array.isArray(val) && val.length > 0) return val;
+      if (typeof val === 'string') {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch {}
+      }
+      return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    };
+
     rows.forEach((row) => {
       // Topic
       if (!topicsMap.has(row.topic_id)) {
@@ -358,6 +371,7 @@ exports.getCourseStructure = async (req, res) => {
                 evaluator_type: row.capstone_evaluator_type,
                 rubric: row.capstone_rubric,
                 test_cases: row.capstone_test_cases,
+                allowed_submission_types: parseSubmissionTypes(row.capstone_allowed_submission_types),
               }
             : null,
           units: new Map(),

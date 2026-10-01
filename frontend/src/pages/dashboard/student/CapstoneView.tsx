@@ -1,34 +1,61 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   Loader2,
   XCircle,
   Trophy,
   CheckCircle2,
-  Link2,
   ArrowRight,
   PartyPopper,
   Eye,
   Sparkles,
+  Upload,
+  FileText,
+  ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
-import type { StudentAssignmentOverviewItem } from '@/utils/types';
+import type { StudentAssignmentOverviewItem, SubmissionType } from '@/utils/types';
+import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
+import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
+import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
+
+const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: string }> = {
+  file: { pattern: /.+/, example: 'Any uploaded file' },
+  github: {
+    pattern: /^https?:\/\/(www\.)?(github\.com|gitlab\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/i,
+    example: 'https://github.com/username/repository',
+  },
+  docs: {
+    pattern: /^https?:\/\/(docs\.google\.com\/(document|presentation)|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
+    example: 'https://docs.google.com/document/d/...',
+  },
+  figma: {
+    pattern: /^https?:\/\/(www\.)?figma\.com\/(file|design|proto|board)\/[A-Za-z0-9]+/i,
+    example: 'https://www.figma.com/design/... or https://www.figma.com/proto/...',
+  },
+  excel: {
+    pattern: /^https?:\/\/(docs\.google\.com\/spreadsheets|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
+    example: 'https://docs.google.com/spreadsheets/d/...',
+  },
+  url: {
+    pattern: /^https?:\/\/.+/i,
+    example: 'https://your-deployed-app.vercel.app',
+  },
+};
 
 /* =======================
    Course-wide "next item" navigation
-   (mirrors the flattening logic in Lesson.tsx/AssignmentView.tsx, scoped
-   here since CapstoneView is a separate route/component)
 ======================= */
 
 type FlatItem =
@@ -72,8 +99,15 @@ interface CapstoneDetail {
   instructions?: string | null;
   max_score: number;
   evaluator_type?: string | null;
+  rubric?: any;
+  test_cases?: any;
+  allowed_submission_types?: SubmissionType[];
+  submission_type?: SubmissionType | null;
   submission_link?: string | null;
+  submission_file_url?: string | null;
+  submission_file_name?: string | null;
   submitted_at?: string | null;
+  updated_at?: string | null;
   is_approved?: boolean | null;
   score?: number | null;
   rubric_breakdown?: any;
@@ -89,9 +123,13 @@ export default function CapstoneView() {
   const [error, setError] = useState(false);
   const [courseStructure, setCourseStructure] = useState<any[]>([]);
 
+  const [activeType, setActiveType] = useState<SubmissionType>('github');
   const [link, setLink] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const overviewItem: StudentAssignmentOverviewItem | null = useMemo(() => {
     if (!capstone || capstone.score === null || capstone.score === undefined) return null;
@@ -142,9 +180,7 @@ export default function CapstoneView() {
     if (nextItem) {
       navigate(buildItemUrl(slug, nextItem));
     } else {
-      fireConfetti();
-      toast.success('🎉 Course completed! Great work!');
-      setTimeout(() => navigate(`/dashboard/student/courses/${slug}`), 800);
+      navigate(`/dashboard/student/courses/${slug}`);
     }
   };
 
@@ -161,7 +197,12 @@ export default function CapstoneView() {
         }>(`/students/capstone/${projectId}`);
         const data = res.data.data;
         setCapstone(data);
-        if (data.submission_link) setLink(data.submission_link);
+        if (data.submission_type) {
+          setActiveType(data.submission_type);
+        }
+        if (data.submission_link) {
+          setLink(data.submission_link);
+        }
       } catch {
         setError(true);
       } finally {
@@ -172,34 +213,123 @@ export default function CapstoneView() {
     fetchCapstone();
   }, [projectId]);
 
-  const handleSubmit = async () => {
-    if (!link.trim()) {
-      toast.error('Please enter a submission link');
+  const allowedTypes: SubmissionType[] = useMemo(() => {
+    const raw = capstone?.allowed_submission_types;
+    if (!raw) return ALL_SUBMISSION_TYPES;
+    if (Array.isArray(raw) && raw.length > 0) return raw as SubmissionType[];
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as SubmissionType[];
+      } catch {}
+    }
+    return ALL_SUBMISSION_TYPES;
+  }, [capstone?.allowed_submission_types]);
+
+  useEffect(() => {
+    if (capstone?.submission_type && allowedTypes.includes(capstone.submission_type)) {
+      setActiveType(capstone.submission_type);
+    } else if (allowedTypes.length > 0 && !allowedTypes.includes(activeType)) {
+      setActiveType(allowedTypes[0]);
+    }
+  }, [allowedTypes, capstone?.submission_type]);
+
+  const handleTypeSelect = (type: SubmissionType) => {
+    setActiveType(type);
+    setUrlValidationError(null);
+    if (capstone?.submission_type === type && capstone.submission_link) {
+      setLink(capstone.submission_link);
+    } else {
+      setLink('');
+    }
+  };
+
+  const handleUrlChange = (value: string) => {
+    setLink(value);
+    if (!value.trim()) {
+      setUrlValidationError(null);
       return;
     }
-    try {
-      new URL(link.trim());
-    } catch {
-      toast.error('Please enter a valid URL');
-      return;
+    const validator = SUBMISSION_REGEX[activeType];
+    if (validator && !validator.pattern.test(value.trim())) {
+      setUrlValidationError(`Invalid format. Example: ${validator.example}`);
+    } else {
+      setUrlValidationError(null);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error('File size must be under 25MB');
+        return;
+      }
+      setSelectedFile(file);
+    }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error('File size must be under 25MB');
+        return;
+      }
+      setSelectedFile(file);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (activeType === 'file') {
+      if (!selectedFile && !capstone?.submission_file_url) {
+        toast.error('Please select a file to upload');
+        return;
+      }
+    } else {
+      if (!link.trim()) {
+        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        return;
+      }
+      const validator = SUBMISSION_REGEX[activeType];
+      if (validator && !validator.pattern.test(link.trim())) {
+        toast.error(`Invalid URL format. Example: ${validator.example}`);
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
-      const res = await apiClient.post<{
-        success: boolean;
-        data: { submission_link: string; submitted_at: string };
-      }>(`/students/capstone/${projectId}/submit`, {
-        submission_link: link.trim(),
-      });
+      let res;
+      if (activeType === 'file' && selectedFile) {
+        const formData = new FormData();
+        formData.append('submission_type', 'file');
+        formData.append('submission_file', selectedFile);
+        res = await apiClient.post<{
+          success: boolean;
+          data: CapstoneDetail;
+        }>(`/students/capstone/${projectId}/submit`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } else {
+        res = await apiClient.post<{
+          success: boolean;
+          data: CapstoneDetail;
+        }>(`/students/capstone/${projectId}/submit`, {
+          submission_type: activeType,
+          submission_link: activeType === 'file' ? null : link.trim(),
+        });
+      }
       setCapstone((prev) => (prev ? { ...prev, ...res.data.data } : prev));
-      toast.success('Capstone submitted! +20 XP');
+      toast.success(isSubmitted ? 'Capstone resubmitted successfully!' : 'Capstone submitted! +20 XP');
+      fireConfetti();
       notifyCourseProgressUpdated();
+      setSelectedFile(null);
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit capstone'));
     } finally {
       setSubmitting(false);
-      setLink('');
     }
   };
 
@@ -240,7 +370,8 @@ export default function CapstoneView() {
     );
   }
 
-  const isSubmitted = Boolean(capstone.submission_link);
+  const isSubmitted = Boolean(capstone.submission_link || capstone.submission_file_url);
+  const currentTypeConfig = SUBMISSION_TYPE_CONFIGS[activeType] || SUBMISSION_TYPE_CONFIGS.github;
 
   return (
     <div className='mx-auto max-w-4xl space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-10'>
@@ -248,15 +379,18 @@ export default function CapstoneView() {
       <header className='space-y-3'>
         <div className='flex items-start gap-3'>
           <Trophy className='h-6 w-6 sm:h-7 sm:w-7 text-amber-500 shrink-0 mt-1' />
-          <h1 className='text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900'>
-            {capstone.title}
-          </h1>
+          <div>
+            <h1 className='text-xl sm:text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight'>
+              {capstone.title}
+            </h1>
+            <p className='text-xs sm:text-sm text-slate-500 mt-1'>
+              Topic Capstone Deliverable
+            </p>
+          </div>
         </div>
-        <div className='flex flex-wrap gap-1.5 sm:gap-2'>
-          <Badge className='bg-amber-50 text-amber-700 border border-amber-200 text-xs'>
-            Capstone Project
-          </Badge>
-          <Badge className='bg-slate-100 text-slate-600 border border-slate-200 text-xs'>
+
+        <div className='flex flex-wrap items-center gap-2 pt-1'>
+          <Badge className='bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold'>
             +{capstone.max_score} XP
           </Badge>
           {isSubmitted && (
@@ -302,6 +436,20 @@ export default function CapstoneView() {
         </div>
       </Card>
 
+      {/* Grading Rubric */}
+      {capstone.rubric && (
+        <AssignmentRubricsViewer rubric={capstone.rubric} maxScore={capstone.max_score} />
+      )}
+
+      {/* Test Cases */}
+      {capstone.test_cases && (
+        <AssignmentTestCasesViewer
+          testCases={capstone.test_cases}
+          evaluatorType={capstone.evaluator_type}
+          isStaff={false}
+        />
+      )}
+
       {/* Evaluation Results Card (when project is scored/evaluated) */}
       {overviewItem && (
         <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-emerald-200/80 shadow-sm'>
@@ -338,7 +486,7 @@ export default function CapstoneView() {
         </Card>
       )}
 
-      {/* Submission */}
+      {/* Submission Card */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm'>
         <div className='bg-slate-50 px-4 sm:px-6 py-3.5 sm:py-4'>
           <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
@@ -346,42 +494,183 @@ export default function CapstoneView() {
           </p>
           <p className='text-xs sm:text-sm text-slate-600 mt-0.5'>
             {isSubmitted
-              ? 'Already submitted — submit again to update your link'
-              : 'Paste the link to your completed project'}
+              ? 'Already submitted — choose a method below to resubmit or update your deliverable'
+              : 'Choose an accepted submission method and deliver your work'}
           </p>
         </div>
-        <div className='bg-white px-4 py-6 sm:px-6 sm:py-8 space-y-4'>
-          {isSubmitted && (
-            <div className='flex items-center gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100 text-xs sm:text-sm'>
-              <CheckCircle2 className='h-4 w-4 text-emerald-600 shrink-0' />
-              <span className='text-emerald-700 font-medium'>
-                Submitted on{' '}
-                {new Date(capstone.submitted_at!).toLocaleDateString('en-US', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
+
+        <div className='bg-white px-4 py-5 sm:px-8 sm:py-6 space-y-4'>
+          {/* Method Tabs if multiple options allowed */}
+          {allowedTypes.length > 1 && (
+            <div className='space-y-1.5'>
+              <p className='text-xs font-medium text-slate-500'>Choose submission method:</p>
+              <div className='grid grid-cols-2 sm:grid-cols-3 gap-1.5 bg-slate-100 p-1.5 rounded-xl'>
+                {allowedTypes.map((type) => {
+                  const cfg = SUBMISSION_TYPE_CONFIGS[type];
+                  const isSelected = activeType === type;
+                  return (
+                    <button
+                      key={type}
+                      type='button'
+                      onClick={() => handleTypeSelect(type)}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#333D7C] text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                    >
+                      <span>{cfg.emoji}</span>
+                      <span className='truncate'>{cfg.shortLabel}</span>
+                    </button>
+                  );
                 })}
-              </span>
+              </div>
             </div>
           )}
 
-          <div className='flex flex-col sm:flex-row gap-3'>
-            <div className='relative flex-1'>
-              <Link2 className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400' />
-              <Input
-                type='url'
-                placeholder='https://github.com/your-capstone-project'
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                className='pl-9 h-11 text-sm'
-              />
+          {/* Cloud Permissions Warning */}
+          {currentTypeConfig.requiresPermissionsWarning && (
+            <div className='flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs'>
+              <AlertTriangle className='w-4 h-4 text-amber-600 shrink-0 mt-0.5' />
+              <div>
+                <span className='font-semibold'>Sharing Permission Notice:</span> Ensure your link is set to{' '}
+                <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> so instructors can grade your deliverable.
+              </div>
             </div>
+          )}
+
+          {/* Input Area Based on Selected Method */}
+          {activeType === 'file' ? (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onDrop}
+              className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center space-y-3 transition-all group cursor-pointer ${
+                selectedFile
+                  ? 'border-emerald-400 bg-emerald-50/50'
+                  : 'border-slate-200 hover:border-amber-500 hover:bg-slate-50/50'
+              }`}
+            >
+              <input
+                type='file'
+                className='hidden'
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar'
+              />
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-transform group-hover:scale-110 ${
+                  selectedFile ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
+                }`}
+              >
+                <Upload className='w-5 h-5' />
+              </div>
+              <div className='space-y-1'>
+                <p className='text-xs sm:text-sm font-semibold text-slate-800 break-all'>
+                  {selectedFile
+                    ? selectedFile.name
+                    : capstone.submission_file_name
+                    ? `Current: ${capstone.submission_file_name}`
+                    : 'Click to upload or drag and drop your deliverable'}
+                </p>
+                <p className='text-[11px] sm:text-xs text-slate-400'>
+                  {selectedFile
+                    ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`
+                    : 'PDF, DOCX, XLSX, PPTX, ZIP (Max 25MB)'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className='space-y-2'>
+              <div className='relative'>
+                <div className='absolute left-3.5 top-3.5 text-lg select-none'>
+                  {currentTypeConfig.emoji}
+                </div>
+                <textarea
+                  value={link}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder={currentTypeConfig.placeholder}
+                  className={`w-full rounded-2xl border-2 px-11 py-3 text-xs sm:text-sm outline-none transition-all placeholder:text-slate-300 min-h-24 resize-none ${
+                    urlValidationError
+                      ? 'border-red-300 bg-red-50/20 focus:border-red-500'
+                      : 'border-slate-100 focus:border-amber-500'
+                  }`}
+                />
+              </div>
+              {urlValidationError ? (
+                <p className='text-xs text-red-500 font-medium px-1 flex items-center gap-1'>
+                  <span>⚠️</span> {urlValidationError}
+                </p>
+              ) : (
+                <p className='text-[11px] text-slate-400 italic px-1'>
+                  {currentTypeConfig.helperText}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Active Deliverable Summary */}
+          {isSubmitted && (
+            <div className='p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1.5'>
+              <div className='flex items-center justify-between text-xs text-slate-500'>
+                <span className='font-medium'>
+                  {capstone.updated_at && capstone.submitted_at && new Date(capstone.updated_at).getTime() > new Date(capstone.submitted_at).getTime() + 1000
+                    ? 'Last Updated:'
+                    : 'Submitted On:'}
+                </span>
+                <span>
+                  {capstone.updated_at || capstone.submitted_at
+                    ? new Date(capstone.updated_at || capstone.submitted_at!).toLocaleString()
+                    : 'Recently'}
+                </span>
+              </div>
+              {capstone.submission_type && (
+                <div className='flex items-center justify-between text-xs text-slate-500'>
+                  <span className='font-medium'>Submitted Via:</span>
+                  <span className='font-semibold text-slate-700 capitalize flex items-center gap-1'>
+                    <span>{SUBMISSION_TYPE_CONFIGS[capstone.submission_type]?.emoji || '📄'}</span>
+                    <span>{SUBMISSION_TYPE_CONFIGS[capstone.submission_type]?.label || capstone.submission_type}</span>
+                  </span>
+                </div>
+              )}
+              {capstone.submission_link && (
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-slate-500 truncate'>Link:</span>
+                  <a
+                    href={capstone.submission_link}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='text-amber-600 hover:underline font-semibold flex items-center gap-1 truncate'
+                  >
+                    <span className='truncate max-w-[280px] sm:max-w-md'>{capstone.submission_link}</span>
+                    <ExternalLink className='w-3 h-3 shrink-0' />
+                  </a>
+                </div>
+              )}
+              {capstone.submission_file_url && (
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-slate-500'>File:</span>
+                  <a
+                    href={capstone.submission_file_url}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='text-amber-600 hover:underline font-semibold flex items-center gap-1'
+                  >
+                    <FileText className='w-3 h-3' />
+                    <span className='truncate'>{capstone.submission_file_name || 'Download Deliverable'}</span>
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className='flex justify-end pt-2'>
             <Button
               onClick={handleSubmit}
               loading={submitting}
-              className='bg-amber-500 hover:bg-amber-600 shrink-0 h-11 px-6 font-semibold w-full sm:w-auto min-h-[44px]'
+              className='bg-amber-500 hover:bg-amber-600 text-white h-11 px-8 font-semibold w-full sm:w-auto shadow-sm cursor-pointer'
             >
-              {isSubmitted ? 'Update' : 'Submit'}
+              {isSubmitted ? 'Update Submission' : 'Submit Capstone Project'}
             </Button>
           </div>
         </div>

@@ -146,13 +146,27 @@ exports.getCoursesForAssignment = async (req, res) => {
 exports.getTopicsForCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const query = `
-      SELECT id as value, title as label
-      FROM topics
-      WHERE subject_id = $1 AND is_deleted = false
-      ORDER BY order_index ASC
-    `;
-    const result = await pool.query(query, [courseId]);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId);
+    let query, params;
+    if (isUuid) {
+      query = `
+        SELECT id as value, title as label
+        FROM topics
+        WHERE subject_id = $1 AND is_deleted = false
+        ORDER BY order_index ASC
+      `;
+      params = [courseId];
+    } else {
+      query = `
+        SELECT t.id as value, t.title as label
+        FROM topics t
+        JOIN subjects s ON s.id = t.subject_id
+        WHERE (s.name ILIKE $1 OR s.slug ILIKE $1) AND t.is_deleted = false
+        ORDER BY t.order_index ASC
+      `;
+      params = [courseId];
+    }
+    const result = await pool.query(query, params);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('getTopicsForCourse error:', error);
@@ -210,8 +224,9 @@ exports.getMyCollegeAssignments = async (req, res) => {
               ca.course AS raw_course,
               ca.instruction_file_url, ca.instruction_file_name,
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
+              ca.allowed_submission_types,
               u.full_name AS created_by_name,
-              cas.submission_link, cas.submission_file_url, cas.submitted_at
+              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at, cas.updated_at
        FROM college_assignments ca
        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
@@ -242,9 +257,10 @@ exports.manageAssignments = async (req, res) => {
         SELECT ca.id, ca.title, ca.description, ca.due_date,
                COALESCE(s.name, ca.course) AS course,
                ca.course AS raw_course,
-               ca.created_at, ca.updated_at,
+               ca.topic_id, ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
                ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
+               ca.allowed_submission_types,
                ca.college_id, c.name AS college_name,
                u.full_name AS created_by_name,
                (
@@ -304,9 +320,10 @@ exports.manageAssignments = async (req, res) => {
         SELECT ca.id, ca.title, ca.description, ca.due_date,
                COALESCE(s.name, ca.course) AS course,
                ca.course AS raw_course,
-               ca.created_at, ca.updated_at,
+               ca.topic_id, ca.created_at, ca.updated_at,
                ca.instruction_file_url, ca.instruction_file_name,
                ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
+               ca.allowed_submission_types,
                ca.college_id, c.name AS college_name,
                u.full_name AS created_by_name,
                (
@@ -404,6 +421,7 @@ exports.createAssignment = async (req, res) => {
     rubric,
     evaluator_type,
     assignment_description,
+    allowed_submission_types,
   } = req.body;
 
   const targetCollegeIds = Array.isArray(college_ids)
@@ -455,6 +473,11 @@ exports.createAssignment = async (req, res) => {
     }
   }
 
+  const submissionTypesJson =
+    allowed_submission_types && Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0
+      ? JSON.stringify(allowed_submission_types)
+      : JSON.stringify(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -462,8 +485,8 @@ exports.createAssignment = async (req, res) => {
 
     for (const cid of targetCollegeIds) {
       const { rows } = await client.query(
-        `INSERT INTO college_assignments (college_id, created_by, title, description, due_date, course, topic_id, instruction_file_url, instruction_file_name, test_cases, rubric, evaluator_type, assignment_description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO college_assignments (college_id, created_by, title, description, due_date, course, topic_id, instruction_file_url, instruction_file_name, test_cases, rubric, evaluator_type, assignment_description, allowed_submission_types)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING *`,
         [
           cid,
@@ -479,6 +502,7 @@ exports.createAssignment = async (req, res) => {
           formatJsonField(rubric, null),
           evaluator_type || null,
           assignment_description || null,
+          submissionTypesJson,
         ],
       );
       const assignment = rows[0];
@@ -538,6 +562,7 @@ exports.updateAssignment = async (req, res) => {
     rubric,
     evaluator_type,
     assignment_description,
+    allowed_submission_types,
   } = req.body;
 
   try {
@@ -619,8 +644,9 @@ exports.updateAssignment = async (req, res) => {
            rubric                = COALESCE($9, rubric),
            evaluator_type        = COALESCE($10, evaluator_type),
            assignment_description= COALESCE($11, assignment_description),
+           allowed_submission_types = COALESCE($12, allowed_submission_types),
            updated_at  = NOW()
-       WHERE id = $12
+       WHERE id = $13
        RETURNING *`,
       [
         title || null,
@@ -634,6 +660,7 @@ exports.updateAssignment = async (req, res) => {
         rubric !== undefined ? formatJsonField(rubric, null) : null,
         evaluator_type || null,
         assignment_description || null,
+        allowed_submission_types ? JSON.stringify(allowed_submission_types) : null,
         id,
       ],
     );
@@ -728,15 +755,16 @@ exports.getCollegeAssignmentById = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT ca.id, ca.title, ca.description, ca.due_date, ca.created_at,
+      `SELECT ca.id, ca.college_id, c.name AS college_name, ca.title, ca.description, ca.due_date, ca.created_at,
               COALESCE(s.name, ca.course) AS course,
               ca.course AS raw_course,
-              ca.instruction_file_url, ca.instruction_file_name,
+              ca.topic_id, ca.instruction_file_url, ca.instruction_file_name,
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
-              ca.college_id, ca.created_by,
+              ca.allowed_submission_types, ca.created_by,
               u.full_name AS created_by_name,
-              cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at
+              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at, cas.updated_at
        FROM college_assignments ca
+       LEFT JOIN colleges c ON c.id = ca.college_id
        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
        LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $2
@@ -834,54 +862,95 @@ exports.getCollegeAssignmentById = async (req, res) => {
 // POST /api/v1/college-assignments/:id/submit
 exports.submitCollegeAssignment = async (req, res) => {
   const { id } = req.params;
-  const { submission_link } = req.body || {};
+  const { submission_link, submission_type = 'file' } = req.body || {};
   const student_id = req.user.id;
 
   try {
-    // 1. Verify existence
-    const assignment = await pool.query(
-      'SELECT id FROM college_assignments WHERE id = $1 AND is_deleted = false',
+    // 1. Verify existence and allowed submission types
+    const assignmentRes = await pool.query(
+      'SELECT id, college_id, allowed_submission_types FROM college_assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
-    if (!assignment.rowCount) {
+    if (!assignmentRes.rowCount) {
       return res
         .status(404)
         .json({ success: false, message: 'Assignment not found' });
     }
 
-    if (!req.file && !submission_link) {
+    const assignment = assignmentRes.rows[0];
+
+    // Authorization: Verify student belongs to this assignment's college
+    if (req.user.role === 'student') {
+      const studentProfile = await pool.query(
+        'SELECT college_id FROM student_profiles WHERE user_id = $1',
+        [student_id],
+      );
+      const studentCollegeId = studentProfile.rows[0]?.college_id;
+      if (!studentCollegeId || String(studentCollegeId) !== String(assignment.college_id)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: Assignment does not belong to your college',
+        });
+      }
+    }
+
+    const allowed = Array.isArray(assignment.allowed_submission_types) && assignment.allowed_submission_types.length > 0
+      ? assignment.allowed_submission_types
+      : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+
+    if (!allowed.includes(submission_type)) {
       return res.status(400).json({
         success: false,
-        message: 'A submission_link or a file is required',
+        message: `Submission type '${submission_type}' is not allowed for this assignment`,
       });
     }
 
     let file_url = null;
     let file_name = null;
 
-    // 2. Handle file upload if present
-    if (req.file) {
-      const { url, name } = await storeFile(req.file, {
+    if (submission_type === 'file') {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please upload a document file',
+        });
+      }
+      const stored = await storeFile(req.file, {
         s3KeyPrefix: 'college-submissions',
         localSubPath: 'submissions',
       });
-      file_url = url;
-      file_name = name;
+      file_url = stored.url;
+      file_name = stored.name;
+    } else {
+      if (!submission_link || !submission_link.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid submission link',
+        });
+      }
     }
 
-    // 3. Upsert submission
+    // 2. Atomic Upsert with Mutually-Exclusive Channel Overwrites
     const { rows } = await pool.query(
       `INSERT INTO college_assignment_submissions
-       (assignment_id, student_id, submission_link, submission_file_url, submission_file_name, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
+       (assignment_id, student_id, submission_type, submission_link, submission_file_url, submission_file_name, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
        ON CONFLICT (assignment_id, student_id)
        DO UPDATE SET
-         submission_link = COALESCE(EXCLUDED.submission_link, college_assignment_submissions.submission_link),
-         submission_file_url = COALESCE(EXCLUDED.submission_file_url, college_assignment_submissions.submission_file_url),
-         submission_file_name = COALESCE(EXCLUDED.submission_file_name, college_assignment_submissions.submission_file_name),
+         submission_type = EXCLUDED.submission_type,
+         submission_link = CASE WHEN EXCLUDED.submission_type = 'file' THEN NULL ELSE EXCLUDED.submission_link END,
+         submission_file_url = CASE WHEN EXCLUDED.submission_type = 'file' THEN EXCLUDED.submission_file_url ELSE NULL END,
+         submission_file_name = CASE WHEN EXCLUDED.submission_type = 'file' THEN EXCLUDED.submission_file_name ELSE NULL END,
          updated_at = NOW()
        RETURNING *`,
-      [id, student_id, submission_link || null, file_url, file_name],
+      [
+        id,
+        student_id,
+        submission_type,
+        submission_type === 'file' ? null : submission_link.trim(),
+        file_url,
+        file_name,
+      ],
     );
 
     logAction({
@@ -889,7 +958,7 @@ exports.submitCollegeAssignment = async (req, res) => {
       action: 'CREATE',
       entityType: 'college_assignment_submission',
       entityId: id,
-      details: { submission_link },
+      details: { submission_type, submission_link },
     });
 
     markActionToday(student_id);
@@ -946,7 +1015,10 @@ exports.getAssignmentSubmissions = async (req, res) => {
       const result = await pool.query(
         `SELECT
            asub.id,
+           asub.submission_type,
            asub.submission_link,
+           asub.submission_file_url,
+           asub.submission_file_name,
            asub.submitted_at,
            u.full_name  AS student_name,
            u.email      AS student_email,
@@ -1037,6 +1109,7 @@ exports.getAssignmentSubmissions = async (req, res) => {
         const result = await pool.query(
           `SELECT
              cas.id,
+             cas.submission_type,
              cas.submission_link,
              cas.submission_file_url,
              cas.submission_file_name,

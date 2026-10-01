@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
 import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
+import type { SubmissionType } from '@/utils/types';
 
 export interface AssignmentPreviewData {
   id?: string;
@@ -25,6 +26,7 @@ export interface AssignmentPreviewData {
   evaluator_type?: string | null;
   test_cases?: any;
   rubric?: any;
+  allowed_submission_types?: SubmissionType[];
   unit_title?: string;
   subject_title?: string;
 }
