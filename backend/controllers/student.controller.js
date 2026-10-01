@@ -2979,8 +2979,8 @@ exports.getCapstone = async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-        p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric,
-        ps.submission_link, ps.is_approved, ps.submitted_at, 
+        p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric, p.test_cases, p.allowed_submission_types,
+        ps.submission_type, ps.submission_link, ps.submission_file_url, ps.submission_file_name, ps.is_approved, ps.submitted_at, ps.updated_at,
         COALESCE(er.marks, ps.score) AS score,
         er.feedback AS er_feedback,
         ps.rubric_breakdown AS ps_rubric_breakdown,
@@ -3037,6 +3037,21 @@ exports.getCapstone = async (req, res) => {
     const submission_link = row.submission_link
       ? await presignS3Url(row.submission_link)
       : null;
+    const submission_file_url = row.submission_file_url
+      ? await presignS3Url(row.submission_file_url)
+      : null;
+
+    let capstoneAllowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (Array.isArray(row.allowed_submission_types) && row.allowed_submission_types.length > 0) {
+      capstoneAllowedTypes = row.allowed_submission_types;
+    } else if (typeof row.allowed_submission_types === 'string') {
+      try {
+        const parsed = JSON.parse(row.allowed_submission_types);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          capstoneAllowedTypes = parsed;
+        }
+      } catch (e) {}
+    }
 
     res.json({
       success: true,
@@ -3047,9 +3062,15 @@ exports.getCapstone = async (req, res) => {
         max_score: row.max_score ? Number(row.max_score) : 100,
         evaluator_type: row.evaluator_type,
         rubric: row.rubric,
+        test_cases: row.test_cases,
+        allowed_submission_types: capstoneAllowedTypes,
+        submission_type: row.submission_type || (row.submission_file_url ? 'file' : (row.submission_link ? 'github' : null)),
         submission_link,
+        submission_file_url,
+        submission_file_name: row.submission_file_name,
         is_approved: row.is_approved,
         submitted_at: row.submitted_at,
+        updated_at: row.updated_at,
         score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
         rubric_breakdown,
         execution_logs: row.execution_logs,
@@ -3063,24 +3084,18 @@ exports.getCapstone = async (req, res) => {
 };
 
 /**
- * Submit (or update) a capstone project solution link
+ * Submit (or update) a capstone project deliverable
  * POST /api/students/capstone/:projectId/submit
  */
 exports.submitCapstone = async (req, res) => {
   try {
     const userId = req.user.id;
     const { projectId } = req.params;
-    const { submission_link } = req.body;
+    let { submission_type = 'github', submission_link } = req.body || {};
 
-    if (!submission_link || !submission_link.trim()) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'submission_link is required' });
-    }
-
-    // Verify enrollment
+    // Verify enrollment and retrieve project + allowed types
     const enrolled = await pool.query(
-      `SELECT p.id FROM projects p
+      `SELECT p.id, p.allowed_submission_types FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
        LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
@@ -3097,13 +3112,84 @@ exports.submitCapstone = async (req, res) => {
         .json({ success: false, message: 'Project not found' });
     }
 
+    const project = enrolled.rows[0];
+    let allowed = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (Array.isArray(project.allowed_submission_types) && project.allowed_submission_types.length > 0) {
+      allowed = project.allowed_submission_types;
+    } else if (typeof project.allowed_submission_types === 'string') {
+      try {
+        const parsed = JSON.parse(project.allowed_submission_types);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          allowed = parsed;
+        }
+      } catch (e) {}
+    }
+
+    if (!allowed.includes(submission_type)) {
+      return res.status(400).json({
+        success: false,
+        message: `Submission type '${submission_type}' is not allowed for this capstone project`,
+      });
+    }
+
+    let cleanLink = null;
+    let cleanFileUrl = null;
+    let cleanFileName = null;
+
+    if (submission_type === 'file') {
+      if (req.file) {
+        const stored = await storeFile(req.file, {
+          s3KeyPrefix: 'capstone-submissions',
+          localSubPath: 'submissions',
+        });
+        cleanFileUrl = stored.url;
+        cleanFileName = stored.name;
+      } else {
+        const existingSub = await pool.query(
+          `SELECT submission_file_url, submission_file_name 
+           FROM project_submissions 
+           WHERE project_id = $1 AND user_id = $2 AND submission_type = 'file'`,
+          [projectId, userId],
+        );
+        if (existingSub.rows.length > 0 && existingSub.rows[0].submission_file_url) {
+          cleanFileUrl = existingSub.rows[0].submission_file_url;
+          cleanFileName = existingSub.rows[0].submission_file_name;
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: 'Please upload a document file',
+          });
+        }
+      }
+    } else {
+      if (!submission_link || !submission_link.trim()) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'Please provide a valid submission link' });
+      }
+      try {
+        new URL(submission_link.trim());
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid URL (e.g. starting with https://)',
+        });
+      }
+      cleanLink = submission_link.trim();
+    }
+
     const result = await pool.query(
-      `INSERT INTO project_submissions (project_id, user_id, submission_link)
-       VALUES ($1, $2, $3)
+      `INSERT INTO project_submissions (project_id, user_id, submission_type, submission_link, submission_file_url, submission_file_name, submitted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        ON CONFLICT (project_id, user_id)
-       DO UPDATE SET submission_link = EXCLUDED.submission_link, updated_at = CURRENT_TIMESTAMP
-       RETURNING submission_link, submitted_at, is_approved`,
-      [projectId, userId, submission_link.trim()],
+       DO UPDATE SET
+         submission_type = EXCLUDED.submission_type,
+         submission_link = CASE WHEN EXCLUDED.submission_type = 'file' THEN NULL ELSE EXCLUDED.submission_link END,
+         submission_file_url = CASE WHEN EXCLUDED.submission_type = 'file' THEN EXCLUDED.submission_file_url ELSE NULL END,
+         submission_file_name = CASE WHEN EXCLUDED.submission_type = 'file' THEN EXCLUDED.submission_file_name ELSE NULL END,
+         updated_at = NOW()
+       RETURNING id, project_id, user_id, submission_type, submission_link, submission_file_url, submission_file_name, submitted_at, is_approved`,
+      [projectId, userId, submission_type, cleanLink, cleanFileUrl, cleanFileName],
     );
 
     // Award 20 points once per capstone (idempotent via unique source key)
@@ -3126,7 +3212,7 @@ exports.submitCapstone = async (req, res) => {
       action: 'CREATE',
       entityType: 'project_submission',
       entityId: projectId,
-      details: { submission_link: submission_link.trim() },
+      details: { submission_type, submission_link: cleanLink, submission_file_name: cleanFileName },
     });
 
     const subjectIdRes = await pool.query(
@@ -3143,7 +3229,15 @@ exports.submitCapstone = async (req, res) => {
       console.warn(`[Progress] capstone ${projectId} → could not resolve subjectId for userId=${userId}`);
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const savedRow = result.rows[0];
+    if (savedRow.submission_file_url) {
+      savedRow.submission_file_url = await presignS3Url(savedRow.submission_file_url);
+    }
+    if (savedRow.submission_link) {
+      savedRow.submission_link = await presignS3Url(savedRow.submission_link);
+    }
+
+    res.json({ success: true, data: savedRow });
   } catch (error) {
     console.error('Error submitting capstone:', error);
     serverError(res, error);

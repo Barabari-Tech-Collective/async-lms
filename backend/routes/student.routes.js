@@ -157,6 +157,7 @@ router.post(
   '/capstone/:projectId/submit',
   verifyToken,
   isStudent,
+  upload.single('submission_file'),
   submitCapstone,
 );
 

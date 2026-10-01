@@ -676,6 +676,7 @@ pool.on('error', (err, client) => {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_cases JSONB;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS rubric JSONB;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_score INTEGER DEFAULT 100;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS allowed_submission_types JSONB DEFAULT '["file", "github", "docs", "figma", "excel", "url"]'::jsonb;
     `);
 
     await client.query(`
@@ -691,6 +692,9 @@ pool.on('error', (err, client) => {
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS score NUMERIC;
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS rubric_breakdown JSONB;
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS execution_logs TEXT;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_type VARCHAR(20) DEFAULT 'github';
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_file_url TEXT;
+      ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_file_name TEXT;
     `);
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);

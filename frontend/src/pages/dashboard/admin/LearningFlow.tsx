@@ -799,6 +799,7 @@ const LearningFlow: React.FC = () => {
     evaluator_type?: string | null;
     test_cases?: string | null;
     rubric?: string | null;
+    allowed_submission_types?: string[];
   }) => {
     if (!selectedTopicForCapstone) return;
     setModalLoading(true);
@@ -811,9 +812,10 @@ const LearningFlow: React.FC = () => {
         evaluator_type: data.evaluator_type,
         test_cases: data.test_cases,
         rubric: data.rubric,
+        allowed_submission_types: data.allowed_submission_types,
       });
       toast.success('Capstone project created');
-      refreshStructure();
+      await refreshStructure();
       setCapstoneModalOpen(false);
       setSelectedTopicForCapstone(null);
     } catch (error) {
@@ -830,6 +832,7 @@ const LearningFlow: React.FC = () => {
     evaluator_type?: string | null;
     test_cases?: string | null;
     rubric?: string | null;
+    allowed_submission_types?: string[];
   }) => {
     if (!editingCapstone) return;
     setModalLoading(true);
@@ -841,9 +844,10 @@ const LearningFlow: React.FC = () => {
         evaluator_type: data.evaluator_type,
         test_cases: data.test_cases,
         rubric: data.rubric,
+        allowed_submission_types: data.allowed_submission_types,
       });
       toast.success('Capstone updated');
-      refreshStructure();
+      await refreshStructure();
       setEditingCapstone(null);
       setCapstoneModalOpen(false);
     } catch (error) {
@@ -1154,10 +1158,18 @@ const LearningFlow: React.FC = () => {
                           <div className='flex items-center gap-1 sm:gap-2 text-slate-400 shrink-0'>
                             <button
                               type='button'
-                              onClick={() => {
+                              onClick={async () => {
                                 setSelectedTopicForCapstone(topic);
                                 setEditingCapstone(topic.capstone ?? null);
                                 setCapstoneModalOpen(true);
+                                if (topic.capstone?.id) {
+                                  try {
+                                    const res = await apiClient.get(`/admin/projects/${topic.capstone.id}`);
+                                    if (res.data?.data) {
+                                      setEditingCapstone(res.data.data);
+                                    }
+                                  } catch {}
+                                }
                               }}
                               className='p-1.5 rounded-lg hover:bg-amber-50 transition-colors'
                               title={
@@ -1945,10 +1957,16 @@ const LearningFlow: React.FC = () => {
                                   <div className='flex items-center gap-1 text-slate-400 shrink-0 ml-2'>
                                     <button
                                       type='button'
-                                      onClick={() => {
+                                      onClick={async () => {
                                         setSelectedTopicForCapstone(topic);
                                         setEditingCapstone(topic.capstone!);
                                         setCapstoneModalOpen(true);
+                                        try {
+                                          const res = await apiClient.get(`/admin/projects/${topic.capstone!.id}`);
+                                          if (res.data?.data) {
+                                            setEditingCapstone(res.data.data);
+                                          }
+                                        } catch {}
                                       }}
                                       className='p-1.5 rounded-lg hover:bg-amber-100 hover:text-amber-700 transition-colors'
                                       title='Edit Capstone'
@@ -2318,6 +2336,7 @@ const LearningFlow: React.FC = () => {
                 evaluator_type: editingCapstone.evaluator_type,
                 test_cases: editingCapstone.test_cases,
                 rubric: editingCapstone.rubric,
+                allowed_submission_types: editingCapstone.allowed_submission_types,
               }
             : undefined
         }

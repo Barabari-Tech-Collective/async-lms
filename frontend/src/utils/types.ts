@@ -287,6 +287,7 @@ export interface CapstoneProject {
   evaluator_type?: string | null;
   test_cases?: any;
   rubric?: any;
+  allowed_submission_types?: SubmissionType[];
 }
 
 export interface Topic {
