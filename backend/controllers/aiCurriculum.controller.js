@@ -848,16 +848,19 @@ exports.publishCourse = async (req, res) => {
         // Assignment per unit
         if (aiTopic.assignment) {
           const asgn = typeof aiTopic.assignment === 'string' ? JSON.parse(aiTopic.assignment) : aiTopic.assignment;
+          const allowedTypes = Array.isArray(asgn.allowed_submission_types) && asgn.allowed_submission_types.length > 0
+            ? asgn.allowed_submission_types
+            : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
           const existAsgn = await client.query(`SELECT id FROM assignments WHERE unit_id = $1`, [unitId]);
           if (existAsgn.rows.length) {
             await client.query(
-              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
-              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, existAsgn.rows[0].id],
+              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, allowed_submission_types = $4, updated_at = NOW() WHERE id = $5`,
+              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes), existAsgn.rows[0].id],
             );
           } else {
             await client.query(
-              `INSERT INTO assignments (unit_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
-              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100],
+              `INSERT INTO assignments (unit_id, title, instructions, max_score, allowed_submission_types) VALUES ($1,$2,$3,$4,$5)`,
+              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes)],
             );
           }
         }

@@ -43,6 +43,7 @@ const {
   updateAssignment,
   deleteAssignment,
   createProject,
+  getProject,
   updateProject,
   deleteProject,
   verifyUser,
@@ -218,6 +219,7 @@ router.put('/assignments/:id', verifyToken, isAdmin, updateAssignment);
 router.delete('/assignments/:id', verifyToken, isAdmin, deleteAssignment);
 
 // ===== PROJECT MANAGEMENT =====
+router.get('/projects/:id', verifyToken, isAdmin, getProject);
 router.post('/projects', verifyToken, isAdmin, createProject);
 router.put('/projects/:id', verifyToken, isAdmin, updateProject);
 router.delete('/projects/:id', verifyToken, isAdmin, deleteProject);

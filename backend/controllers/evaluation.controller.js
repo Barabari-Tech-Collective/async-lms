@@ -177,7 +177,10 @@ exports.runEvaluation = async (req, res) => {
       : isCollegeAssignment
       ? `SELECT
           s.id as submission_id,
+          s.submission_type,
           s.submission_link,
+          s.submission_file_url,
+          s.submission_file_name,
           s.student_id as user_id,
           u.full_name as student_name
          FROM college_assignment_submissions s
@@ -186,7 +189,10 @@ exports.runEvaluation = async (req, res) => {
          WHERE s.assignment_id = $1${scopeFilter}${facSubFilter}`
       : `SELECT
           s.id as submission_id,
+          s.submission_type,
           s.submission_link,
+          s.submission_file_url,
+          s.submission_file_name,
           s.user_id,
           u.full_name as student_name
          FROM assignment_submissions s
@@ -293,9 +299,50 @@ exports.runEvaluation = async (req, res) => {
     let jobIdsAndLinks = []; // { jobId, statusUrl, submissionId, studentName, studentId }
 
     try {
-      // Filter out submissions with no link or non-git link to prevent failing the entire batch
-      const validSubmissions = submissions.filter((s) => isAllowedGitUrl(s.submission_link));
-      const invalidSubmissions = submissions.filter((s) => !isAllowedGitUrl(s.submission_link));
+      // Filter git vs non-git submissions
+      const validSubmissions = submissions.filter(
+        (s) =>
+          (s.submission_type === 'github' || (!s.submission_type && s.submission_link)) &&
+          !!s.submission_link &&
+          isAllowedGitUrl(s.submission_link),
+      );
+      const nonGitSubmissions = submissions.filter(
+        (s) =>
+          (s.submission_type && s.submission_type !== 'github') ||
+          (!s.submission_link && !!s.submission_file_url),
+      );
+      const invalidSubmissions = submissions.filter(
+        (s) =>
+          (s.submission_type === 'github' || (!s.submission_type && !s.submission_file_url)) &&
+          (!s.submission_link || !isAllowedGitUrl(s.submission_link)),
+      );
+
+      if (nonGitSubmissions.length > 0) {
+        // Queue non-git submissions for manual facilitator review
+        for (const nonGit of nonGitSubmissions) {
+          const typeName = nonGit.submission_type || 'File';
+          const pendingFeedback = JSON.stringify({
+            summary: `${typeName.toUpperCase()} submission queued for manual facilitator review.`,
+            strengths: [],
+            issues: [],
+            breakdown: [],
+          });
+          await client.query(
+            `INSERT INTO evaluation_results
+             (evaluation_id, submission_id, student_id, student_name, status, marks, feedback)
+             VALUES ($1, $2, $3, $4, 'pending', 0, $5::jsonb)
+             ON CONFLICT (evaluation_id, submission_id) DO UPDATE
+             SET status = 'pending', marks = 0, feedback = EXCLUDED.feedback`,
+            [
+              evaluation.id,
+              nonGit.submission_id || nonGit.id,
+              nonGit.user_id || nonGit.student_id,
+              nonGit.student_name,
+              pendingFeedback,
+            ],
+          );
+        }
+      }
 
       if (invalidSubmissions.length > 0) {
         console.warn(
@@ -333,6 +380,20 @@ exports.runEvaluation = async (req, res) => {
             ],
           );
         }
+      }
+
+      if (validSubmissions.length === 0 && nonGitSubmissions.length > 0) {
+        // All submissions were non-git and queued for manual review
+        await client.query(
+          `UPDATE evaluations SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+          [evaluation.id],
+        );
+        await client.query('COMMIT');
+        return res.json({
+          success: true,
+          message: 'Submissions recorded and queued for manual facilitator review.',
+          data: { evaluationId: evaluation.id },
+        });
       }
 
       if (validSubmissions.length === 0) {

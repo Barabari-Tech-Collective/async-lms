@@ -66,6 +66,15 @@ interface Assignment {
   dueDate: string;
   rawDueDate?: string;
   status: 'Active' | 'Submitted' | 'Completed' | 'Pending' | 'Overdue';
+  description?: string;
+  topicId?: string;
+  assignmentDescription?: string;
+  evaluatorType?: string;
+  allowedSubmissionTypes?: string[];
+  testCases?: any;
+  rubric?: any;
+  instructionFileUrl?: string;
+  instructionFileName?: string;
 }
 
 /* ======================
@@ -237,6 +246,15 @@ export default function AssignmentManagement() {
               : 'No Due Date',
             rawDueDate: item.due_date ? item.due_date.split('T')[0] : '',
             status,
+            description: item.description || '',
+            topicId: item.topic_id || '',
+            assignmentDescription: item.assignment_description || '',
+            evaluatorType: item.evaluator_type || '',
+            allowedSubmissionTypes: item.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url'],
+            testCases: item.test_cases || null,
+            rubric: item.rubric || null,
+            instructionFileUrl: item.instruction_file_url || '',
+            instructionFileName: item.instruction_file_name || '',
           };
         });
         setAssignments(mapped);
@@ -522,7 +540,15 @@ export default function AssignmentManagement() {
                               course: assignment.rawCourse || assignment.course || '',
                               collegeId: assignment.collegeId,
                               deadline: assignment.rawDueDate || '',
-                              description: '',
+                              description: assignment.description || '',
+                              topicId: assignment.topicId || '',
+                              assignmentDescription: assignment.assignmentDescription || '',
+                              aiEvaluationType: assignment.evaluatorType || '',
+                              allowed_submission_types: assignment.allowedSubmissionTypes,
+                              test_cases: assignment.testCases,
+                              rubric: assignment.rubric,
+                              instruction_file_url: assignment.instructionFileUrl,
+                              instruction_file_name: assignment.instructionFileName,
                             },
                           });
                         }}
@@ -675,7 +701,15 @@ export default function AssignmentManagement() {
                                   course: assignment.rawCourse || assignment.course || '',
                                   collegeId: assignment.collegeId,
                                   deadline: assignment.rawDueDate || '',
-                                  description: '',
+                                  description: assignment.description || '',
+                                  topicId: assignment.topicId || '',
+                                  assignmentDescription: assignment.assignmentDescription || '',
+                                  aiEvaluationType: assignment.evaluatorType || '',
+                                  allowed_submission_types: assignment.allowedSubmissionTypes,
+                                  test_cases: assignment.testCases,
+                                  rubric: assignment.rubric,
+                                  instruction_file_url: assignment.instructionFileUrl,
+                                  instruction_file_name: assignment.instructionFileName,
                                 },
                               });
                             }}

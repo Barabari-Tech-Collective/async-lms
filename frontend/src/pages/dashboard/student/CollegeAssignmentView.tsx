@@ -1,14 +1,14 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ChevronLeft,
   Calendar,
   Download,
   FileText,
-  Link2,
   Loader2,
   ArrowRight,
-  Code2,
+  Upload,
+  AlertTriangle,
   ExternalLink,
   CheckCircle2,
   Lock,
@@ -18,17 +18,46 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
-import type { CollegeAssignment } from '@/utils/types';
+import type { CollegeAssignment, SubmissionType } from '@/utils/types';
+import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
+
+// URL Validation Regex Patterns
+const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
+  figma: {
+    pattern: /^https?:\/\/(www\.)?figma\.com\/(file|design|proto|board)\/[A-Za-z0-9]+/i,
+    example: 'https://www.figma.com/design/... or https://www.figma.com/proto/...',
+  },
+  docs: {
+    pattern: /^https?:\/\/((docs\.google\.com\/document\/d\/)|([A-Za-z0-9-]+\.(sharepoint\.com|office\.com|1drv\.ms)))/i,
+    example: 'https://docs.google.com/document/d/... or Word Online link',
+  },
+  excel: {
+    pattern: /^https?:\/\/((docs\.google\.com\/spreadsheets\/d\/)|([A-Za-z0-9-]+\.(sharepoint\.com|office\.com|1drv\.ms)))/i,
+    example: 'https://docs.google.com/spreadsheets/d/... or Excel Online link',
+  },
+  github: {
+    pattern: /^https?:\/\/(www\.)?(github\.com|gitlab\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/i,
+    example: 'https://github.com/username/repository',
+  },
+  url: {
+    pattern: /^https?:\/\/[A-Za-z0-9-._~:/?#[\]@!$&'()*+,;=]+/i,
+    example: 'https://my-app.vercel.app',
+  },
+};
 
 export default function CollegeAssignmentView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [assignment, setAssignment] = useState<CollegeAssignment | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  const [solution, setSolution] = useState('');
+  const [activeType, setActiveType] = useState<SubmissionType>('file');
+  const [solutionUrl, setSolutionUrl] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
 
   const parsedRubric = useMemo<any[] | null>(() => {
     if (!assignment?.rubric) return null;
@@ -71,8 +100,24 @@ export default function CollegeAssignmentView() {
       const data = res.data.data;
       setAssignment(data);
 
-      if (data.submission_link) {
-        setSolution(data.submission_link);
+      const allowed: SubmissionType[] =
+        Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
+          ? data.allowed_submission_types
+          : ALL_SUBMISSION_TYPES;
+
+      if (data.submission_type && allowed.includes(data.submission_type)) {
+        setActiveType(data.submission_type);
+        if (data.submission_link) {
+          setSolutionUrl(data.submission_link);
+        }
+      } else if (data.submission_link) {
+        setSolutionUrl(data.submission_link);
+        const linkType = allowed.find((t) => t !== 'file') || 'github';
+        setActiveType(linkType);
+      } else if (data.submission_file_url) {
+        setActiveType('file');
+      } else {
+        setActiveType(allowed[0] || 'file');
       }
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to load assignment details'));
@@ -85,39 +130,96 @@ export default function CollegeAssignmentView() {
     fetchAssignment();
   }, [id]);
 
+  const validateUrlInput = (type: SubmissionType, val: string) => {
+    if (!val.trim()) {
+      setUrlValidationError(null);
+      return;
+    }
+    const validator = SUBMISSION_REGEX[type];
+    if (validator && !validator.pattern.test(val.trim())) {
+      setUrlValidationError(`Invalid format. Expected e.g. ${validator.example}`);
+    } else {
+      setUrlValidationError(null);
+    }
+  };
+
+  const handleUrlChange = (val: string) => {
+    setSolutionUrl(val);
+    validateUrlInput(activeType, val);
+  };
+
+  const handleTypeSelect = (type: SubmissionType) => {
+    setActiveType(type);
+    setUrlValidationError(null);
+    if (assignment?.submission_type === type && assignment.submission_link) {
+      setSolutionUrl(assignment.submission_link);
+    } else {
+      setSolutionUrl('');
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error('File size exceeds 25MB limit');
+        return;
+      }
+      setSelectedFile(file);
+    }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error('File size exceeds 25MB limit');
+        return;
+      }
+      setSelectedFile(file);
+    }
+  };
+
   const handleSubmit = async () => {
-    const cleanLink = solution.trim();
-    if (!cleanLink) {
-      toast.error('Please enter your GitHub repository link');
-      return;
-    }
-
-    const lower = cleanLink.toLowerCase();
-    if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
-      toast.error('Google Drive links are not accepted. Please provide a public GitHub repository link (https://github.com/username/project).');
-      return;
-    }
-
-    if (!lower.includes('github.com')) {
-      toast.error('Only public GitHub repository links (https://github.com/...) are accepted for automated evaluation.');
-      return;
-    }
-
-    try {
-      new URL(cleanLink);
-    } catch {
-      toast.error('Please enter a valid URL (e.g. https://github.com/username/project)');
-      return;
+    if (activeType === 'file') {
+      if (!selectedFile && !assignment?.submission_file_url) {
+        toast.error('Please select a file to upload');
+        return;
+      }
+      if (!selectedFile && isSubmitted && assignment?.submission_type === 'file') {
+        toast.error('Please select a new file to update your submission');
+        return;
+      }
+    } else {
+      if (!solutionUrl.trim()) {
+        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        return;
+      }
+      const validator = SUBMISSION_REGEX[activeType];
+      if (validator && !validator.pattern.test(solutionUrl.trim())) {
+        toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
       const formData = new FormData();
-      formData.append('submission_link', cleanLink);
+      formData.append('submission_type', activeType);
+
+      if (activeType === 'file') {
+        if (selectedFile) {
+          formData.append('submission_file', selectedFile);
+        }
+      } else {
+        formData.append('submission_link', solutionUrl.trim());
+      }
 
       await apiClient.post(`/college-assignments/${id}/submit`, formData);
 
-      toast.success('Assignment submitted successfully!');
+      toast.success(isSubmitted ? 'Submission updated successfully!' : 'Assignment submitted successfully!');
+      setSelectedFile(null);
       fetchAssignment();
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to submit assignment'));
@@ -145,9 +247,17 @@ export default function CollegeAssignmentView() {
     );
   }
 
+  const allowedTypes: SubmissionType[] =
+    Array.isArray(assignment.allowed_submission_types) &&
+    assignment.allowed_submission_types.length > 0
+      ? assignment.allowed_submission_types
+      : ALL_SUBMISSION_TYPES;
+
   const isSubmitted = Boolean(
-    assignment.submission_link || assignment.submission_file_url,
+    assignment.submission_link || assignment.submission_file_url
   );
+
+  const currentTypeConfig = SUBMISSION_TYPE_CONFIGS[activeType] || SUBMISSION_TYPE_CONFIGS.file;
 
   return (
     <div className='min-h-screen bg-[#FDFDFD] p-4 sm:p-6 md:p-10'>
@@ -173,12 +283,13 @@ export default function CollegeAssignmentView() {
                 {assignment.course || 'General'}
               </span>
               <span
-                className={`px-3 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                className={`px-3 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1.5 ${
                   isSubmitted
                     ? 'bg-emerald-50 text-emerald-700'
                     : 'bg-orange-50 text-orange-600'
                 }`}
               >
+                {isSubmitted && <CheckCircle2 className='w-3 h-3' />}
                 {isSubmitted ? 'Completed' : 'Pending'}
               </span>
             </div>
@@ -402,45 +513,201 @@ export default function CollegeAssignmentView() {
 
           {/* Right: Submit Assignment */}
           <div className='lg:col-span-5 space-y-6 min-w-0'>
-            <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-6 sm:space-y-8 overflow-hidden min-w-0'>
-              <div className='space-y-1.5'>
+            <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-5 sm:space-y-6'>
+              <div className='flex items-center justify-between'>
                 <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
                   Submit Assignment
                 </h2>
-                <p className='text-xs sm:text-sm text-slate-500'>
-                  Submit your public GitHub repository URL for automated evaluation.
-                </p>
+                {isSubmitted && (
+                  <span className='px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full'>
+                    Submitted
+                  </span>
+                )}
               </div>
 
-              {/* GitHub Link Input */}
-              <div className='space-y-3 sm:space-y-4'>
-                <div className='relative'>
-                  <Link2 className='absolute left-4 top-4 w-4 h-4 sm:w-5 sm:h-5 text-[#333D7C]' />
-                  <textarea
-                    value={solution}
-                    onChange={(e) => setSolution(e.target.value)}
-                    placeholder='https://github.com/username/repository'
-                    className='w-full rounded-2xl border-2 border-slate-100 px-10 sm:px-12 py-3.5 sm:py-4 text-xs sm:text-sm focus:border-[#333D7C] outline-none transition-all placeholder:text-slate-300 min-h-24 sm:min-h-28 resize-none'
+              {/* Dynamic Submission Type Tabs */}
+              {allowedTypes.length > 1 && (
+                <div className='space-y-1.5'>
+                  <p className='text-xs font-medium text-slate-500'>Choose submission method:</p>
+                  <div className='grid grid-cols-2 sm:grid-cols-3 gap-1.5 bg-slate-100 p-1.5 rounded-xl'>
+                    {allowedTypes.map((type) => {
+                      const cfg = SUBMISSION_TYPE_CONFIGS[type];
+                      const isSelected = activeType === type;
+                      return (
+                        <button
+                          key={type}
+                          type='button'
+                          onClick={() => handleTypeSelect(type)}
+                          className={`flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-semibold rounded-lg transition-all ${
+                            isSelected
+                              ? 'bg-[#333D7C] text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                        >
+                          <span>{cfg.emoji}</span>
+                          <span className='truncate'>{cfg.shortLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Cloud Sharing Permission Warning Alert */}
+              {currentTypeConfig.requiresPermissionsWarning && (
+                <div className='flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs'>
+                  <AlertTriangle className='w-4 h-4 text-amber-600 shrink-0 mt-0.5' />
+                  <div>
+                    <span className='font-semibold'>Sharing Permission Notice:</span> Ensure your link is set to{' '}
+                    <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> so facilitators can grade your deliverable.
+                  </div>
+                </div>
+              )}
+
+              {/* Input Area Based on Selected Submission Type */}
+              {activeType === 'file' ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={onDrop}
+                  className={`border-2 border-dashed rounded-2xl sm:rounded-[2rem] p-6 sm:p-10 text-center space-y-3 sm:space-y-4 transition-all group cursor-pointer ${
+                    selectedFile
+                      ? 'border-emerald-400 bg-emerald-50/50'
+                      : 'border-slate-200 hover:border-[#333D7C] hover:bg-slate-50/50'
+                  }`}
+                >
+                  <input
+                    type='file'
+                    className='hidden'
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar'
                   />
+                  <div
+                    className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center mx-auto transition-transform group-hover:scale-110 ${
+                      selectedFile ? 'bg-emerald-100' : 'bg-[#333D7C]/10'
+                    }`}
+                  >
+                    <Upload
+                      className={`w-5 h-5 sm:w-6 sm:h-6 ${selectedFile ? 'text-emerald-600' : 'text-[#333D7C]'}`}
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <p className='text-xs sm:text-sm font-semibold text-[#1e293b] break-all'>
+                      {selectedFile
+                        ? selectedFile.name
+                        : assignment.submission_file_name
+                        ? `Current: ${assignment.submission_file_name}`
+                        : 'Click to upload or drag and drop'}
+                    </p>
+                    <p className='text-[11px] sm:text-xs text-slate-400'>
+                      {selectedFile
+                        ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`
+                        : 'PDF, DOCX, XLSX, PPTX, ZIP (Max 25MB)'}
+                    </p>
+                  </div>
                 </div>
-                <div className='p-3.5 bg-blue-50/70 rounded-xl sm:rounded-2xl border border-blue-100 flex items-start gap-2.5 text-slate-600 text-xs leading-relaxed'>
-                  <Code2 className='w-4 h-4 text-blue-600 shrink-0 mt-0.5' />
-                  <span>
-                    Make sure your GitHub repository is <strong>public</strong> and contains your project files. File uploads or Google Drive links are not supported for automated evaluation.
-                  </span>
+              ) : (
+                <div className='space-y-2'>
+                  <div className='relative'>
+                    <div className='absolute left-3.5 top-3.5 text-lg select-none'>
+                      {currentTypeConfig.emoji}
+                    </div>
+                    <textarea
+                      value={solutionUrl}
+                      onChange={(e) => handleUrlChange(e.target.value)}
+                      placeholder={currentTypeConfig.placeholder}
+                      className={`w-full rounded-2xl border-2 px-11 py-3 text-xs sm:text-sm outline-none transition-all placeholder:text-slate-300 min-h-24 resize-none ${
+                        urlValidationError
+                          ? 'border-red-300 bg-red-50/20 focus:border-red-500'
+                          : 'border-slate-100 focus:border-[#333D7C]'
+                      }`}
+                    />
+                  </div>
+                  {urlValidationError ? (
+                    <p className='text-xs text-red-500 font-medium px-1 flex items-center gap-1'>
+                      <span>⚠️</span> {urlValidationError}
+                    </p>
+                  ) : (
+                    <p className='text-[11px] text-slate-400 italic px-1'>
+                      {currentTypeConfig.helperText}
+                    </p>
+                  )}
                 </div>
-              </div>
+              )}
+
+              {/* Current Active Submission Review */}
+              {isSubmitted && (
+                <div className='p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1.5'>
+                  <div className='flex items-center justify-between text-xs text-slate-500'>
+                    <span className='font-medium'>
+                      {assignment.updated_at && assignment.submitted_at && new Date(assignment.updated_at).getTime() > new Date(assignment.submitted_at).getTime() + 1000
+                        ? 'Last Updated:'
+                        : 'Submitted On:'}
+                    </span>
+                    <span>
+                      {assignment.updated_at || assignment.submitted_at
+                        ? new Date(assignment.updated_at || assignment.submitted_at!).toLocaleString()
+                        : 'Recently'}
+                    </span>
+                  </div>
+                  {assignment.submission_type && (
+                    <div className='flex items-center justify-between text-xs text-slate-500'>
+                      <span className='font-medium'>Submitted Via:</span>
+                      <span className='font-semibold text-slate-700 capitalize flex items-center gap-1'>
+                        <span>{SUBMISSION_TYPE_CONFIGS[assignment.submission_type]?.emoji || '📄'}</span>
+                        <span>{SUBMISSION_TYPE_CONFIGS[assignment.submission_type]?.label || assignment.submission_type}</span>
+                      </span>
+                    </div>
+                  )}
+                  {assignment.submission_link && (
+                    <div className='flex items-center justify-between gap-2 text-xs'>
+                      <span className='text-slate-500 truncate'>Link:</span>
+                      <a
+                        href={assignment.submission_link}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='text-blue-600 font-medium hover:underline flex items-center gap-1 truncate max-w-[220px]'
+                      >
+                        <span className='truncate'>{assignment.submission_link}</span>
+                        <ExternalLink className='w-3 h-3 shrink-0' />
+                      </a>
+                    </div>
+                  )}
+                  {assignment.submission_file_url && (
+                    <div className='flex items-center justify-between gap-2 text-xs'>
+                      <span className='text-slate-500 truncate'>File:</span>
+                      <a
+                        href={assignment.submission_file_url}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='text-blue-600 font-medium hover:underline flex items-center gap-1 truncate max-w-[220px]'
+                      >
+                        <span className='truncate'>
+                          {assignment.submission_file_name || 'Download File'}
+                        </span>
+                        <Download className='w-3 h-3 shrink-0' />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <Button
                 onClick={handleSubmit}
-                disabled={submitting || !solution.trim()}
+                disabled={
+                  submitting ||
+                  (activeType === 'file' && !selectedFile && !assignment.submission_file_url) ||
+                  (activeType !== 'file' && !solutionUrl.trim()) ||
+                  Boolean(urlValidationError)
+                }
                 className='w-full h-12 sm:h-14 rounded-xl sm:rounded-2xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 bg-[#333D7C] hover:bg-[#2a3268] text-white min-h-[44px]'
               >
                 {submitting ? (
                   <Loader2 className='w-4 h-4 sm:w-5 sm:h-5 animate-spin' />
                 ) : (
                   <>
-                    Submit Assignment
+                    {isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment'}
                     <ArrowRight className='w-4 h-4' />
                   </>
                 )}
