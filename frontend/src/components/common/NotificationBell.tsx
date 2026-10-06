@@ -13,18 +13,17 @@ import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router';
 
 const TYPE_STYLES: Record<string, { dot: string; icon: string }> = {
-  course_update:      { dot: 'bg-emerald-500', icon: '✨' },
-  achievement:        { dot: 'bg-yellow-400', icon: '🏆' },
-  assignment_graded:  { dot: 'bg-green-400',  icon: '✅' },
-  new_assignment:     { dot: 'bg-blue-400',   icon: '📋' },
-  submission_received:{ dot: 'bg-purple-400', icon: '📥' },
-  general:            { dot: 'bg-slate-400',  icon: '📣' },
+  achievement: { dot: 'bg-yellow-400', icon: '🏆' },
+  assignment_graded: { dot: 'bg-green-400', icon: '✅' },
+  new_assignment: { dot: 'bg-blue-400', icon: '📋' },
+  submission_received: { dot: 'bg-purple-400', icon: '📥' },
+  general: { dot: 'bg-slate-400', icon: '📣' },
 };
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const m = Math.floor(diff / 60000);
-  if (m < 1)  return 'just now';
+  if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
@@ -155,9 +154,8 @@ export default function NotificationBell() {
                 <div
                   key={n.id}
                   onClick={() => handleClick(n)}
-                  className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors group ${
-                    !n.is_read ? 'bg-indigo-50/30' : ''
-                  }`}
+                  className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors group ${!n.is_read ? 'bg-indigo-50/30' : ''
+                    }`}
                 >
                   {/* Type dot */}
                   <div className='flex-shrink-0 mt-0.5'>

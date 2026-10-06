@@ -243,8 +243,6 @@ exports.getCourseStructure = async (req, res) => {
         st.slug AS subtopic_slug,
         st.description AS subtopic_description,
         st.order_index AS subtopic_order,
-        (st.created_at >= NOW() - INTERVAL '7 days') AS subtopic_is_new,
-        (st.updated_at >= NOW() - INTERVAL '7 days' AND st.updated_at > st.created_at + INTERVAL '1 hour') AS subtopic_is_updated,
         CASE WHEN
           -- Fast path: user_subtopic_progress explicitly marks it done
           COALESCE(usp.is_completed, false) = true
@@ -278,16 +276,12 @@ exports.getCourseStructure = async (req, res) => {
         lc.estimated_read_time AS lesson_read_time,
         lc.version AS lesson_version,
         lc.video_url AS lesson_video_url,
-        (lc.created_at >= NOW() - INTERVAL '7 days') AS lesson_is_new,
-        (lc.updated_at >= NOW() - INTERVAL '7 days' AND lc.updated_at > lc.created_at + INTERVAL '1 hour') AS lesson_is_updated,
         COALESCE(ulp.is_completed, false) AS lesson_is_completed,
 
         -- Quiz (presence only — questions/options fetched on demand via /subjects/quiz/:id)
         q.id AS quiz_id,
         q.passing_score AS quiz_passing_score,
         q.max_score AS quiz_max_score,
-        (q.created_at >= NOW() - INTERVAL '7 days') AS quiz_is_new,
-        (q.updated_at >= NOW() - INTERVAL '7 days' AND q.updated_at > q.created_at + INTERVAL '1 hour') AS quiz_is_updated,
         (
           SELECT EXISTS(
             SELECT 1 FROM quiz_attempts qa
@@ -306,8 +300,6 @@ exports.getCourseStructure = async (req, res) => {
         a.title AS assignment_title,
         a.instructions AS assignment_instructions,
         a.max_score AS assignment_max_score,
-        (a.created_at >= NOW() - INTERVAL '7 days') AS assignment_is_new,
-        (a.updated_at >= NOW() - INTERVAL '7 days' AND a.updated_at > a.created_at + INTERVAL '1 hour') AS assignment_is_updated,
         (
           SELECT EXISTS(
             SELECT 1 FROM assignment_submissions asub
@@ -412,8 +404,6 @@ exports.getCourseStructure = async (req, res) => {
           slug: row.subtopic_slug,
           description: row.subtopic_description,
           order_index: row.subtopic_order,
-          is_new: !!row.subtopic_is_new,
-          is_updated: !row.subtopic_is_new && (!!row.subtopic_is_updated || !!row.lesson_is_updated),
           is_completed: !!row.subtopic_is_completed,
           lesson_content: [],
           exercises: [],
@@ -432,8 +422,6 @@ exports.getCourseStructure = async (req, res) => {
             estimated_read_time: row.lesson_read_time,
             version: row.lesson_version,
             video_url: row.lesson_video_url,
-            is_new: !!row.lesson_is_new,
-            is_updated: !!row.lesson_is_updated,
           });
         }
       }
@@ -445,8 +433,6 @@ exports.getCourseStructure = async (req, res) => {
             id: row.quiz_id,
             passing_score: row.quiz_passing_score,
             max_score: row.quiz_max_score,
-            is_new: !!row.quiz_is_new,
-            is_updated: !row.quiz_is_new && !!row.quiz_is_updated,
             is_passed: row.quiz_is_passed || false,
           });
         }
@@ -472,8 +458,6 @@ exports.getCourseStructure = async (req, res) => {
             title: row.assignment_title,
             instructions: row.assignment_instructions,
             max_score: row.assignment_max_score,
-            is_new: !!row.assignment_is_new,
-            is_updated: !row.assignment_is_new && !!row.assignment_is_updated,
             is_submitted: row.assignment_is_submitted || false,
           });
         }
