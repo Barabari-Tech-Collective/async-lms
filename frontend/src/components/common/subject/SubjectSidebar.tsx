@@ -150,6 +150,18 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                     >
                       <PlayCircle className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>{sub.title}</span>
+                      {sub.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {sub.is_updated && !sub.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {sub.is_completed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
@@ -170,6 +182,18 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                     >
                       <ListChecks className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>Quiz</span>
+                      {quiz.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {quiz.is_updated && !quiz.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {quiz.is_passed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
@@ -190,6 +214,18 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                     >
                       <FileText className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>{a.title}</span>
+                      {a.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {a.is_updated && !a.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {a.is_submitted && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}

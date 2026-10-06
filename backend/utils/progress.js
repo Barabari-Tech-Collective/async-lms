@@ -214,6 +214,9 @@ exports.syncUserSubjectProgress = async (userId, subjectId) => {
     finalPercent = Math.min(99, currentPercent + step);
   }
 
+  // Absolute Monotonic Guarantee: progress can never decrease below current earned watermark
+  finalPercent = Math.max(currentPercent, finalPercent);
+
   const finalIsCompleted = is_completed || finalPercent >= 100;
 
   console.log(`[Progress] syncUserSubjectProgress → userId=${userId} subjectId=${subjectId} total=${total} completed=${completed} finalPercent=${finalPercent}% isCompleted=${finalIsCompleted}`);

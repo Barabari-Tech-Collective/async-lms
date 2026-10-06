@@ -13,6 +13,7 @@ import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router';
 
 const TYPE_STYLES: Record<string, { dot: string; icon: string }> = {
+  course_update: { dot: 'bg-emerald-500', icon: '✨' },
   achievement: { dot: 'bg-yellow-400', icon: '🏆' },
   assignment_graded: { dot: 'bg-green-400', icon: '✅' },
   new_assignment: { dot: 'bg-blue-400', icon: '📋' },

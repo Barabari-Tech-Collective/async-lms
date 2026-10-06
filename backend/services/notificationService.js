@@ -76,12 +76,9 @@ async function notifyCollege({ collegeId, type, title, body, link = null, meta =
 async function notifySubjectStudents({ subjectId, type, title, body, link = null, meta = null }) {
   try {
     const { rows } = await pool.query(
-      `SELECT us.user_id
+      `SELECT DISTINCT us.user_id
        FROM user_subjects us
-       JOIN users u ON u.id = us.user_id
-       WHERE us.subject_id = $1
-         AND u.is_active = true
-         AND u.is_deleted = false`,
+       WHERE us.subject_id = $1`,
       [subjectId],
     );
 
@@ -99,24 +96,18 @@ async function notifySubjectStudents({ subjectId, type, title, body, link = null
         params.push(r.user_id, type, title, body, link);
       }
 
-      await pool.query(
+      const inserted = await pool.query(
         `INSERT INTO notifications (user_id, type, title, body, link)
-         VALUES ${values.join(', ')}`,
+         VALUES ${values.join(', ')}
+         RETURNING *`,
         params,
       );
-    }
 
-    // Push real-time Socket.io events
-    if (_io) {
-      for (const r of rows) {
-        _io.to(`user:${r.user_id}`).emit('notification:new', {
-          user_id: r.user_id,
-          type,
-          title,
-          body,
-          link,
-          created_at: new Date().toISOString(),
-        });
+      // Push real-time Socket.io events with full notification payload
+      if (_io) {
+        for (const notif of inserted.rows) {
+          _io.to(`user:${notif.user_id}`).emit('notification:new', notif);
+        }
       }
     }
   } catch (err) {

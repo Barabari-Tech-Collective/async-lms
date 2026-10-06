@@ -8,7 +8,7 @@ const {
   generateCapstone, generateExerciseTests, generateContentFromFile, generateExerciseFromFile,
 } = require('../services/aiCurriculumService');
 const pdfParse = require('pdf-parse');
-const { notify } = require('../services/notificationService');
+const { notify, notifySubjectStudents } = require('../services/notificationService');
 const { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const path = require('path');
@@ -106,7 +106,39 @@ async function ensureColumns() {
       UPDATE ai_courses c
       SET subject_id = s.id
       FROM subjects s
-      WHERE c.subject_id IS NULL AND c.title = s.name AND c.status = 'published'
+      WHERE c.subject_id IS NULL AND c.title = s.name AND c.status = 'published';
+
+      ALTER TABLE ai_course_modules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE ai_course_topics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE ai_course_lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+      UPDATE ai_courses c
+      SET last_published_at = COALESCE(c.last_published_at, s.created_at)
+      FROM subjects s
+      WHERE (c.subject_id = s.id OR (c.title = s.name AND c.status = 'published'))
+        AND c.last_published_at IS NULL;
+
+      -- Align updated_at to created_at for all records that existed at or before publication
+      UPDATE ai_course_lessons l
+      SET updated_at = l.created_at
+      FROM ai_course_topics t, ai_course_modules m, ai_courses c
+      WHERE l.topic_id = t.id AND t.module_id = m.id AND m.course_id = c.id
+        AND c.last_published_at IS NOT NULL
+        AND l.created_at <= c.last_published_at;
+
+      UPDATE ai_course_topics t
+      SET updated_at = t.created_at
+      FROM ai_course_modules m, ai_courses c
+      WHERE t.module_id = m.id AND m.course_id = c.id
+        AND c.last_published_at IS NOT NULL
+        AND t.created_at <= c.last_published_at;
+
+      UPDATE ai_course_modules m
+      SET updated_at = m.created_at
+      FROM ai_courses c
+      WHERE m.course_id = c.id
+        AND c.last_published_at IS NOT NULL
+        AND m.created_at <= c.last_published_at;
     `);
     columnsMigrated = true;
   } catch (err) {
@@ -158,13 +190,16 @@ async function markLessonCourseUpdated(lessonId) {
   if (!lessonId) return;
   try {
     const res = await pool.query(
-      `SELECT m.course_id FROM ai_course_lessons l
+      `SELECT m.course_id, t.id AS topic_id FROM ai_course_lessons l
        JOIN ai_course_topics t ON l.topic_id = t.id
        JOIN ai_course_modules m ON t.module_id = m.id
        WHERE l.id = $1`,
       [lessonId],
     );
-    if (res.rows.length) await markCourseUpdated(res.rows[0].course_id);
+    if (res.rows.length) {
+      await pool.query(`UPDATE ai_course_topics SET updated_at = NOW() WHERE id = $1`, [res.rows[0].topic_id]);
+      await markCourseUpdated(res.rows[0].course_id);
+    }
   } catch (err) {
     console.error('markLessonCourseUpdated error:', err);
   }
@@ -411,10 +446,24 @@ exports.getCourse = async (req, res) => {
       }
     }
 
-    const lastPublishedTime = course.last_published_at ? new Date(course.last_published_at).getTime() : null;
+    let lastPublishedTime = course.last_published_at ? new Date(course.last_published_at).getTime() : null;
+    if (!lastPublishedTime && effectiveSubjectId) {
+      try {
+        const subjRes = await pool.query(`SELECT created_at, updated_at FROM subjects WHERE id = $1`, [effectiveSubjectId]);
+        if (subjRes.rows.length) {
+          const s = subjRes.rows[0];
+          lastPublishedTime = new Date(s.updated_at || s.created_at).getTime();
+        }
+      } catch (err) {
+        console.error('Error fetching fallback lastPublishedTime:', err);
+      }
+    }
     let newModulesCount = 0;
     let newTopicsCount = 0;
     let newLessonsCount = 0;
+    let modifiedLessonsCount = 0;
+    let newQuizzesCount = 0;
+    let newAssignmentsCount = 0;
 
     const modulesRes = await pool.query(
       `SELECT * FROM ai_course_modules WHERE course_id = $1 AND is_deleted = false ORDER BY order_index`,
@@ -478,6 +527,25 @@ exports.getCourse = async (req, res) => {
         );
         if (isTopicNew) newTopicsCount++;
 
+        let hasQuizUpdated = false;
+        if (topic.quiz_questions) {
+          const qq = typeof topic.quiz_questions === 'string' ? JSON.parse(topic.quiz_questions) : topic.quiz_questions;
+          if (Array.isArray(qq) && qq.length > 0) {
+            if (isTopicNew || (lastPublishedTime && topic.updated_at && new Date(topic.updated_at).getTime() > lastPublishedTime)) {
+              newQuizzesCount++;
+              hasQuizUpdated = true;
+            }
+          }
+        }
+
+        let hasAssignmentUpdated = false;
+        if (topic.assignment) {
+          if (isTopicNew || (lastPublishedTime && topic.updated_at && new Date(topic.updated_at).getTime() > lastPublishedTime)) {
+            newAssignmentsCount++;
+            hasAssignmentUpdated = true;
+          }
+        }
+
         const rawLessons = lessonsByTopicId.get(topic.id) || [];
         const signedLessons = await Promise.all(rawLessons.map(async (lesson) => {
           const isLessonNew = Boolean(
@@ -487,13 +555,25 @@ exports.getCourse = async (req, res) => {
               (lastPublishedTime && new Date(lesson.created_at).getTime() > lastPublishedTime)
             )
           );
+          const lessonCreatedTime = lesson.created_at ? new Date(lesson.created_at).getTime() : 0;
+          const lessonUpdatedTime = lesson.updated_at ? new Date(lesson.updated_at).getTime() : 0;
+          const lessonHasBeenUpdated = lessonUpdatedTime > (lessonCreatedTime + 5000);
+
           const isLessonModified = Boolean(
-            !isLessonNew && effectiveSubjectId && lastPublishedTime && lesson.updated_at &&
-            new Date(lesson.updated_at).getTime() > lastPublishedTime
+            !isLessonNew &&
+            effectiveSubjectId &&
+            lastPublishedTime &&
+            lessonUpdatedTime > lastPublishedTime
           );
           if (isLessonNew) newLessonsCount++;
+          if (isLessonModified) modifiedLessonsCount++;
 
-          const updatedLesson = { ...lesson, is_new: isLessonNew, is_modified: isLessonModified };
+          const updatedLesson = {
+            ...lesson,
+            is_new: isLessonNew,
+            is_modified: isLessonModified,
+            is_updated: isLessonModified,
+          };
 
           if (updatedLesson.video_url) {
             updatedLesson.video_url = await presignS3Url(updatedLesson.video_url);
@@ -528,10 +608,40 @@ exports.getCourse = async (req, res) => {
           return updatedLesson;
         }));
 
-        topics.push({ ...topic, is_new: isTopicNew, lessons: signedLessons });
+        const topicUpdatedTime = topic.updated_at ? new Date(topic.updated_at).getTime() : 0;
+
+        const isTopicModified = Boolean(
+          !isTopicNew &&
+          effectiveSubjectId &&
+          lastPublishedTime &&
+          (topicUpdatedTime > lastPublishedTime || hasQuizUpdated || hasAssignmentUpdated)
+        );
+
+        topics.push({
+          ...topic,
+          is_new: isTopicNew,
+          is_modified: isTopicModified,
+          is_updated: isTopicModified,
+          lessons: signedLessons,
+        });
       }
 
-      modules.push({ ...mod, is_new: isModuleNew, topics });
+      const modUpdatedTime = mod.updated_at ? new Date(mod.updated_at).getTime() : 0;
+
+      const isModuleModified = Boolean(
+        !isModuleNew &&
+        effectiveSubjectId &&
+        lastPublishedTime &&
+        modUpdatedTime > lastPublishedTime
+      );
+
+      modules.push({
+        ...mod,
+        is_new: isModuleNew,
+        is_modified: isModuleModified,
+        is_updated: isModuleModified,
+        topics,
+      });
     }
 
     // Review history
@@ -547,7 +657,10 @@ exports.getCourse = async (req, res) => {
       new_modules: newModulesCount,
       new_topics: newTopicsCount,
       new_lessons: newLessonsCount,
-      total: newModulesCount + newTopicsCount + newLessonsCount,
+      modified_lessons: modifiedLessonsCount,
+      new_quizzes: newQuizzesCount,
+      new_assignments: newAssignmentsCount,
+      total: newModulesCount + newTopicsCount + newLessonsCount + modifiedLessonsCount + newQuizzesCount + newAssignmentsCount,
     };
 
     res.json({ success: true, data: { ...course, modules, pending_changes_summary, reviews: reviewsRes.rows } });
@@ -753,6 +866,10 @@ exports.publishCourse = async (req, res) => {
     const activeTopicIds = new Set();
     const activeUnitIds = new Set();
     const activeSubtopicIds = new Set();
+    let newLessonsCount = 0;
+    let modifiedLessonsCount = 0;
+    let newQuizzesCount = 0;
+    let newAssignmentsCount = 0;
 
     // Fetch modules
     const modulesRes = await client.query(
@@ -831,10 +948,19 @@ exports.publishCourse = async (req, res) => {
         const matchedUnit = existingUnits.find((u) => u.title.trim().toLowerCase() === aiTopic.title.trim().toLowerCase());
         if (matchedUnit) {
           unitId = matchedUnit.id;
-          await client.query(
-            `UPDATE units SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
-            [aiTopic.title, aiTopic.description || null, ti, unitId],
-          );
+          const unitTitleChanged = (matchedUnit.title || '').trim() !== (aiTopic.title || '').trim();
+          const unitDescChanged = (matchedUnit.description || '').trim() !== (aiTopic.description || '').trim();
+          if (unitTitleChanged || unitDescChanged) {
+            await client.query(
+              `UPDATE units SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+              [aiTopic.title, aiTopic.description || null, ti, unitId],
+            );
+          } else {
+            await client.query(
+              `UPDATE units SET title = $1, description = $2, order_index = $3 WHERE id = $4`,
+              [aiTopic.title, aiTopic.description || null, ti, unitId],
+            );
+          }
         } else {
           const unitSlug = uniqueSlug(aiTopic.title, `${Date.now()}-${ti}`);
           const unitRes = await client.query(
@@ -851,16 +977,35 @@ exports.publishCourse = async (req, res) => {
           const allowedTypes = Array.isArray(asgn.allowed_submission_types) && asgn.allowed_submission_types.length > 0
             ? asgn.allowed_submission_types
             : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
-          const existAsgn = await client.query(`SELECT id FROM assignments WHERE unit_id = $1`, [unitId]);
+          const existAsgn = await client.query(`SELECT id, title, instructions, max_score FROM assignments WHERE unit_id = $1`, [unitId]);
+          const asgnTitle = asgn.title || `${aiTopic.title} Assignment`;
+          const asgnInst = asgn.instructions || null;
+          const asgnMaxScore = asgn.max_score || 100;
+
           if (existAsgn.rows.length) {
-            await client.query(
-              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, allowed_submission_types = $4, updated_at = NOW() WHERE id = $5`,
-              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes), existAsgn.rows[0].id],
-            );
+            const curA = existAsgn.rows[0];
+            const titleDiff = (curA.title || '').trim() !== asgnTitle.trim();
+            const instDiff = (curA.instructions || '').replace(/\r\n/g, '\n').trim() !== (asgnInst || '').replace(/\r\n/g, '\n').trim();
+            const scoreDiff = Number(curA.max_score) !== Number(asgnMaxScore);
+            const asgnChanged = titleDiff || instDiff || scoreDiff;
+
+            if (asgnChanged) {
+              modifiedAssignmentsCount++;
+              await client.query(
+                `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, allowed_submission_types = $4, updated_at = NOW() WHERE id = $5`,
+                [asgnTitle, asgnInst, asgnMaxScore, JSON.stringify(allowedTypes), curA.id],
+              );
+            } else {
+              await client.query(
+                `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, allowed_submission_types = $4 WHERE id = $5`,
+                [asgnTitle, asgnInst, asgnMaxScore, JSON.stringify(allowedTypes), curA.id],
+              );
+            }
           } else {
+            newAssignmentsCount++;
             await client.query(
               `INSERT INTO assignments (unit_id, title, instructions, max_score, allowed_submission_types) VALUES ($1,$2,$3,$4,$5)`,
-              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes)],
+              [unitId, asgnTitle, asgnInst, asgnMaxScore, JSON.stringify(allowedTypes)],
             );
           }
         }
@@ -870,55 +1015,103 @@ exports.publishCourse = async (req, res) => {
         if (rawTopicQuiz.length > 0) {
           const totalPoints = rawTopicQuiz.length * 10;
           let quizId = null;
-          const existQuiz = await client.query(`SELECT id FROM quizzes WHERE unit_id = $1`, [unitId]);
+          const existQuiz = await client.query(`SELECT id, passing_score, max_score FROM quizzes WHERE unit_id = $1`, [unitId]);
           if (existQuiz.rows.length) {
             quizId = existQuiz.rows[0].id;
-            await client.query(
-              `UPDATE quizzes SET passing_score = $1, max_score = $2, updated_at = NOW() WHERE id = $3`,
-              [Math.ceil(totalPoints * 0.7), totalPoints, quizId],
-            );
-            // Soft-deprecate existing active questions under quizId to preserve historical student attempts
-            await client.query(
-              `UPDATE quiz_questions SET is_deleted = true, updated_at = NOW() WHERE quiz_id = $1 AND is_deleted = false`,
+            const existingQuestions = await client.query(
+              `SELECT id, question_text, explanation, order_index FROM quiz_questions WHERE quiz_id = $1 AND is_deleted = false ORDER BY order_index`,
               [quizId],
             );
+            let quizChanged = existingQuestions.rows.length !== rawTopicQuiz.length;
+            if (!quizChanged) {
+              for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
+                const qText = (rawTopicQuiz[qi].question || '').trim();
+                const existText = (existingQuestions.rows[qi].question_text || '').trim();
+                if (qText !== existText) {
+                  quizChanged = true;
+                  break;
+                }
+              }
+            }
+
+            if (quizChanged) {
+              modifiedQuizzesCount++;
+              await client.query(
+                `UPDATE quizzes SET passing_score = $1, max_score = $2, updated_at = NOW() WHERE id = $3`,
+                [Math.ceil(totalPoints * 0.7), totalPoints, quizId],
+              );
+              // Soft-deprecate existing active questions under quizId to preserve historical student attempts
+              await client.query(
+                `UPDATE quiz_questions SET is_deleted = true, updated_at = NOW() WHERE quiz_id = $1 AND is_deleted = false`,
+                [quizId],
+              );
+              for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
+                const q = rawTopicQuiz[qi];
+                const qqRes = await client.query(
+                  `INSERT INTO quiz_questions (quiz_id, question_text, question_type, points, explanation, order_index)
+                   VALUES ($1, $2, 'multiple_choice', 10, $3, $4) RETURNING id`,
+                  [quizId, q.question, q.explanation || null, qi],
+                );
+                const questionId = qqRes.rows[0].id;
+                const options = Array.isArray(q.options) ? q.options : [];
+                if (options.length > 0) {
+                  const optValues = [];
+                  const optParams = [];
+                  options.forEach((optText, oi) => {
+                    const base = oi * 4;
+                    optValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+                    optParams.push(questionId, optText, oi === (q.correct_index ?? 0), oi);
+                  });
+                  await client.query(
+                    `INSERT INTO quiz_question_options (question_id, option_text, is_correct, order_index)
+                     VALUES ${optValues.join(', ')}`,
+                    optParams,
+                  );
+                }
+              }
+            } else {
+              await client.query(
+                `UPDATE quizzes SET passing_score = $1, max_score = $2 WHERE id = $3`,
+                [Math.ceil(totalPoints * 0.7), totalPoints, quizId],
+              );
+            }
           } else {
+            newQuizzesCount++;
             const quizRes = await client.query(
               `INSERT INTO quizzes (unit_id, passing_score, max_score) VALUES ($1, $2, $3) RETURNING id`,
               [unitId, Math.ceil(totalPoints * 0.7), totalPoints],
             );
             quizId = quizRes.rows[0].id;
-          }
-
-          for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
-            const q = rawTopicQuiz[qi];
-            const qqRes = await client.query(
-              `INSERT INTO quiz_questions (quiz_id, question_text, question_type, points, explanation, order_index)
-               VALUES ($1, $2, 'multiple_choice', 10, $3, $4) RETURNING id`,
-              [quizId, q.question, q.explanation || null, qi],
-            );
-            const questionId = qqRes.rows[0].id;
-            const options = Array.isArray(q.options) ? q.options : [];
-            if (options.length > 0) {
-              const optValues = [];
-              const optParams = [];
-              options.forEach((optText, oi) => {
-                const base = oi * 4;
-                optValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
-                optParams.push(questionId, optText, oi === (q.correct_index ?? 0), oi);
-              });
-              await client.query(
-                `INSERT INTO quiz_question_options (question_id, option_text, is_correct, order_index)
-                 VALUES ${optValues.join(', ')}`,
-                optParams,
+            for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
+              const q = rawTopicQuiz[qi];
+              const qqRes = await client.query(
+                `INSERT INTO quiz_questions (quiz_id, question_text, question_type, points, explanation, order_index)
+                 VALUES ($1, $2, 'multiple_choice', 10, $3, $4) RETURNING id`,
+                [quizId, q.question, q.explanation || null, qi],
               );
+              const questionId = qqRes.rows[0].id;
+              const options = Array.isArray(q.options) ? q.options : [];
+              if (options.length > 0) {
+                const optValues = [];
+                const optParams = [];
+                options.forEach((optText, oi) => {
+                  const base = oi * 4;
+                  optValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+                  optParams.push(questionId, optText, oi === (q.correct_index ?? 0), oi);
+                });
+                await client.query(
+                  `INSERT INTO quiz_question_options (question_id, option_text, is_correct, order_index)
+                   VALUES ${optValues.join(', ')}`,
+                  optParams,
+                );
+              }
             }
           }
         }
 
         // Subtopics & Lessons
         const existingSubtopicsRes = await client.query(
-          `SELECT id, title, order_index FROM subtopics WHERE unit_id = $1 AND is_deleted = false ORDER BY order_index`,
+          `SELECT id, title, description, order_index FROM subtopics WHERE unit_id = $1 AND is_deleted = false ORDER BY order_index`,
           [unitId],
         );
         const existingSubtopics = existingSubtopicsRes.rows;
@@ -932,13 +1125,34 @@ exports.publishCourse = async (req, res) => {
 
           let subtopicId = null;
           const matchedSubtopic = existingSubtopics.find((s) => s.title.trim().toLowerCase() === aiLesson.title.trim().toLowerCase());
+          let lessonWasModified = false;
+          const norm = (s) => (s || '').replace(/\r\n/g, '\n').trim();
+
+          const aiLessonCreatedTime = aiLesson.created_at ? new Date(aiLesson.created_at).getTime() : 0;
+          const aiLessonUpdatedTime = aiLesson.updated_at ? new Date(aiLesson.updated_at).getTime() : 0;
+          const aiLessonWasEdited = aiLessonUpdatedTime > (aiLessonCreatedTime + 10000);
+
           if (matchedSubtopic) {
             subtopicId = matchedSubtopic.id;
-            await client.query(
-              `UPDATE subtopics SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
-              [aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, li, subtopicId],
-            );
+            const newDesc = aiLesson.explanation?.substring(0, 200) || null;
+            const titleChanged = norm(matchedSubtopic.title) !== norm(aiLesson.title);
+            const descChanged = norm(matchedSubtopic.description) !== norm(newDesc);
+            const subtopicChanged = titleChanged || descChanged || aiLessonWasEdited;
+
+            if (subtopicChanged) {
+              lessonWasModified = true;
+              await client.query(
+                `UPDATE subtopics SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+                [aiLesson.title, newDesc, li, subtopicId],
+              );
+            } else {
+              await client.query(
+                `UPDATE subtopics SET title = $1, description = $2, order_index = $3 WHERE id = $4`,
+                [aiLesson.title, newDesc, li, subtopicId],
+              );
+            }
           } else {
+            newLessonsCount++;
             const subtopicSlug = uniqueSlug(aiLesson.title, `${Date.now()}-${li}`);
             const subtopicRes = await client.query(
               `INSERT INTO subtopics (unit_id, title, description, slug, order_index) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -958,26 +1172,57 @@ exports.publishCourse = async (req, res) => {
               : '',
           ].filter(Boolean).join('\n');
 
-          await client.query(
-            `INSERT INTO lesson_content (subtopic_id, content_type, markdown_path, video_url, is_published, version)
-             VALUES ($1, 'markdown', $2, $3, true, 1)
-             ON CONFLICT (subtopic_id, version) DO UPDATE SET
-               markdown_path = EXCLUDED.markdown_path,
-               video_url = EXCLUDED.video_url,
-               updated_at = NOW()`,
-            [subtopicId, `ai-generated:${markdown}`, aiLesson.video_url || null],
+          const newMarkdownPath = `ai-generated:${markdown}`;
+          const newVideoUrl = aiLesson.video_url || null;
+
+          const existLc = await client.query(
+            `SELECT id, markdown_path, video_url FROM lesson_content WHERE subtopic_id = $1 AND version = 1`,
+            [subtopicId],
           );
+          if (existLc.rows.length > 0) {
+            const curLc = existLc.rows[0];
+            const contentChanged = norm(curLc.markdown_path) !== norm(newMarkdownPath) || (curLc.video_url || null) !== newVideoUrl;
+            if (contentChanged || aiLessonWasEdited) {
+              lessonWasModified = true;
+              await client.query(
+                `UPDATE lesson_content SET markdown_path = $1, video_url = $2, is_published = true, is_deleted = false, updated_at = NOW() WHERE id = $3`,
+                [newMarkdownPath, newVideoUrl, curLc.id],
+              );
+              await client.query(`UPDATE subtopics SET updated_at = NOW() WHERE id = $1`, [subtopicId]);
+            }
+          } else {
+            await client.query(
+              `INSERT INTO lesson_content (subtopic_id, content_type, markdown_path, video_url, is_published, version)
+               VALUES ($1, 'markdown', $2, $3, true, 1)`,
+              [subtopicId, newMarkdownPath, newVideoUrl],
+            );
+          }
 
           // Exercise per subtopic
           const exerciseData = aiLesson.exercise_data;
           if (exerciseData) {
             const ex = typeof exerciseData === 'string' ? JSON.parse(exerciseData) : exerciseData;
-            const existEx = await client.query(`SELECT id FROM exercises WHERE subtopic_id = $1`, [subtopicId]);
+            const existEx = await client.query(`SELECT id, title, instructions FROM exercises WHERE subtopic_id = $1`, [subtopicId]);
             if (existEx.rows.length) {
-              await client.query(
-                `UPDATE exercises SET title = $1, instructions = $2, initial_files = $3, updated_at = NOW() WHERE id = $4`,
-                [ex.title || aiLesson.title, ex.description || null, JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]), existEx.rows[0].id],
-              );
+              const exTitle = ex.title || aiLesson.title;
+              const exDesc = ex.description || null;
+              const exTitleChanged = norm(existEx.rows[0].title) !== norm(exTitle);
+              const exInstChanged = norm(existEx.rows[0].instructions) !== norm(exDesc);
+              const exChanged = exTitleChanged || exInstChanged;
+
+              if (exChanged) {
+                lessonWasModified = true;
+                await client.query(
+                  `UPDATE exercises SET title = $1, instructions = $2, initial_files = $3, updated_at = NOW() WHERE id = $4`,
+                  [exTitle, exDesc, JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]), existEx.rows[0].id],
+                );
+                await client.query(`UPDATE subtopics SET updated_at = NOW() WHERE id = $1`, [subtopicId]);
+              } else {
+                await client.query(
+                  `UPDATE exercises SET title = $1, instructions = $2, initial_files = $3 WHERE id = $4`,
+                  [exTitle, exDesc, JSON.stringify([{ name: 'index.js', content: ex.starter_code || '// Write your code here\n' }]), existEx.rows[0].id],
+                );
+              }
             } else {
               await client.query(
                 `INSERT INTO exercises (subtopic_id, title, instructions, max_score, language, tasks, initial_files)
@@ -992,6 +1237,10 @@ exports.publishCourse = async (req, res) => {
               );
             }
           }
+
+          if (lessonWasModified) {
+            modifiedLessonsCount++;
+          }
         }
       }
     }
@@ -999,20 +1248,20 @@ exports.publishCourse = async (req, res) => {
     // Soft-delete any topics, units, or subtopics removed in the latest draft (preserves foreign keys and completions)
     if (activeTopicIds.size > 0) {
       await client.query(
-        `UPDATE topics SET is_deleted = true WHERE subject_id = $1 AND id NOT IN (${Array.from(activeTopicIds).map((_, idx) => `$${idx + 2}`).join(',')})`,
-        [subjectId, ...Array.from(activeTopicIds)],
+        `UPDATE topics SET is_deleted = true WHERE subject_id = $1 AND NOT (id = ANY($2::uuid[]))`,
+        [subjectId, Array.from(activeTopicIds)],
       );
     }
-    if (activeUnitIds.size > 0) {
+    if (activeUnitIds.size > 0 && activeTopicIds.size > 0) {
       await client.query(
-        `UPDATE units SET is_deleted = true WHERE topic_id IN (${Array.from(activeTopicIds).map((_, idx) => `$${idx + 1}`).join(',')}) AND id NOT IN (${Array.from(activeUnitIds).map((_, idx) => `$${activeTopicIds.size + idx + 1}`).join(',')})`,
-        [...Array.from(activeTopicIds), ...Array.from(activeUnitIds)],
+        `UPDATE units SET is_deleted = true WHERE topic_id = ANY($1::uuid[]) AND NOT (id = ANY($2::uuid[]))`,
+        [Array.from(activeTopicIds), Array.from(activeUnitIds)],
       );
     }
-    if (activeSubtopicIds.size > 0) {
+    if (activeSubtopicIds.size > 0 && activeUnitIds.size > 0) {
       await client.query(
-        `UPDATE subtopics SET is_deleted = true WHERE unit_id IN (${Array.from(activeUnitIds).map((_, idx) => `$${idx + 1}`).join(',')}) AND id NOT IN (${Array.from(activeSubtopicIds).map((_, idx) => `$${activeUnitIds.size + idx + 1}`).join(',')})`,
-        [...Array.from(activeUnitIds), ...Array.from(activeSubtopicIds)],
+        `UPDATE subtopics SET is_deleted = true WHERE unit_id = ANY($1::uuid[]) AND NOT (id = ANY($2::uuid[]))`,
+        [Array.from(activeUnitIds), Array.from(activeSubtopicIds)],
       );
     }
 
@@ -1068,6 +1317,32 @@ exports.publishCourse = async (req, res) => {
       link: `/dashboard/admin/subjects`,
     });
 
+    // Notify enrolled students on republish with exact change manifest (Trap 2 fix)
+    try {
+      const subjectSlugRes = await pool.query(`SELECT slug FROM subjects WHERE id = $1`, [subjectId]);
+      const subjectSlug = subjectSlugRes.rows[0]?.slug;
+
+      const changeParts = [];
+      if (newLessonsCount > 0) changeParts.push(`${newLessonsCount} new lesson${newLessonsCount > 1 ? 's' : ''}`);
+      if (modifiedLessonsCount > 0) changeParts.push(`${modifiedLessonsCount} updated lesson${modifiedLessonsCount > 1 ? 's' : ''}`);
+      if (newQuizzesCount > 0) changeParts.push(`${newQuizzesCount} new quiz${newQuizzesCount > 1 ? 'zes' : ''}`);
+      if (newAssignmentsCount > 0) changeParts.push(`${newAssignmentsCount} new assignment${newAssignmentsCount > 1 ? 's' : ''}`);
+
+      const changeSummary = changeParts.length > 0
+        ? changeParts.join(', ')
+        : 'New curriculum materials and updates';
+
+      await notifySubjectStudents({
+        subjectId,
+        type: 'course_update',
+        title: `Course Updated: ${course.title}`,
+        body: `${changeSummary} added to ${course.title}. Click to explore!`,
+        link: subjectSlug ? `/dashboard/student/courses/${subjectSlug}` : '/dashboard/student/courses',
+      });
+    } catch (notifErr) {
+      console.error('[publishCourse] Error sending student notifications:', notifErr.message);
+    }
+
     res.json({ success: true, data: { subject_id: subjectId } });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1089,7 +1364,8 @@ exports.updateModule = async (req, res) => {
          title = COALESCE($1, title),
          description = COALESCE($2, description),
          practice_tasks = COALESCE($3, practice_tasks),
-         case_studies = COALESCE($4, case_studies)
+         case_studies = COALESCE($4, case_studies),
+         updated_at = NOW()
        WHERE id = $5`,
       [title || null, description || null,
        practice_tasks ? JSON.stringify(practice_tasks) : null,
@@ -1115,6 +1391,7 @@ exports.updateTopic = async (req, res) => {
     if (quiz_questions !== undefined) { sets.push(`quiz_questions = $${i++}`); vals.push(JSON.stringify(quiz_questions)); }
     if (assignment !== undefined)    { sets.push(`assignment = $${i++}`);     vals.push(assignment ? JSON.stringify(assignment) : null); }
     if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
+    sets.push(`updated_at = NOW()`);
     vals.push(id);
     await pool.query(`UPDATE ai_course_topics SET ${sets.join(', ')} WHERE id = $${i}`, vals);
     await markTopicCourseUpdated(id);
@@ -1144,6 +1421,7 @@ exports.updateLesson = async (req, res) => {
     if (resource_links !== undefined)      add('resource_links', JSON.stringify(resource_links));
     if (exercise_data !== undefined)       add('exercise_data', exercise_data);
     if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update' });
+    sets.push(`updated_at = NOW()`);
     vals.push(id);
     await pool.query(`UPDATE ai_course_lessons SET ${sets.join(', ')} WHERE id = $${i}`, vals);
     await markLessonCourseUpdated(id);
@@ -1706,17 +1984,17 @@ exports.generateAndSaveLessonContent = async (req, res) => {
 
     let updateFields, updateVals;
     if (type === 'video') {
-      updateFields = 'video_url = $1';
+      updateFields = 'video_url = $1, updated_at = NOW()';
       updateVals = [result.video_url, id];
     } else if (type === 'markdown') {
-      updateFields = 'explanation = $1, example = $2, activity = $3, interview_questions = $4, duration_mins = $5';
+      updateFields = 'explanation = $1, example = $2, activity = $3, interview_questions = $4, duration_mins = $5, updated_at = NOW()';
       updateVals = [
         result.explanation, result.example, result.activity,
         JSON.stringify(result.interview_questions || []),
         result.duration_mins || 25, id,
       ];
     } else {
-      updateFields = 'exercise_data = $1';
+      updateFields = 'exercise_data = $1, updated_at = NOW()';
       updateVals = [JSON.stringify(result.exercise), id];
     }
 
@@ -1724,7 +2002,7 @@ exports.generateAndSaveLessonContent = async (req, res) => {
       `UPDATE ai_course_lessons SET ${updateFields} WHERE id = $${updateVals.length}`,
       updateVals,
     );
-    await markCourseUpdated(course_id);
+    await markLessonCourseUpdated(id);
 
     logAction({ req, action: 'UPDATE', entityType: 'ai_course_lesson', entityId: id, details: { type } });
     res.json({ success: true, data: result });
