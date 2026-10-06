@@ -21,10 +21,10 @@ const sendMail = async ({ to, subject, html, text }) => {
 
   const brevoKey = (process.env.BREVO_API_KEY || pass).trim().replace(/\s+/g, '');
 
-  // Debug API Key properties safely in production
+  // Safe production mail configuration log
   if (isProduction) {
     const activeKey = host.includes('brevo.com') ? brevoKey : pass;
-    console.log(`[mailer] DEBUG: Active mail key length is ${activeKey.length} | Starts with: ${activeKey.substring(0, 12)}... | Ends with: ...${activeKey.substring(Math.max(0, activeKey.length - 12))}`);
+    console.log(`[mailer] Production mail configured (key configured: ${Boolean(activeKey)}, length: ${activeKey ? activeKey.length : 0})`);
   }
 
   // ------------------------------------------------------------------

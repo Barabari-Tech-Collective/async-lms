@@ -22,7 +22,7 @@ exports.getUserSubjects = async (req, res) => {
          WHERE t.subject_id = s.id AND st.is_deleted = false) as total_lessons,
         COALESCE(us.is_completed, false)::boolean as is_completed,
         us.completed_at,
-        us.certificate_id,
+        CASE WHEN us.is_completed = true THEN us.certificate_id ELSE NULL END as certificate_id,
         COALESCE(us.progress_percent, 0)::int as progress_percent
       FROM public.subjects s
       INNER JOIN public.user_subjects us ON s.id = us.subject_id 

@@ -162,6 +162,7 @@ exports.calculateSubjectProgress = async (userId, subjectId) => {
     total, 
     completed, 
     percent, 
+    rawPercent,
     is_completed: isCompleted, 
     has_new_content: false, 
     new_content_count: 0,
@@ -195,14 +196,14 @@ exports.syncUserSubjectProgress = async (userId, subjectId) => {
     return 100;
   }
 
-  const { total, completed, percent, is_completed } = await exports.calculateSubjectProgress(userId, subjectId);
+  const { total, completed, percent, rawPercent, is_completed } = await exports.calculateSubjectProgress(userId, subjectId);
   const currentPercent = enrolledRow?.progress_percent || 0;
   let finalPercent = percent;
 
   // Curriculum Pruning Rule
   if (total > 0 && completed >= total) {
     finalPercent = 100;
-  } else if (currentPercent > percent) {
+  } else if (currentPercent > rawPercent) {
     // Proportional Step Accumulation (Killing the Dead Zone):
     // When total items increase and rawPercent < currentPercent,
     // distribute the remaining percentage (100 - currentPercent) proportionally
