@@ -1,7 +1,6 @@
 const pool = require('../config/pg');
 const bcrypt = require('bcrypt');
 const { logAction } = require('../utils/auditLogger');
-const { calculateSubjectProgress } = require('../utils/progress');
 
 // @desc    Get subjects for a specific student
 exports.getUserSubjects = async (req, res) => {
@@ -15,13 +14,16 @@ exports.getUserSubjects = async (req, res) => {
         s.slug, 
         s.description, 
         s.level, 
-        -- Count total subtopics for this subject
+        -- Count active subtopics for this subject
         (SELECT COUNT(st.id) 
          FROM public.subtopics st 
          JOIN public.units u ON st.unit_id = u.id
          JOIN public.topics t ON u.topic_id = t.id 
-         WHERE t.subject_id = s.id) as total_lessons,
-        us.progress_percent as progress_percent
+         WHERE t.subject_id = s.id AND st.is_deleted = false) as total_lessons,
+        COALESCE(us.is_completed, false)::boolean as is_completed,
+        us.completed_at,
+        us.certificate_id,
+        COALESCE(us.progress_percent, 0)::int as progress_percent
       FROM public.subjects s
       INNER JOIN public.user_subjects us ON s.id = us.subject_id 
       WHERE us.user_id = $1 AND s.is_published = true AND s.is_deleted = false
@@ -30,28 +32,8 @@ exports.getUserSubjects = async (req, res) => {
 
     const { rows } = await pool.query(query, [userId]);
 
-    // Ensure progress is freshly accurate and synchronized
-    const enriched = await Promise.all(
-      rows.map(async (row) => {
-        try {
-          const { percent } = await calculateSubjectProgress(userId, row.id);
-          if (row.progress_percent !== percent) {
-            pool
-              .query(
-                'UPDATE public.user_subjects SET progress_percent = $1 WHERE user_id = $2 AND subject_id = $3',
-                [percent, userId, row.id],
-              )
-              .catch(() => {});
-            row.progress_percent = percent;
-          }
-        } catch {
-          // Fallback to row.progress_percent
-        }
-        return row;
-      }),
-    );
-
-    res.json({ success: true, data: enriched });
+    // Pure O(1) read — zero database writes or locks on dashboard visits
+    res.json({ success: true, data: rows });
   } catch (err) {
     console.error('Error fetching student subjects:', err);
     res.status(500).json({ success: false, message: 'Server error' });

@@ -107,11 +107,13 @@ const CourseIntro = () => {
               const d = res.data?.data;
               if (d) {
                 const pct =
-                  d.total_subtopics > 0
-                    ? Math.round(
-                        (d.completed_subtopics / d.total_subtopics) * 100,
-                      )
-                    : 0;
+                  d.overall_progress !== undefined
+                    ? d.overall_progress
+                    : d.total_subtopics > 0
+                      ? Math.round(
+                          (d.completed_subtopics / d.total_subtopics) * 100,
+                        )
+                      : 0;
                 setProgressPercent(pct);
                 setLastAccessedSlug(d.last_accessed_subtopic_slug ?? null);
               }

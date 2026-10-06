@@ -1,3 +1,7 @@
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 const { Pool } = require('pg');
 
 let dbHost = (process.env.PGHOST || '').trim();
@@ -520,6 +524,45 @@ pool.on('error', (err, client) => {
     await client.query(
       `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ`,
     );
+
+    // Course Completion Lock & Progress Protection
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS is_completed BOOLEAN NOT NULL DEFAULT false`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS certificate_id UUID DEFAULT gen_random_uuid()`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS certificate_issued_at TIMESTAMPTZ`,
+    );
+    await client.query(`
+      UPDATE user_subjects 
+      SET is_completed = true, 
+          completed_at = COALESCE(completed_at, NOW()),
+          certificate_issued_at = COALESCE(certificate_issued_at, completed_at, NOW())
+      WHERE progress_percent >= 100 AND is_completed = false
+    `);
+
+    // High-performance partial indexes for high concurrency at scale
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_subjects_lookup 
+        ON user_subjects(user_id, subject_id, is_completed);
+
+      CREATE INDEX IF NOT EXISTS idx_ulp_completed 
+        ON user_lesson_progress(user_id, lesson_content_id) 
+        WHERE is_completed = true;
+
+      CREATE INDEX IF NOT EXISTS idx_quiz_attempts_passed 
+        ON quiz_attempts(user_id, quiz_id) 
+        WHERE is_passed = true;
+
+      CREATE INDEX IF NOT EXISTS idx_exercise_submissions_passed 
+        ON exercise_submissions(user_id, exercise_id) 
+        WHERE is_passed = true;
+    `);
 
     // ── Video Recommendation Engine ─────────────────────────────────────────────
     await client.query(`

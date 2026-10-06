@@ -762,9 +762,9 @@ exports.publishCourse = async (req, res) => {
     for (let mi = 0; mi < modulesRes.rows.length; mi++) {
       const mod = modulesRes.rows[mi];
 
-      // Match existing topic by order_index or title
+      // Match existing topic strictly by title
       let topicId = null;
-      const matchedTopic = existingTopics[mi] || existingTopics.find((t) => t.title.trim().toLowerCase() === mod.title.trim().toLowerCase());
+      const matchedTopic = existingTopics.find((t) => t.title.trim().toLowerCase() === mod.title.trim().toLowerCase());
       if (matchedTopic) {
         topicId = matchedTopic.id;
         await client.query(
@@ -828,7 +828,7 @@ exports.publishCourse = async (req, res) => {
         const aiTopic = aiTopics.rows[ti];
 
         let unitId = null;
-        const matchedUnit = existingUnits[ti] || existingUnits.find((u) => u.title.trim().toLowerCase() === aiTopic.title.trim().toLowerCase());
+        const matchedUnit = existingUnits.find((u) => u.title.trim().toLowerCase() === aiTopic.title.trim().toLowerCase());
         if (matchedUnit) {
           unitId = matchedUnit.id;
           await client.query(
@@ -877,12 +877,11 @@ exports.publishCourse = async (req, res) => {
               `UPDATE quizzes SET passing_score = $1, max_score = $2, updated_at = NOW() WHERE id = $3`,
               [Math.ceil(totalPoints * 0.7), totalPoints, quizId],
             );
-            // Replace questions cleanly under existing quizId
+            // Soft-deprecate existing active questions under quizId to preserve historical student attempts
             await client.query(
-              `DELETE FROM quiz_question_options WHERE question_id IN (SELECT id FROM quiz_questions WHERE quiz_id = $1)`,
+              `UPDATE quiz_questions SET is_deleted = true, updated_at = NOW() WHERE quiz_id = $1 AND is_deleted = false`,
               [quizId],
             );
-            await client.query(`DELETE FROM quiz_questions WHERE quiz_id = $1`, [quizId]);
           } else {
             const quizRes = await client.query(
               `INSERT INTO quizzes (unit_id, passing_score, max_score) VALUES ($1, $2, $3) RETURNING id`,
@@ -932,7 +931,7 @@ exports.publishCourse = async (req, res) => {
           const aiLesson = aiLessons.rows[li];
 
           let subtopicId = null;
-          const matchedSubtopic = existingSubtopics[li] || existingSubtopics.find((s) => s.title.trim().toLowerCase() === aiLesson.title.trim().toLowerCase());
+          const matchedSubtopic = existingSubtopics.find((s) => s.title.trim().toLowerCase() === aiLesson.title.trim().toLowerCase());
           if (matchedSubtopic) {
             subtopicId = matchedSubtopic.id;
             await client.query(
@@ -1026,10 +1025,21 @@ exports.publishCourse = async (req, res) => {
         [subjectId],
       );
       if (lastTopicRes.rows.length) {
-        await client.query(
-          `INSERT INTO projects (topic_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
-          [lastTopicRes.rows[0].id, cp.title || `${course.title} — Final Capstone`, cp.instructions || cp.description || null, 100],
+        const existingCapstone = await client.query(
+          `SELECT id FROM projects WHERE topic_id = $1 AND is_deleted = false LIMIT 1`,
+          [lastTopicRes.rows[0].id],
         );
+        if (existingCapstone.rows.length) {
+          await client.query(
+            `UPDATE projects SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
+            [cp.title || `${course.title} — Final Capstone`, cp.instructions || cp.description || null, 100, existingCapstone.rows[0].id],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO projects (topic_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
+            [lastTopicRes.rows[0].id, cp.title || `${course.title} — Final Capstone`, cp.instructions || cp.description || null, 100],
+          );
+        }
       }
     }
 
