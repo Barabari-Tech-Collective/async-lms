@@ -378,6 +378,36 @@ export default function AiCurriculumReview() {
               </div>
             </div>
 
+            {/* Change Manifest Diff Banner */}
+            {course.pending_changes_summary && course.pending_changes_summary.total > 0 && (
+              <div className='bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs'>
+                <div className='flex items-center gap-2 flex-wrap'>
+                  <span className='text-xs font-bold text-slate-500 uppercase tracking-wider'>Change Manifest:</span>
+                  {course.pending_changes_summary.new_lessons > 0 && (
+                    <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200'>
+                      +{course.pending_changes_summary.new_lessons} New Lesson{course.pending_changes_summary.new_lessons > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {Boolean(course.pending_changes_summary.modified_lessons && course.pending_changes_summary.modified_lessons > 0) && (
+                    <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200'>
+                      ~{course.pending_changes_summary.modified_lessons} Modified
+                    </span>
+                  )}
+                  {Boolean(course.pending_changes_summary.new_quizzes && course.pending_changes_summary.new_quizzes > 0) && (
+                    <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200'>
+                      +{course.pending_changes_summary.new_quizzes} New Quiz{course.pending_changes_summary.new_quizzes > 1 ? 'zes' : ''}
+                    </span>
+                  )}
+                  {Boolean(course.pending_changes_summary.new_assignments && course.pending_changes_summary.new_assignments > 0) && (
+                    <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200'>
+                      +{course.pending_changes_summary.new_assignments} New Assignment{course.pending_changes_summary.new_assignments > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <span className='text-xs text-slate-400 font-medium'>Submitted by {course.creator_name}</span>
+              </div>
+            )}
+
             {/* Module cards */}
             {course.modules.map((mod, i) => (
               <ModuleCard key={mod.id} mod={mod} index={i} />

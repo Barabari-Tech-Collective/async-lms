@@ -8,7 +8,7 @@ const {
   generateCapstone, generateExerciseTests, generateContentFromFile, generateExerciseFromFile,
 } = require('../services/aiCurriculumService');
 const pdfParse = require('pdf-parse');
-const { notify } = require('../services/notificationService');
+const { notify, notifySubjectStudents } = require('../services/notificationService');
 const { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const path = require('path');
@@ -415,6 +415,9 @@ exports.getCourse = async (req, res) => {
     let newModulesCount = 0;
     let newTopicsCount = 0;
     let newLessonsCount = 0;
+    let modifiedLessonsCount = 0;
+    let newQuizzesCount = 0;
+    let newAssignmentsCount = 0;
 
     const modulesRes = await pool.query(
       `SELECT * FROM ai_course_modules WHERE course_id = $1 AND is_deleted = false ORDER BY order_index`,
@@ -478,6 +481,21 @@ exports.getCourse = async (req, res) => {
         );
         if (isTopicNew) newTopicsCount++;
 
+        if (topic.quiz_questions) {
+          const qq = typeof topic.quiz_questions === 'string' ? JSON.parse(topic.quiz_questions) : topic.quiz_questions;
+          if (Array.isArray(qq) && qq.length > 0) {
+            if (isTopicNew || (lastPublishedTime && topic.updated_at && new Date(topic.updated_at).getTime() > lastPublishedTime)) {
+              newQuizzesCount++;
+            }
+          }
+        }
+
+        if (topic.assignment) {
+          if (isTopicNew || (lastPublishedTime && topic.updated_at && new Date(topic.updated_at).getTime() > lastPublishedTime)) {
+            newAssignmentsCount++;
+          }
+        }
+
         const rawLessons = lessonsByTopicId.get(topic.id) || [];
         const signedLessons = await Promise.all(rawLessons.map(async (lesson) => {
           const isLessonNew = Boolean(
@@ -492,6 +510,7 @@ exports.getCourse = async (req, res) => {
             new Date(lesson.updated_at).getTime() > lastPublishedTime
           );
           if (isLessonNew) newLessonsCount++;
+          if (isLessonModified) modifiedLessonsCount++;
 
           const updatedLesson = { ...lesson, is_new: isLessonNew, is_modified: isLessonModified };
 
@@ -547,7 +566,10 @@ exports.getCourse = async (req, res) => {
       new_modules: newModulesCount,
       new_topics: newTopicsCount,
       new_lessons: newLessonsCount,
-      total: newModulesCount + newTopicsCount + newLessonsCount,
+      modified_lessons: modifiedLessonsCount,
+      new_quizzes: newQuizzesCount,
+      new_assignments: newAssignmentsCount,
+      total: newModulesCount + newTopicsCount + newLessonsCount + modifiedLessonsCount + newQuizzesCount + newAssignmentsCount,
     };
 
     res.json({ success: true, data: { ...course, modules, pending_changes_summary, reviews: reviewsRes.rows } });
@@ -754,6 +776,11 @@ exports.publishCourse = async (req, res) => {
     const activeUnitIds = new Set();
     const activeSubtopicIds = new Set();
 
+    let newLessonsCount = 0;
+    let modifiedLessonsCount = 0;
+    let newQuizzesCount = 0;
+    let newAssignmentsCount = 0;
+
     // Fetch modules
     const modulesRes = await client.query(
       `SELECT * FROM ai_course_modules WHERE course_id = $1 AND is_deleted = false ORDER BY order_index`, [id],
@@ -862,6 +889,7 @@ exports.publishCourse = async (req, res) => {
               `INSERT INTO assignments (unit_id, title, instructions, max_score, allowed_submission_types) VALUES ($1,$2,$3,$4,$5)`,
               [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes)],
             );
+            newAssignmentsCount++;
           }
         }
 
@@ -888,6 +916,7 @@ exports.publishCourse = async (req, res) => {
               [unitId, Math.ceil(totalPoints * 0.7), totalPoints],
             );
             quizId = quizRes.rows[0].id;
+            newQuizzesCount++;
           }
 
           for (let qi = 0; qi < rawTopicQuiz.length; qi++) {
@@ -934,10 +963,22 @@ exports.publishCourse = async (req, res) => {
           const matchedSubtopic = existingSubtopics.find((s) => s.title.trim().toLowerCase() === aiLesson.title.trim().toLowerCase());
           if (matchedSubtopic) {
             subtopicId = matchedSubtopic.id;
-            await client.query(
-              `UPDATE subtopics SET title = $1, description = $2, order_index = $3, updated_at = NOW() WHERE id = $4`,
+            const updateSubRes = await client.query(
+              `UPDATE subtopics 
+               SET title = $1, 
+                   description = $2, 
+                   order_index = $3, 
+                   updated_at = CASE 
+                     WHEN title IS DISTINCT FROM $1 OR description IS DISTINCT FROM $2 THEN NOW() 
+                     ELSE updated_at 
+                   END 
+               WHERE id = $4
+               RETURNING (updated_at = NOW()) as was_updated`,
               [aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, li, subtopicId],
             );
+            if (updateSubRes.rows[0]?.was_updated) {
+              modifiedLessonsCount++;
+            }
           } else {
             const subtopicSlug = uniqueSlug(aiLesson.title, `${Date.now()}-${li}`);
             const subtopicRes = await client.query(
@@ -945,6 +986,7 @@ exports.publishCourse = async (req, res) => {
               [unitId, aiLesson.title, aiLesson.explanation?.substring(0, 200) || null, subtopicSlug, li],
             );
             subtopicId = subtopicRes.rows[0].id;
+            newLessonsCount++;
           }
           activeSubtopicIds.add(subtopicId);
 
@@ -964,7 +1006,12 @@ exports.publishCourse = async (req, res) => {
              ON CONFLICT (subtopic_id, version) DO UPDATE SET
                markdown_path = EXCLUDED.markdown_path,
                video_url = EXCLUDED.video_url,
-               updated_at = NOW()`,
+               updated_at = CASE 
+                 WHEN lesson_content.markdown_path IS DISTINCT FROM EXCLUDED.markdown_path 
+                   OR lesson_content.video_url IS DISTINCT FROM EXCLUDED.video_url 
+                 THEN NOW() 
+                 ELSE lesson_content.updated_at 
+               END`,
             [subtopicId, `ai-generated:${markdown}`, aiLesson.video_url || null],
           );
 
@@ -1067,6 +1114,32 @@ exports.publishCourse = async (req, res) => {
       body: `"${course.title}" is now live as a subject for students.`,
       link: `/dashboard/admin/subjects`,
     });
+
+    // Notify enrolled students on republish with exact change manifest (Trap 2 fix)
+    try {
+      const subjectSlugRes = await pool.query(`SELECT slug FROM subjects WHERE id = $1`, [subjectId]);
+      const subjectSlug = subjectSlugRes.rows[0]?.slug;
+
+      const changeParts = [];
+      if (newLessonsCount > 0) changeParts.push(`${newLessonsCount} new lesson${newLessonsCount > 1 ? 's' : ''}`);
+      if (modifiedLessonsCount > 0) changeParts.push(`${modifiedLessonsCount} updated lesson${modifiedLessonsCount > 1 ? 's' : ''}`);
+      if (newQuizzesCount > 0) changeParts.push(`${newQuizzesCount} new quiz${newQuizzesCount > 1 ? 'zes' : ''}`);
+      if (newAssignmentsCount > 0) changeParts.push(`${newAssignmentsCount} new assignment${newAssignmentsCount > 1 ? 's' : ''}`);
+
+      const changeSummary = changeParts.length > 0
+        ? changeParts.join(', ')
+        : 'New curriculum materials and updates';
+
+      await notifySubjectStudents({
+        subjectId,
+        type: 'course_update',
+        title: `Course Updated: ${course.title}`,
+        body: `${changeSummary} added to ${course.title}. Click to explore!`,
+        link: subjectSlug ? `/dashboard/student/courses/${subjectSlug}` : '/dashboard/student/courses',
+      });
+    } catch (notifErr) {
+      console.error('[publishCourse] Error sending student notifications:', notifErr.message);
+    }
 
     res.json({ success: true, data: { subject_id: subjectId } });
   } catch (err) {

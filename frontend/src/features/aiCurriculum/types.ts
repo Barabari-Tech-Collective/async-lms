@@ -125,6 +125,9 @@ export interface AiCourse {
     new_modules: number;
     new_topics: number;
     new_lessons: number;
+    modified_lessons?: number;
+    new_quizzes?: number;
+    new_assignments?: number;
     total: number;
   };
   created_at: string;
