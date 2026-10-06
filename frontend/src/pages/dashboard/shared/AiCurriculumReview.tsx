@@ -395,12 +395,12 @@ export default function AiCurriculumReview() {
                   )}
                   {Boolean(course.pending_changes_summary.new_quizzes && course.pending_changes_summary.new_quizzes > 0) && (
                     <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200'>
-                      +{course.pending_changes_summary.new_quizzes} New Quiz{course.pending_changes_summary.new_quizzes > 1 ? 'zes' : ''}
+                      +{course.pending_changes_summary.new_quizzes} New Quiz{(course.pending_changes_summary.new_quizzes || 0) > 1 ? 'zes' : ''}
                     </span>
                   )}
                   {Boolean(course.pending_changes_summary.new_assignments && course.pending_changes_summary.new_assignments > 0) && (
                     <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200'>
-                      +{course.pending_changes_summary.new_assignments} New Assignment{course.pending_changes_summary.new_assignments > 1 ? 's' : ''}
+                      +{course.pending_changes_summary.new_assignments} New Assignment{(course.pending_changes_summary.new_assignments || 0) > 1 ? 's' : ''}
                     </span>
                   )}
                 </div>
