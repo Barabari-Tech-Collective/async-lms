@@ -1500,7 +1500,8 @@ exports.submitExercise = async (req, res) => {
       let rawFeedback = resultObj?.feedback || '';
       let feedbackText =
         typeof rawFeedback === 'object' && rawFeedback !== null
-          ? rawFeedback.feedback ||
+          ? rawFeedback.summary ||
+            rawFeedback.feedback ||
             rawFeedback.reason ||
             JSON.stringify(rawFeedback)
           : rawFeedback;
@@ -1524,6 +1525,24 @@ exports.submitExercise = async (req, res) => {
 
         if (Array.isArray(resultObj.rubric_breakdown)) {
           rubricBreakdown = resultObj.rubric_breakdown;
+        } else if (Array.isArray(resultObj.breakdown)) {
+          rubricBreakdown = resultObj.breakdown;
+        } else if (Array.isArray(resultObj.rubricFeedback?.breakdown)) {
+          rubricBreakdown = resultObj.rubricFeedback.breakdown;
+        } else if (Array.isArray(resultObj.feedback?.breakdown)) {
+          rubricBreakdown = resultObj.feedback.breakdown;
+        } else if (resultObj.rubric_breakdown && typeof resultObj.rubric_breakdown === 'object') {
+          rubricBreakdown = Object.entries(resultObj.rubric_breakdown).map(([name, score]) => {
+            const match = rubricItems.find(
+              (r) => r.name && r.name.toLowerCase().trim() === name.toLowerCase().trim()
+            );
+            return {
+              name,
+              score,
+              max_score: match ? match.weight || match.max_score || 100 : 100,
+              feedback: (resultObj.feedback?.issues || []).find((iss) => iss.includes(name)) || ''
+            };
+          });
         } else {
           // Merge visual, dom, behavior, and code breakdowns
           const breakdowns = [
