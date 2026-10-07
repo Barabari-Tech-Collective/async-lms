@@ -433,6 +433,9 @@ exports.runEvaluation = async (req, res) => {
             ? JSON.stringify(assignment.rubric)
             : 'Standard evaluation',
           expectedUrl: assignment.expected_url || 'https://example.com',
+          assignmentId: targetId,
+          skipCache: true,
+          reEvaluate: true,
         };
 
         const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
@@ -1676,6 +1679,9 @@ exports.reEvaluateSubmission = async (req, res) => {
           ...jsConfig,
           rubricText: assignment.rubric ? JSON.stringify(assignment.rubric) : 'Standard evaluation',
           expectedUrl: assignment.expected_url || 'https://example.com',
+          assignmentId: assignmentId,
+          skipCache: true,
+          reEvaluate: true,
         };
 
         const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {

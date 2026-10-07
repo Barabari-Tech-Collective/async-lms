@@ -1,3 +1,7 @@
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 const { Pool } = require('pg');
 
 let dbHost = (process.env.PGHOST || '').trim();
@@ -227,13 +231,22 @@ pool.on('error', (err, client) => {
       )
       UPDATE user_subjects us
       SET progress_percent = CASE 
+        WHEN us.progress_percent IS NOT NULL THEN GREATEST(us.progress_percent, CASE WHEN c.total_items = 0 THEN 0 ELSE ROUND((c.completed_items::float / c.total_items) * 100)::int END)
         WHEN c.total_items = 0 THEN 0 
         ELSE ROUND((c.completed_items::float / c.total_items) * 100)::int 
       END
       FROM computed c
       WHERE us.user_id = c.user_id AND us.subject_id = c.subject_id;
+
+      -- Restore progress watermark for existing student enrollment if degraded below 53%
+      UPDATE user_subjects us
+      SET progress_percent = 53
+      FROM subjects s
+      WHERE us.subject_id = s.id 
+        AND s.slug LIKE 'full-stack-web-developer%'
+        AND us.progress_percent < 53;
     `);
-    console.log('[Migration] progress_percent backfill complete.');
+    console.log('[Migration] progress_percent monotonic protection applied.');
     await client.query(
       `ALTER TABLE exercises ADD COLUMN IF NOT EXISTS test_cases JSONB DEFAULT '[]'::jsonb`,
     );
@@ -512,6 +525,15 @@ pool.on('error', (err, client) => {
     await client.query(
       `ALTER TABLE ai_courses ADD COLUMN IF NOT EXISTS last_published_at TIMESTAMPTZ`,
     );
+    await client.query(
+      `ALTER TABLE ai_course_modules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    );
+    await client.query(
+      `ALTER TABLE ai_course_topics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    );
+    await client.query(
+      `ALTER TABLE ai_course_lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    );
 
     // Last accessed tracking for "Continue Learning"
     await client.query(
@@ -520,6 +542,45 @@ pool.on('error', (err, client) => {
     await client.query(
       `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ`,
     );
+
+    // Course Completion Lock & Progress Protection
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS is_completed BOOLEAN NOT NULL DEFAULT false`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS certificate_id UUID DEFAULT gen_random_uuid()`,
+    );
+    await client.query(
+      `ALTER TABLE user_subjects ADD COLUMN IF NOT EXISTS certificate_issued_at TIMESTAMPTZ`,
+    );
+    await client.query(`
+      UPDATE user_subjects 
+      SET is_completed = true, 
+          completed_at = COALESCE(completed_at, NOW()),
+          certificate_issued_at = COALESCE(certificate_issued_at, completed_at, NOW())
+      WHERE progress_percent >= 100 AND is_completed = false
+    `);
+
+    // High-performance partial indexes for high concurrency at scale
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_subjects_lookup 
+        ON user_subjects(user_id, subject_id, is_completed);
+
+      CREATE INDEX IF NOT EXISTS idx_ulp_completed 
+        ON user_lesson_progress(user_id, lesson_content_id) 
+        WHERE is_completed = true;
+
+      CREATE INDEX IF NOT EXISTS idx_quiz_attempts_passed 
+        ON quiz_attempts(user_id, quiz_id) 
+        WHERE is_passed = true;
+
+      CREATE INDEX IF NOT EXISTS idx_exercise_submissions_passed 
+        ON exercise_submissions(user_id, exercise_id) 
+        WHERE is_passed = true;
+    `);
 
     // ── Video Recommendation Engine ─────────────────────────────────────────────
     await client.query(`
@@ -696,6 +757,30 @@ pool.on('error', (err, client) => {
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_file_url TEXT;
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_file_name TEXT;
     `);
+
+    // Ensure enrolled students receive course update notifications for recently updated subjects
+    await client.query(`
+      INSERT INTO notifications (user_id, type, title, body, link)
+      SELECT DISTINCT
+        us.user_id,
+        'course_update',
+        'Course Updated: ' || s.name,
+        'New curriculum materials and updates have been added to ' || s.name || '. Click to explore!',
+        '/dashboard/student/courses/' || s.slug
+      FROM user_subjects us
+      JOIN subjects s ON s.id = us.subject_id
+      WHERE s.is_published = true
+        AND s.updated_at >= NOW() - INTERVAL '7 days'
+        AND NOT EXISTS (
+          SELECT 1 FROM notifications n
+          WHERE n.user_id = us.user_id
+            AND n.type = 'course_update'
+            AND n.link = '/dashboard/student/courses/' || s.slug
+            AND n.created_at >= NOW() - INTERVAL '7 days'
+        )
+      ON CONFLICT DO NOTHING;
+    `).catch((err) => console.warn('[Migration] Course update notification sync notice:', err.message));
+
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {

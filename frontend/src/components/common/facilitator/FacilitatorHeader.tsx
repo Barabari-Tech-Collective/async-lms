@@ -99,18 +99,18 @@ export default function FacilitatorHeader({
             <DropdownMenuSeparator />
 
             <DropdownMenuItem
-              className='cursor-pointer py-2.5 rounded-md gap-2 text-red-600 focus:text-red-700 focus:bg-red-50'
+              className='cursor-pointer py-2.5 rounded-md focus:text-blue-700 focus:bg-slate-50 gap-2'
               onClick={() => navigate('/dashboard/facilitator/settings')}
             >
-              <User className='h-4 w-4' />
+              <User className='h-4 w-4 text-slate-400' />
               <span className='text-sm font-medium'>My Profile</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              className='cursor-pointer py-2.5 rounded-md gap-2 text-red-600 focus:text-red-700 focus:bg-red-50'
+              className='cursor-pointer py-2.5 rounded-md focus:text-blue-700 focus:bg-slate-50 gap-2'
               onClick={() => navigate('/dashboard/facilitator/settings')}
             >
-              <Settings className='h-4 w-4' />
+              <Settings className='h-4 w-4 text-slate-400' />
               <span className='text-sm font-medium'>Account Settings</span>
             </DropdownMenuItem>
 

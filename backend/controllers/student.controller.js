@@ -480,17 +480,23 @@ exports.getMyProgress = async (req, res) => {
 
     const enrollmentRow = await pool
       .query(
-        `SELECT last_accessed_subtopic_slug FROM user_subjects WHERE user_id = $1 AND subject_id = $2`,
+        `SELECT last_accessed_subtopic_slug, progress_percent, COALESCE(is_completed, false) as is_completed, certificate_id, completed_at FROM user_subjects WHERE user_id = $1 AND subject_id = $2`,
         [userId, subjectId],
       )
       .catch(() => ({ rows: [] }));
     const lastAccessedSlug =
       enrollmentRow.rows[0]?.last_accessed_subtopic_slug ?? null;
+    const isCompleted = Boolean(progressData.is_completed || enrollmentRow.rows[0]?.is_completed);
 
     res.json({
       success: true,
       data: {
         overall_progress: overallProgress,
+        is_completed: isCompleted,
+        has_new_content: Boolean(progressData.has_new_content),
+        new_content_count: Number(progressData.new_content_count || 0),
+        certificate_id: progressData.certificate_id || enrollmentRow.rows[0]?.certificate_id || null,
+        completed_at: progressData.completed_at || enrollmentRow.rows[0]?.completed_at || null,
         total_subtopics: progressData.total,
         completed_subtopics: progressData.completed,
         total_points: totalPoints,
@@ -1360,6 +1366,7 @@ exports.submitExercise = async (req, res) => {
         const payload = {
           type: evaluatorType,
           ideFiles: files,
+          assignmentId: exerciseId,
         };
 
       if (evaluatorType === 'visual') {
@@ -1493,7 +1500,8 @@ exports.submitExercise = async (req, res) => {
       let rawFeedback = resultObj?.feedback || '';
       let feedbackText =
         typeof rawFeedback === 'object' && rawFeedback !== null
-          ? rawFeedback.feedback ||
+          ? rawFeedback.summary ||
+            rawFeedback.feedback ||
             rawFeedback.reason ||
             JSON.stringify(rawFeedback)
           : rawFeedback;
@@ -1517,6 +1525,24 @@ exports.submitExercise = async (req, res) => {
 
         if (Array.isArray(resultObj.rubric_breakdown)) {
           rubricBreakdown = resultObj.rubric_breakdown;
+        } else if (Array.isArray(resultObj.breakdown)) {
+          rubricBreakdown = resultObj.breakdown;
+        } else if (Array.isArray(resultObj.rubricFeedback?.breakdown)) {
+          rubricBreakdown = resultObj.rubricFeedback.breakdown;
+        } else if (Array.isArray(resultObj.feedback?.breakdown)) {
+          rubricBreakdown = resultObj.feedback.breakdown;
+        } else if (resultObj.rubric_breakdown && typeof resultObj.rubric_breakdown === 'object') {
+          rubricBreakdown = Object.entries(resultObj.rubric_breakdown).map(([name, score]) => {
+            const match = rubricItems.find(
+              (r) => r.name && r.name.toLowerCase().trim() === name.toLowerCase().trim()
+            );
+            return {
+              name,
+              score,
+              max_score: match ? match.weight || match.max_score || 100 : 100,
+              feedback: (resultObj.feedback?.issues || []).find((iss) => iss.includes(name)) || ''
+            };
+          });
         } else {
           // Merge visual, dom, behavior, and code breakdowns
           const breakdowns = [

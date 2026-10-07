@@ -101,9 +101,8 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
 
   return (
     <div
-      className={`h-full bg-slate-50 border-r flex flex-col overflow-y-auto shrink-0 ${
-        isMobile ? 'w-full' : 'w-80'
-      }`}
+      className={`h-full bg-slate-50 border-r flex flex-col overflow-y-auto shrink-0 ${isMobile ? 'w-full' : 'w-80'
+        }`}
     >
       <div className='p-4 sm:p-6 border-b bg-white flex items-center justify-between'>
         <h2 className='font-bold text-base sm:text-lg text-slate-900'>Course Content</h2>
@@ -143,15 +142,26 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                       to={`/dashboard/student/courses/${slug}/lesson/${sub.slug}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${
-                          isActive
-                            ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
-                            : 'text-slate-600 hover:bg-slate-50'
+                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
+                          ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
+                          : 'text-slate-600 hover:bg-slate-50'
                         }`
                       }
                     >
                       <PlayCircle className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>{sub.title}</span>
+                      {sub.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {sub.is_updated && !sub.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {sub.is_completed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
@@ -164,15 +174,26 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                       to={`/dashboard/student/courses/${slug}/quiz/${quiz.id}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${
-                          isActive
-                            ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
-                            : 'text-slate-600 hover:bg-slate-50'
+                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
+                          ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
+                          : 'text-slate-600 hover:bg-slate-50'
                         }`
                       }
                     >
                       <ListChecks className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>Quiz</span>
+                      {quiz.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {quiz.is_updated && !quiz.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {quiz.is_passed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
@@ -185,15 +206,26 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                       to={`/dashboard/student/courses/${slug}/assignment/${a.id}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${
-                          isActive
-                            ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
-                            : 'text-slate-600 hover:bg-slate-50'
+                        `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
+                          ? 'border-r-4 border-blue-600 bg-blue-50 text-blue-700 font-semibold'
+                          : 'text-slate-600 hover:bg-slate-50'
                         }`
                       }
                     >
                       <FileText className='h-4 w-4 shrink-0' />
                       <span className='flex-1 truncate'>{a.title}</span>
+                      {a.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                          NEW
+                        </span>
+                      )}
+                      {a.is_updated && !a.is_new && (
+                        <span className='inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0'>
+                          <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+                          UPDATED
+                        </span>
+                      )}
                       {a.is_submitted && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
@@ -207,10 +239,9 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                   to={`/dashboard/student/courses/${slug}/capstone/${topic.capstone.id}`}
                   onClick={handleItemClick}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 py-2.5 pl-4 sm:pl-6 pr-4 text-xs sm:text-sm transition-all border-t border-slate-200 min-h-[44px] ${
-                      isActive
-                        ? 'border-r-4 border-amber-500 bg-amber-50 text-amber-700 font-semibold'
-                        : 'text-slate-600 hover:bg-amber-50/60'
+                    `flex items-center gap-3 py-2.5 pl-4 sm:pl-6 pr-4 text-xs sm:text-sm transition-all border-t border-slate-200 min-h-[44px] ${isActive
+                      ? 'border-r-4 border-amber-500 bg-amber-50 text-amber-700 font-semibold'
+                      : 'text-slate-600 hover:bg-amber-50/60'
                     }`
                   }
                 >

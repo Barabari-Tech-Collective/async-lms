@@ -1385,10 +1385,10 @@ export function RightSidebar({
               New Subtopic
             </span>
           )}
-          {selectedLesson.is_modified && (
+          {(selectedLesson.is_modified || selectedLesson.is_updated) && !selectedLesson.is_new && (
             <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
               <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
-              Edited Subtopic
+              Updated Subtopic
             </span>
           )}
         </div>
@@ -1410,6 +1410,13 @@ export function RightSidebar({
         <div className='bg-emerald-50/80 border-b border-emerald-200/80 px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-900'>
           <Sparkles className='w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse' />
           <span>This is a <strong>newly added subtopic</strong> not yet published to live students.</span>
+        </div>
+      )}
+
+      {(selectedLesson.is_modified || selectedLesson.is_updated) && !selectedLesson.is_new && (
+        <div className='bg-amber-50/80 border-b border-amber-200/80 px-4 py-2 flex items-center gap-2 text-[11px] text-amber-900'>
+          <Sparkles className='w-3.5 h-3.5 text-amber-600 shrink-0' />
+          <span>This subtopic has <strong>unpublished updates</strong> (video, content, or exercise).</span>
         </div>
       )}
 
