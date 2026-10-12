@@ -1409,7 +1409,7 @@ exports.submitExercise = async (req, res) => {
       }
 
       const CENTRAL_URL =
-        process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:3004';
+        process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000';
 
       let evalResponse = null;
       let postRetries = 2;

@@ -407,16 +407,26 @@ exports.runEvaluation = async (req, res) => {
       if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
         const payloadType = (evaluatorType === 'JS') ? 'javascript' : (evaluatorType === 'VISUAL' ? 'visual' : (evaluatorType === 'PYTHON' ? 'python' : evaluatorType));
         
-        let jsConfig = { testCases: assignment.test_cases };
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        let jsConfig = { testCases: rawTestCases };
         
         // If test_cases is a JSON object containing advanced JS configs, extract them
-        if ((payloadType === 'javascript' || payloadType === 'python') && assignment.test_cases && typeof assignment.test_cases === 'object' && !Array.isArray(assignment.test_cases)) {
+        if ((payloadType === 'javascript' || payloadType === 'python') && rawTestCases && typeof rawTestCases === 'object' && !Array.isArray(rawTestCases)) {
            jsConfig = {
-             testCases: assignment.test_cases.testCases || [],
-             evaluationMode: assignment.test_cases.evaluationMode || 'function',
-             entryFunction: assignment.test_cases.entryFunction,
-             functions: assignment.test_cases.functions,
-             expectedLogs: assignment.test_cases.expectedLogs
+             testCases: rawTestCases.testCases || [],
+             evaluationMode: rawTestCases.evaluationMode || 'function',
+             entryFunction: rawTestCases.entryFunction,
+             entryFile: rawTestCases.entryFile,
+             functions: rawTestCases.functions,
+             expectedLogs: rawTestCases.expectedLogs
            };
         }
 
@@ -1292,7 +1302,7 @@ Evaluation Rubric:
 ${rubric ? JSON.stringify(rubric, null, 2) : 'No rubric provided'}`;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "deepseek-v4-flash",
+      model: process.env.OPENAI_MODEL || "deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -1394,7 +1404,7 @@ Instructions:
 ${instructions}`;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "deepseek-v4-flash",
+      model: process.env.OPENAI_MODEL || "deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -1437,10 +1447,10 @@ exports.reEvaluateSubmission = async (req, res) => {
     if (!evaluationId) {
       if (!assignmentId) throw new Error("Either evaluationId or assignmentId must be provided");
 
-      const isCollegeAssignmentRes = await client.query(`SELECT id FROM college_assignments WHERE id = $1`, [assignmentId]);
+      const isCollegeAssignmentRes = await client.query(`SELECT id FROM college_assignments WHERE id::text = $1::text`, [assignmentId]);
       isCollegeAssignment = isCollegeAssignmentRes.rows.length > 0;
 
-      const isProjectRes = await client.query(`SELECT id FROM projects WHERE id = $1`, [assignmentId]);
+      const isProjectRes = await client.query(`SELECT id FROM projects WHERE id::text = $1::text`, [assignmentId]);
       isProject = isProjectRes.rows.length > 0;
       
       const newEval = await client.query(
@@ -1462,16 +1472,16 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           WHERE s.id = ANY($1::uuid[])`
+           WHERE s.id::text = ANY($1::text[])`
         : isProject
         ? `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id = ANY($1::uuid[])`
+           WHERE s.id::text = ANY($1::text[])`
         : `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id = ANY($1::uuid[])`,
+           WHERE s.id::text = ANY($1::text[])`,
         [submissionIds]
       );
       
@@ -1509,14 +1519,18 @@ exports.reEvaluateSubmission = async (req, res) => {
           prev.status_url, 
           prev.created_at
         FROM (
-          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          SELECT DISTINCT ON (COALESCE(r.student_id::text, r.submission_id::text)) r.*
           FROM evaluation_results r
           JOIN evaluations e ON r.evaluation_id = e.id
           WHERE ${targetCol}::text = $2::text
             AND r.status IN ('completed', 'failed')
-            AND r.submission_id != ALL($3::uuid[])
-            AND r.student_id != ALL($4::uuid[])
-          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+            AND (r.submission_id IS NULL OR r.submission_id::text != ALL($3::text[]))
+            AND (r.student_id IS NULL OR r.student_id::text != ALL($4::text[]))
+            AND r.submission_id::text IN (
+              SELECT id::text FROM ${isCollegeAssignment ? 'college_assignment_submissions' : isProject ? 'project_submissions' : 'assignment_submissions'}
+              WHERE ${isCollegeAssignment ? 'college_assignment_id' : isProject ? 'project_id' : 'assignment_id'}::text = $2::text
+            )
+          ORDER BY COALESCE(r.student_id::text, r.submission_id::text), e.created_at DESC, r.created_at DESC
         ) prev
         ON CONFLICT (evaluation_id, submission_id) DO NOTHING
         RETURNING id`,
@@ -1532,7 +1546,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     } else {
       // Fetch the evaluation to get assignmentId or collegeAssignmentId or project_id
       const evalRes = await client.query(
-        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id = $1`,
+        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id::text = $1::text`,
         [evaluationId]
       );
 
@@ -1553,11 +1567,11 @@ exports.reEvaluateSubmission = async (req, res) => {
     // Fetch assignment or project for rubric/test_cases
     let assignmentRes;
     if (isCollegeAssignment) {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type FROM college_assignments WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type FROM college_assignments WHERE id::text = $1::text`, [assignmentId]);
     } else if (isProject) {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'project' as type FROM projects WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'project' as type FROM projects WHERE id::text = $1::text`, [assignmentId]);
     } else {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'unit' as type FROM assignments WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'unit' as type FROM assignments WHERE id::text = $1::text`, [assignmentId]);
     }
     const assignment = assignmentRes.rows[0];
     if (!assignment) throw new Error("Assignment or Project not found");
@@ -1567,22 +1581,22 @@ exports.reEvaluateSubmission = async (req, res) => {
       ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
          FROM college_assignment_submissions s
          JOIN users u ON s.student_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.student_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
+         WHERE s.id::text = ANY($1::text[])
+            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+            OR s.student_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
       : isProject
       ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
          FROM project_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.user_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
+         WHERE s.id::text = ANY($1::text[])
+            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+            OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
       : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
          FROM assignment_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.user_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`;
+         WHERE s.id::text = ANY($1::text[])
+            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+            OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`;
          
     const submissionsRes = await client.query(queryStr, [submissionIds, evaluationId]);
     const submissions = submissionsRes.rows;
@@ -1593,19 +1607,19 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.student_id
-           WHERE er.evaluation_id = $1`
+           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.student_id::text
+           WHERE er.evaluation_id::text = $1::text`
         : isProject
         ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.user_id
-           WHERE er.evaluation_id = $1`
+           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
+           WHERE er.evaluation_id::text = $1::text`
         : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.user_id
-           WHERE er.evaluation_id = $1`;
+           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
+           WHERE er.evaluation_id::text = $1::text`;
       const fallbackRes = await client.query(fallbackQuery, [evaluationId]);
       if (fallbackRes.rows.length > 0) {
         submissions.push(...fallbackRes.rows);
@@ -1654,17 +1668,31 @@ exports.reEvaluateSubmission = async (req, res) => {
 
     let jobIdsAndLinks = [];
 
-    if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
-        const payloadType = (evaluatorType === 'JS') ? 'javascript' : (evaluatorType === 'VISUAL' ? 'visual' : (evaluatorType === 'PYTHON' ? 'python' : evaluatorType));
+    // Resolve effective evaluator type (falling back to assignment's configured type if defaulted to REACT)
+    const effectiveType = (!evaluatorType || evaluatorType === 'REACT')
+      ? (assignment.evaluator_type || evaluatorType || 'AI')
+      : evaluatorType;
+
+    if (effectiveType === 'JS' || effectiveType === 'VISUAL' || effectiveType === 'javascript' || effectiveType === 'visual' || effectiveType === 'PYTHON' || effectiveType === 'python') {
+        const payloadType = (effectiveType === 'JS') ? 'javascript' : (effectiveType === 'VISUAL' ? 'visual' : (effectiveType === 'PYTHON' ? 'python' : effectiveType));
         
-        let jsConfig = { testCases: assignment.test_cases };
-        if ((payloadType === 'javascript' || payloadType === 'python') && assignment.test_cases && typeof assignment.test_cases === 'object' && !Array.isArray(assignment.test_cases)) {
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        let jsConfig = { testCases: rawTestCases };
+        if ((payloadType === 'javascript' || payloadType === 'python') && rawTestCases && typeof rawTestCases === 'object' && !Array.isArray(rawTestCases)) {
            jsConfig = {
-             testCases: assignment.test_cases.testCases || [],
-             evaluationMode: assignment.test_cases.evaluationMode || 'function',
-             entryFunction: assignment.test_cases.entryFunction,
-             functions: assignment.test_cases.functions,
-             expectedLogs: assignment.test_cases.expectedLogs
+             testCases: rawTestCases.testCases || [],
+             evaluationMode: rawTestCases.evaluationMode || 'function',
+             entryFunction: rawTestCases.entryFunction,
+             functions: rawTestCases.functions,
+             expectedLogs: rawTestCases.expectedLogs
            };
         }
 
@@ -1698,8 +1726,8 @@ exports.reEvaluateSubmission = async (req, res) => {
           });
         });
     } else {
-        const typeMap = { REACT: 'react', PYTHON: 'python', FULLSTACK: 'fullstack', AI: 'backend' };
-        const payloadType = typeMap[evaluatorType] || typeMap[evaluatorType.toUpperCase()] || 'backend';
+        const typeMap = { REACT: 'react', PYTHON: 'python', FULLSTACK: 'fullstack', AI: 'backend', BACKEND: 'backend' };
+        const payloadType = typeMap[effectiveType] || typeMap[effectiveType.toUpperCase()] || 'backend';
 
         let rubricObj = assignment.rubric;
         if (typeof assignment.rubric === 'string') {
@@ -1717,6 +1745,16 @@ exports.reEvaluateSubmission = async (req, res) => {
           formattedRubric = rubricObj;
         } else {
           formattedRubric = { criteria: [{ name: 'Standard Grading', weight: 100 }] };
+        }
+
+        // Normalize criteria fields (central-evaluator requires string 'name' and positive numeric 'weight')
+        formattedRubric.criteria = (formattedRubric.criteria || []).map((c) => ({
+          name: typeof c === 'string' ? c : (c.name || c.title || c.criterion || 'Standard Grading'),
+          weight: typeof c === 'object' && Number(c.weight || c.marks || c.points || c.score) > 0 ? Number(c.weight || c.marks || c.points || c.score) : 10,
+          description: typeof c === 'object' ? (c.description || '') : ''
+        }));
+        if (!formattedRubric.criteria.length) {
+          formattedRubric.criteria = [{ name: 'Standard Grading', weight: 100 }];
         }
 
         let testCasesObj = assignment.test_cases;
@@ -1769,7 +1807,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     for (const j of jobIdsAndLinks) {
       await client.query(
         `UPDATE evaluation_results
-         SET job_id = $1, status = 'pending', status_url = $2, marks = 0, feedback = ''
+         SET job_id = $1, status = 'pending', status_url = $2
          WHERE evaluation_id = $3 AND submission_id = $4`,
         [j.jobId, j.statusUrl, evaluationId, j.submissionId],
       );
@@ -1790,12 +1828,25 @@ exports.reEvaluateSubmission = async (req, res) => {
     return res.json({ success: true, message: "Re-evaluation started" });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.log('Re-evaluate Error:', error.message);
-    if (error.response) {
-      console.log('Evaluator API Response Data:', error.response.data);
-      return res.status(500).json({ success: false, message: error.response.data.error || error.response.data.message || error.message });
-    }
-    return res.status(500).json({ success: false, message: error.message });
+    const evaluatorData = error.response?.data;
+    const evaluatorMsg = (evaluatorData && typeof evaluatorData === 'object')
+      ? (evaluatorData.error || evaluatorData.message)
+      : (typeof evaluatorData === 'string' && evaluatorData.trim() ? evaluatorData : null);
+    const errString = error?.toString && error.toString() !== '[object Object]' ? error.toString() : null;
+    const finalMsg = evaluatorMsg || error.message || error.code || error.detail || errString || 'Evaluator request failed';
+    console.error('Re-evaluate Full Error Dump:', {
+      finalMsg,
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack
+    });
+    return res.status(500).json({ 
+      success: false, 
+      message: finalMsg,
+      errorDetail: error.message || error.code || error.response?.status || 'Unknown'
+    });
   } finally {
     client.release();
   }

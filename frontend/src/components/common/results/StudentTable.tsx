@@ -372,9 +372,16 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                     ) : (
                       <span className="text-green-700 text-[10px] font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-200">Evaluated</span>
                     )}
-                    <span className="font-extrabold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
-                      {item.marks} pts
-                    </span>
+
+                    {item.status === 'pending' ? (
+                      <span className="font-semibold text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 animate-pulse">
+                        Evaluating...
+                      </span>
+                    ) : (
+                      <span className="font-extrabold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+                        {item.marks} pts
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -460,7 +467,15 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                       <span className="text-green-700 text-xs font-semibold bg-green-50 px-2.5 py-0.5 rounded-full border border-green-200">Evaluated</span>
                     )}
                   </td>
-                  <td className="p-3 text-center font-bold text-slate-900">{item.marks}</td>
+                  <td className="p-3 text-center font-bold text-slate-900">
+                    {item.status === 'pending' ? (
+                      <span className="text-amber-700 text-xs font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 animate-pulse">
+                        Evaluating...
+                      </span>
+                    ) : (
+                      item.marks
+                    )}
+                  </td>
                   <td className="p-3"><FeedbackCell feedback={item.feedback} /></td>
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-2">
