@@ -237,14 +237,6 @@ pool.on('error', (err, client) => {
       END
       FROM computed c
       WHERE us.user_id = c.user_id AND us.subject_id = c.subject_id;
-
-      -- Restore progress watermark for existing student enrollment if degraded below 53%
-      UPDATE user_subjects us
-      SET progress_percent = 53
-      FROM subjects s
-      WHERE us.subject_id = s.id 
-        AND s.slug LIKE 'full-stack-web-developer%'
-        AND us.progress_percent < 53;
     `);
     console.log('[Migration] progress_percent monotonic protection applied.');
     await client.query(

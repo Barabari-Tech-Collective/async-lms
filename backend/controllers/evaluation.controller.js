@@ -57,7 +57,7 @@ function isAllowedSpreadsheetUrl(urlStr) {
     const allowed = ['docs.google.com', 'sheets.google.com', 'onedrive.live.com', '1drv.ms', 'sharepoint.com'];
     if (allowed.some(h => host === h || host.endsWith('.' + h))) return true;
     const pathLower = parsed.pathname.toLowerCase();
-    return pathLower.endsWith('.xlsx') || pathLower.endsWith('.xls') || pathLower.endsWith('.xlsm') || pathLower.endsWith('.csv') || parsed.search.toLowerCase().includes('format=xlsx');
+    return pathLower.endsWith('.xlsx') || pathLower.endsWith('.xlsm') || parsed.search.toLowerCase().includes('format=xlsx');
   } catch {
     return false;
   }
@@ -296,7 +296,7 @@ exports.runEvaluation = async (req, res) => {
           WHERE ${targetCol}::text = $2::text
             AND r.status IN ('completed', 'failed')
             AND r.submission_id != ALL($3::uuid[])
-            AND r.student_id != ALL($4::uuid[])
+            AND (r.student_id IS NULL OR r.student_id != ALL($4::uuid[]))
           ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
         ) prev
         ON CONFLICT (evaluation_id, submission_id) DO NOTHING
