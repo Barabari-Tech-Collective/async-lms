@@ -335,6 +335,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
               <option value='REACT'>React Evaluator</option>
               <option value='FULLSTACK'>Full Stack Evaluator</option>
               <option value='AI'>Backend API Evaluator</option>
+              <option value='EXCEL'>Excel Spreadsheet Evaluator</option>
             </select>
           </div>
 

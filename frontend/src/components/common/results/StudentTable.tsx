@@ -95,6 +95,18 @@ const FeedbackCell = ({ feedback }: { feedback: string | object | null }) => {
     ? parsed.breakdown
     : (Array.isArray(parsed.rubric_breakdown) && parsed.rubric_breakdown.length > 0 ? parsed.rubric_breakdown : []);
 
+  const cellEvidenceData: any[] = Array.isArray(parsed.cell_evidence)
+    ? parsed.cell_evidence
+    : (Array.isArray(parsed.assertion_results) ? parsed.assertion_results : []);
+
+  const failedCellEvidence = cellEvidenceData.filter((c: any) => c.passed === false);
+  const displayCellEvidence = (failedCellEvidence.length > 0 ? failedCellEvidence : cellEvidenceData.slice(0, 5)).map((c: any) => {
+    const sheetPrefix = c.sheet ? `${c.sheet}!` : '';
+    const cellRef = c.cell ? `[${sheetPrefix}${c.cell}] ` : (c.sheet ? `[${c.sheet}] ` : '');
+    const symbol = c.passed ? '✓' : '✗';
+    return `${symbol} ${cellRef}${c.reason || c.criterion || 'Cell assertion'}`;
+  });
+
   const summary: string | undefined = parsed.summary || parsed.feedback;
   const lists: { label: string; items: string[]; color?: string }[] = [
     {
@@ -113,6 +125,11 @@ const FeedbackCell = ({ feedback }: { feedback: string | object | null }) => {
         (b: any) => `${b.item || b.criterion || b.name || 'Criterion'}: ${b.awarded ?? b.points_awarded ?? b.score ?? 0}/${b.max ?? b.max_points ?? b.weight ?? ''} pts — ${b.reason || b.feedback || ''}`
       ),
       color: 'text-slate-600',
+    },
+    {
+      label: '🔍 Cell-Level Evidence',
+      items: displayCellEvidence,
+      color: failedCellEvidence.length > 0 ? 'text-amber-700' : 'text-slate-600',
     },
   ].filter((l) => l.items.length > 0);
 
@@ -313,6 +330,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
               <option value='backend'>Backend (Node)</option>
               <option value='python'>Python</option>
               <option value='fullstack'>Fullstack</option>
+              <option value='EXCEL'>Excel</option>
             </select>
             <button 
               className="text-xs sm:text-sm font-semibold px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 min-h-[36px] transition shadow-xs"

@@ -12,6 +12,7 @@ const EVALUATOR_APIS = {
   VISUAL: 'Visual / DOM Evaluator',
   PYTHON: 'Python Evaluator',
   FULLSTACK: 'Fullstack Evaluator',
+  EXCEL: 'Excel Spreadsheet Evaluator',
 };
 
 // Render free-tier services can accept the TCP connection right after waking
@@ -44,6 +45,37 @@ function isAllowedGitUrl(urlStr) {
     return false;
   }
 }
+
+function isAllowedSpreadsheetUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const trimmed = urlStr.trim();
+    if (!trimmed) return false;
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    const allowed = ['docs.google.com', 'sheets.google.com', 'onedrive.live.com', '1drv.ms', 'sharepoint.com'];
+    if (allowed.some(h => host === h || host.endsWith('.' + h))) return true;
+    const pathLower = parsed.pathname.toLowerCase();
+    return pathLower.endsWith('.xlsx') || pathLower.endsWith('.xls') || pathLower.endsWith('.xlsm') || pathLower.endsWith('.csv') || parsed.search.toLowerCase().includes('format=xlsx');
+  } catch {
+    return false;
+  }
+}
+
+function getSpreadsheetDownloadUrl(sub) {
+  if (sub?.submission_file_url) return sub.submission_file_url;
+  const link = (sub?.submission_link || '').trim();
+  if (!link) return null;
+  if (link.includes('docs.google.com/spreadsheets')) {
+    const match = link.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (match && match[1]) {
+      return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
+    }
+  }
+  return link;
+}
+
 exports.runEvaluation = async (req, res) => {
   const { assignmentId, projectId, evaluatorType: reqEvaluatorType, scope = 'pending' } = req.body;
   const targetId = projectId || assignmentId;
@@ -290,7 +322,7 @@ exports.runEvaluation = async (req, res) => {
       throw new Error('Rubric missing for REACT evaluator');
     }
 
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     console.log('Evaluator service api & key: ', evaluatorUrl, evaluatorApiKey);
@@ -299,23 +331,38 @@ exports.runEvaluation = async (req, res) => {
     let jobIdsAndLinks = []; // { jobId, statusUrl, submissionId, studentName, studentId }
 
     try {
-      // Filter git vs non-git submissions
-      const validSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type === 'github' || (!s.submission_type && s.submission_link)) &&
-          !!s.submission_link &&
-          isAllowedGitUrl(s.submission_link),
-      );
-      const nonGitSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type && s.submission_type !== 'github') ||
-          (!s.submission_link && !!s.submission_file_url),
-      );
-      const invalidSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type === 'github' || (!s.submission_type && !s.submission_file_url)) &&
-          (!s.submission_link || !isAllowedGitUrl(s.submission_link)),
-      );
+      const isExcelEvaluation = (evaluatorType === 'EXCEL' || evaluatorType === 'excel');
+
+      // Filter submissions based on evaluator requirements
+      let validSubmissions = [];
+      let nonGitSubmissions = [];
+      let invalidSubmissions = [];
+
+      if (isExcelEvaluation) {
+        validSubmissions = submissions.filter(
+          (s) => !!(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        );
+        invalidSubmissions = submissions.filter(
+          (s) => !(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        );
+      } else {
+        validSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type === 'github' || (!s.submission_type && s.submission_link)) &&
+            !!s.submission_link &&
+            isAllowedGitUrl(s.submission_link),
+        );
+        nonGitSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type && s.submission_type !== 'github') ||
+            (!s.submission_link && !!s.submission_file_url),
+        );
+        invalidSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type === 'github' || (!s.submission_type && !s.submission_file_url)) &&
+            (!s.submission_link || !isAllowedGitUrl(s.submission_link)),
+        );
+      }
 
       if (nonGitSubmissions.length > 0) {
         // Queue non-git submissions for manual facilitator review
@@ -350,13 +397,19 @@ exports.runEvaluation = async (req, res) => {
         );
         // Instantly mark them as failed in the DB
         for (const invalid of invalidSubmissions) {
-          let reason = 'No repository URL provided by student.';
+          let reason = isExcelEvaluation
+            ? 'No spreadsheet URL or file provided by student.'
+            : 'No repository URL provided by student.';
           if (invalid.submission_link) {
             try {
               const h = new URL(invalid.submission_link).hostname;
-              reason = `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
+              reason = isExcelEvaluation
+                ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
+                : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
             } catch {
-              reason = 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
+              reason = isExcelEvaluation
+                ? 'Invalid spreadsheet URL format.'
+                : 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
             }
           }
           const failFeedback = JSON.stringify({
@@ -403,8 +456,67 @@ exports.runEvaluation = async (req, res) => {
       }
 
       // Create payloads based on evaluator type capabilities
-      // visual and javascript accept arrays. backend and react accept singles.
-      if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
+      // visual, javascript, and excel accept batch arrays. backend and react accept singles.
+      if (evaluatorType === 'EXCEL' || evaluatorType === 'excel') {
+        let formattedRubric;
+        if (assignment.rubric && Array.isArray(assignment.rubric)) {
+          formattedRubric = { criteria: assignment.rubric };
+        } else if (
+          assignment.rubric &&
+          assignment.rubric.criteria &&
+          Array.isArray(assignment.rubric.criteria)
+        ) {
+          formattedRubric = assignment.rubric;
+        } else {
+          formattedRubric = {
+            criteria: [{ name: 'Standard Grading', weight: 100 }],
+          };
+        }
+
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        const payload = {
+          type: 'excel',
+          submissions: validSubmissions.map((s) => ({
+            submissionId: s.submission_id || s.id,
+            fileUrl: getSpreadsheetDownloadUrl(s),
+            studentName: s.student_name,
+            studentId: s.user_id || s.student_id,
+          })),
+          rubric: formattedRubric,
+          testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
+          assignmentId: targetId,
+          skipCache: true,
+          reEvaluate: true,
+        };
+
+        const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
+          headers: { 'x-api-key': evaluatorApiKey },
+          timeout: 45000,
+        });
+
+        const jobs = response.data.jobs || [response.data];
+        jobs.forEach((job, index) => {
+          jobIdsAndLinks.push({
+            jobId: job.jobId || job.id,
+            statusUrl: job.statusUrl,
+            submissionId:
+              validSubmissions[index].submission_id ||
+              validSubmissions[index].id,
+            studentName: validSubmissions[index].student_name,
+            studentId:
+              validSubmissions[index].user_id ||
+              validSubmissions[index].student_id,
+          });
+        });
+      } else if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
         const payloadType = (evaluatorType === 'JS') ? 'javascript' : (evaluatorType === 'VISUAL' ? 'visual' : (evaluatorType === 'PYTHON' ? 'python' : evaluatorType));
         
         let rawTestCases = assignment.test_cases;
@@ -656,7 +768,8 @@ exports.syncEvaluationStatus = async (req, res) => {
           continue;
         }
 
-        const url = `${process.env.CENTRAL_EVALUATOR_URL}${job.status_url}`;
+        const baseUrl = process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000';
+        const url = `${baseUrl}${job.status_url}`;
         const response = await axios.get(url, {
           headers: { 'x-api-key': process.env.CENTRAL_EVALUATOR_API_KEY },
         });
@@ -708,6 +821,12 @@ exports.syncEvaluationStatus = async (req, res) => {
                 } catch {
                   const s = String(feedback || '').trim();
                   feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
+                }
+              }
+
+              if (feedback && typeof feedback === 'object') {
+                if (!feedback.cell_evidence && (finalData?.cell_evidence || finalData?.assertion_results)) {
+                  feedback.cell_evidence = finalData.cell_evidence || finalData.assertion_results;
                 }
               }
             }
@@ -1262,7 +1381,106 @@ exports.generateTestCases = async (req, res) => {
       return res.status(400).json({ success: false, message: "Instructions are required to generate test cases." });
     }
 
-    const systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
+    let systemPrompt;
+    if (evaluatorType?.toLowerCase() === 'excel') {
+      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated Excel spreadsheet grading system.
+    
+Based on the Assignment Title, Instructions, and Evaluation Rubric provided by the user, you must output ONLY a raw JSON array of test case objects. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with [ and ending with ].
+
+CRITICAL RULE: Your generated test cases must closely align with the provided Evaluation Rubric criteria. Ensure that every test case has a "criterion" property matching one of the rubric criteria names.
+
+Supported Test Case Types:
+1. "formula_range_check": Verifies that a specific column/range contains dynamic formulas without static hardcoded numbers.
+   {
+     "criterion": "Matching Rubric Criterion Name",
+     "type": "formula_range_check",
+     "range": "D2:D20",
+     "mustBeFormula": true,
+     "forbiddenConstants": true
+   }
+
+2. "function_check": Verifies that a range uses specific required spreadsheet functions.
+   {
+     "criterion": "Matching Rubric Criterion Name",
+     "type": "function_check",
+     "range": "E2:E20",
+     "acceptedFunctions": ["XLOOKUP", "VLOOKUP", "INDEX_MATCH"]
+   }
+
+3. "value_check": Verifies that an explicit cell or anchor label calculates to or matches the expected value.
+   {
+     "criterion": "Matching Rubric Criterion Name",
+     "type": "value_check",
+     "anchor": "Net Profit",
+     "direction": "right",
+     "expectedValue": 25000,
+     "tolerance": 0.05
+   }
+   (Alternatively, use "cell": "E20" instead of "anchor" if explicit cell address is specified).
+
+4. "format_check": Verifies cell styling, headers, borders, and number formatting.
+   {
+     "criterion": "Data Formatting & Structure",
+     "type": "format_check",
+     "range": "A1:C1",
+     "bold": true,
+     "align": "center",
+     "hasFill": true,
+     "hasBorder": true
+   }
+   (For currency formatting):
+   {
+     "criterion": "Data Formatting & Structure",
+     "type": "format_check",
+     "range": "C2:C5",
+     "numberFormat": "currency"
+   }
+
+5. "data_check": Verifies that all table cells in a range contain non-empty entered data (catches missing rows or deleted cell values).
+   {
+     "criterion": "Enter Data",
+     "type": "data_check",
+     "range": "A2:C6"
+   }
+
+6. "chart_check": Verifies that a chart or graph exists with specified type and title.
+   {
+     "criterion": "Charts & Visualizations",
+     "type": "chart_check",
+     "chartType": "bar",
+     "title": "Sales by Product"
+   }
+
+7. "pivot_check": Verifies that native Pivot Table exists with required data fields.
+   {
+     "criterion": "Pivot Tables & Aggregations",
+     "type": "pivot_check",
+     "minPivotTables": 1,
+     "requiredField": "Price"
+   }
+
+8. "macro_check": Verifies that VBA macros and subroutines exist in workbook.
+   {
+     "criterion": "VBA & Macros Automation",
+     "type": "macro_check",
+     "requireVba": true,
+     "requiredSub": "CalculateTotal"
+   }
+
+9. "formula_behavior_check": Tests formula responsiveness by mutating input cells on temporary copies and verifying updated outputs.
+   {
+     "criterion": "Formulas & Dynamic Calculations",
+     "type": "formula_behavior_check",
+     "inputs": [{ "cell": "B2", "value": 15000 }],
+     "expectedOutputs": [{ "cell": "C2", "expectedValue": 1500 }]
+   }
+
+CRITICAL RULE FOR BEGINNER / FORMATTING ASSIGNMENTS:
+If the instructions ask students to enter data and apply formatting (bold headers, background fill, borders, currency formatting) with NO formulas or calculations mentioned, DO NOT generate "formula_range_check". Instead, generate "data_check" to verify data presence in all rows, "value_check" to verify values, and "format_check" to verify formatting!
+
+Do not include any explanation. Output ONLY the raw JSON array.`;
+    } else {
+      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
     
 Based on the Assignment Title, Instructions, and Evaluation Rubric provided by the user, you must output ONLY a raw JSON object that will be used by our JavaScript automated evaluator. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with { and ending with }.
 
@@ -1292,6 +1510,7 @@ Example output for function mode:
 
 If you are unsure or it doesn't fit neatly into function mode, fallback to script mode.
 Do not include any explanation.`;
+    }
 
     const userPrompt = `Assignment Title: ${title || 'Untitled'}
 
@@ -1387,15 +1606,29 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Fullstack Integration" (Use for end-to-end data flow between client and server)
 - "Code Quality & Structure" (Use for clean code, file structure, package.json across both environments)
 You must select 3-6 criteria from this list that cover both Frontend and Backend, based on the instructions and complexity rules above. YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
+    } else if (evaluatorType?.toLowerCase() === 'excel') {
+      systemPrompt += `\n7. For Excel Spreadsheet assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+- "Formulas & Dynamic Calculations" (Use for SUM, AVERAGE, basic arithmetic, and dynamic cell references without static hardcoding)
+- "Lookup & Reference Functions" (Use for VLOOKUP, XLOOKUP, INDEX/MATCH)
+- "Logical & Error Handling" (Use for IF, nested IF, IFERROR, ISNUMBER)
+- "Summary & Numerical Accuracy" (Use for Grand Totals, Net Profit, final calculated totals matching scenarios)
+- "Pivot Tables & Aggregations" (Use for Pivot Tables, SUMIFS, COUNTIFS, two-way matrix tables)
+- "Charts & Visualizations" (Use for Bar Charts, Line Charts, Pie Charts, visual representations of data)
+- "VBA & Macros Automation" (Use for VBA Sub/Function code, macros, automated workbook operations)
+- "Data Entry & Table Completeness" (Use for entering product/table rows, completing all required data fields without leaving blank or missing cells)
+- "Data Formatting & Structure" (Use for Currency, Percentage, Dates, neat sheet layout, borders, bold headers)
+You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.
+
+CRITICAL RULE FOR EXCEL: If the instructions only ask students to enter data and format it (e.g., Day 1 introductory assignments with products, prices, borders, currency format) with NO calculations or formulas requested, DO NOT include "Formulas & Dynamic Calculations". Use "Data Entry & Table Completeness" and "Data Formatting & Structure".`;
     }
 
     systemPrompt += `
 
 Example output:
 [
-  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : 'Feature A'))}", "description": "Implements endpoints correctly.", "weight": 40 },
-  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : 'Feature B'))}", "description": "Implements logic correctly.", "weight": 40 },
-  { "name": "Code Quality & Structure", "description": "Clean and readable code.", "weight": 20 }
+  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Formulas & Dynamic Calculations' : 'Feature A')))}", "description": "Implements calculations correctly.", "weight": 40 },
+  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Summary & Numerical Accuracy' : 'Feature B')))}", "description": "Totals match expected values.", "weight": 40 },
+  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Formatting & Structure' : 'Code Quality & Structure'}", "description": "Clean and readable layout.", "weight": 20 }
 ]`;
 
     const userPrompt = `Assignment Title: ${title || 'Untitled'}
@@ -1578,20 +1811,20 @@ exports.reEvaluateSubmission = async (req, res) => {
 
     // Fetch the specific submissions (support either submission_id or evaluation_results.id)
     const queryStr = isCollegeAssignment
-      ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
+      ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
          FROM college_assignment_submissions s
          JOIN users u ON s.student_id = u.id
          WHERE s.id::text = ANY($1::text[])
             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
             OR s.student_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
       : isProject
-      ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+      ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
          FROM project_submissions s
          JOIN users u ON s.user_id = u.id
          WHERE s.id::text = ANY($1::text[])
             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
             OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
-      : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+      : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
          FROM assignment_submissions s
          JOIN users u ON s.user_id = u.id
          WHERE s.id::text = ANY($1::text[])
@@ -1604,18 +1837,18 @@ exports.reEvaluateSubmission = async (req, res) => {
     if (!submissions.length) {
       // Fallback: fetch any active submissions for this evaluation if IDs were slightly mismatched
       const fallbackQuery = isCollegeAssignment
-        ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
+        ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
            JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.student_id::text
            WHERE er.evaluation_id::text = $1::text`
         : isProject
-        ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+        ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
            JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
            WHERE er.evaluation_id::text = $1::text`
-        : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+        : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
            JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
@@ -1628,18 +1861,39 @@ exports.reEvaluateSubmission = async (req, res) => {
       }
     }
 
-    const validSubmissions = submissions.filter((s) => isAllowedGitUrl(s.submission_link));
-    const invalidSubmissions = submissions.filter((s) => !isAllowedGitUrl(s.submission_link));
+    // Resolve effective evaluator type (falling back to assignment's configured type if defaulted to REACT)
+    const effectiveType = (!evaluatorType || evaluatorType === 'REACT')
+      ? (assignment.evaluator_type || evaluatorType || 'AI')
+      : evaluatorType;
+
+    const isExcelEvaluation = (effectiveType === 'EXCEL' || effectiveType === 'excel');
+
+    const validSubmissions = submissions.filter((s) =>
+      isExcelEvaluation
+        ? !!(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        : isAllowedGitUrl(s.submission_link)
+    );
+    const invalidSubmissions = submissions.filter((s) =>
+      isExcelEvaluation
+        ? !(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        : !isAllowedGitUrl(s.submission_link)
+    );
 
     if (invalidSubmissions.length > 0) {
       for (const invalid of invalidSubmissions) {
-        let reason = 'No repository URL provided by student.';
+        let reason = isExcelEvaluation
+          ? 'No spreadsheet URL or file provided by student.'
+          : 'No repository URL provided by student.';
         if (invalid.submission_link) {
           try {
             const h = new URL(invalid.submission_link).hostname;
-            reason = `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
+            reason = isExcelEvaluation
+              ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
+              : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
           } catch {
-            reason = 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
+            reason = isExcelEvaluation
+              ? 'Invalid spreadsheet URL format.'
+              : 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
           }
         }
         const failFeedback = JSON.stringify({
@@ -1663,15 +1917,10 @@ exports.reEvaluateSubmission = async (req, res) => {
     }
 
     // Now send to central evaluator
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     let jobIdsAndLinks = [];
-
-    // Resolve effective evaluator type (falling back to assignment's configured type if defaulted to REACT)
-    const effectiveType = (!evaluatorType || evaluatorType === 'REACT')
-      ? (assignment.evaluator_type || evaluatorType || 'AI')
-      : evaluatorType;
 
     if (effectiveType === 'JS' || effectiveType === 'VISUAL' || effectiveType === 'javascript' || effectiveType === 'visual' || effectiveType === 'PYTHON' || effectiveType === 'python') {
         const payloadType = (effectiveType === 'JS') ? 'javascript' : (effectiveType === 'VISUAL' ? 'visual' : (effectiveType === 'PYTHON' ? 'python' : effectiveType));
@@ -1725,6 +1974,62 @@ exports.reEvaluateSubmission = async (req, res) => {
             submissionId: validSubmissions[index].submission_id || validSubmissions[index].id,
           });
         });
+    } else if (effectiveType === 'EXCEL' || effectiveType === 'excel') {
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        let rubricObj = assignment.rubric;
+        if (typeof assignment.rubric === 'string') {
+          try {
+            rubricObj = JSON.parse(assignment.rubric);
+          } catch (e) {
+            console.error('Failed to parse rubric:', e);
+          }
+        }
+
+        let formattedRubric;
+        if (rubricObj && Array.isArray(rubricObj)) {
+          formattedRubric = { criteria: rubricObj };
+        } else if (rubricObj && rubricObj.criteria && Array.isArray(rubricObj.criteria)) {
+          formattedRubric = rubricObj;
+        } else {
+          formattedRubric = { criteria: [{ name: 'Standard Grading', weight: 100 }] };
+        }
+
+        formattedRubric.criteria = (formattedRubric.criteria || []).map((c) => ({
+          name: typeof c === 'string' ? c : (c.name || c.title || c.criterion || 'Standard Grading'),
+          weight: typeof c === 'object' && Number(c.weight || c.marks || c.points || c.score) > 0 ? Number(c.weight || c.marks || c.points || c.score) : 10,
+          description: typeof c === 'object' ? (c.description || '') : ''
+        }));
+
+        for (const s of validSubmissions) {
+          const fileUrl = getSpreadsheetDownloadUrl(s);
+
+          const payload = {
+            type: 'excel',
+            submissionId: s.submission_id || s.id,
+            fileUrl: fileUrl,
+            rubric: formattedRubric,
+            testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || [])
+          };
+
+          const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
+            headers: { 'x-api-key': evaluatorApiKey },
+            timeout: 45000,
+          });
+
+          jobIdsAndLinks.push({
+            jobId: response.data.jobId || response.data.id,
+            statusUrl: response.data.statusUrl,
+            submissionId: s.submission_id || s.id,
+          });
+        }
     } else {
         const typeMap = { REACT: 'react', PYTHON: 'python', FULLSTACK: 'fullstack', AI: 'backend', BACKEND: 'backend' };
         const payloadType = typeMap[effectiveType] || typeMap[effectiveType.toUpperCase()] || 'backend';

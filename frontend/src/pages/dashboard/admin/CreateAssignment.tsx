@@ -385,16 +385,26 @@ export default function CreateAssignment() {
 
       if (res.data.success && res.data.testCases) {
         setTestCasesJson(res.data.testCases);
+        if (aiEvaluationType === 'EXCEL') {
+          setTestCaseViewMode('json');
+        }
         try {
           const parsed = JSON.parse(res.data.testCases);
           if (Array.isArray(parsed)) {
             setTestCases(
-              parsed.map((item: any, idx: number) => ({
-                id: Date.now() + idx,
-                input: typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
-                output: typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output || item.expected || ''),
-                score: Number(item.score || item.points || 10),
-              }))
+              parsed.map((item: any, idx: number) => {
+                const isExcelItem = item.criterion || item.type || item.range || item.anchor || item.expectedValue !== undefined;
+                return {
+                  id: Date.now() + idx,
+                  input: isExcelItem
+                    ? `[${item.criterion || 'Excel'}] ${item.type || 'check'}${item.range ? ` (${item.range})` : item.cell ? ` (${item.cell})` : item.anchor ? ` (Anchor: "${item.anchor}")` : ''}`
+                    : typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
+                  output: isExcelItem
+                    ? (item.expectedValue !== undefined ? `Expected: ${item.expectedValue}` : item.acceptedFunctions ? `Allowed: ${item.acceptedFunctions.join(', ')}` : item.output || 'Verified')
+                    : typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output || item.expected || ''),
+                  score: Number(item.score || item.points || 10),
+                };
+              })
             );
           } else if (parsed.testCases && Array.isArray(parsed.testCases)) {
             setTestCases(
@@ -561,6 +571,12 @@ export default function CreateAssignment() {
           toast.error(`Invalid JSON in Test Cases: ${e?.message || 'Check syntax'}`);
           setSubmitting(false);
           return;
+        }
+      } else if (aiEvaluationType === 'EXCEL' && testCasesJson.trim()) {
+        try {
+          finalTestCases = JSON.parse(testCasesJson);
+        } catch {
+          finalTestCases = testCases.map((t) => ({ input: t.input, output: t.output, score: t.score }));
         }
       } else {
         finalTestCases = testCases.map((t) => ({ input: t.input, output: t.output, score: t.score }));
