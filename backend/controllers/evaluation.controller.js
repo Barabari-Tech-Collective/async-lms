@@ -1381,104 +1381,151 @@ exports.generateTestCases = async (req, res) => {
       return res.status(400).json({ success: false, message: "Instructions are required to generate test cases." });
     }
 
+    let normalizedRubric = rubric;
+    if (typeof rubric === 'string') {
+      try {
+        normalizedRubric = JSON.parse(rubric);
+      } catch (e) {
+        // keep as string or raw
+      }
+    }
+
     let systemPrompt;
     if (evaluatorType?.toLowerCase() === 'excel') {
-      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated Excel spreadsheet grading system.
+      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated Excel spreadsheet grading system across ANY assignment domain (finance, sales, HR, operations, science, basic marksheet, lookups, pivots, dashboards, or capstones).
     
 Based on the Assignment Title, Instructions, and Evaluation Rubric provided by the user, you must output ONLY a raw JSON array of test case objects. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with [ and ending with ].
 
-CRITICAL RULE: Your generated test cases must closely align with the provided Evaluation Rubric criteria. Ensure that every test case has a "criterion" property matching one of the rubric criteria names.
+CRITICAL DYNAMIC MAPPING RULES:
+1. STRICT 1-TO-1 CRITERIA BINDING:
+   - When an Evaluation Rubric is provided, EVERY generated test case MUST contain a "criterion" property whose value EXACTLY and VERBATIM matches the "name" of one of the criteria in the provided Evaluation Rubric.
+   - Every criterion in the provided rubric MUST have at least one corresponding test case.
+   - If no rubric is provided, dynamically analyze the instructions to identify the core deliverables (e.g. Data Entry, Formulas, Formatting, Lookups, Charts), create clear descriptive criterion names, and assign test cases to them.
 
-Supported Test Case Types:
-1. "formula_range_check": Verifies that a specific column/range contains dynamic formulas without static hardcoded numbers.
-   {
-     "criterion": "Matching Rubric Criterion Name",
-     "type": "formula_range_check",
-     "range": "D2:D20",
-     "mustBeFormula": true,
-     "forbiddenConstants": true
-   }
+2. DYNAMIC TEST CASE TYPES & SCHEMAS:
+Use the appropriate test case type depending on what each criterion evaluates:
 
-2. "function_check": Verifies that a range uses specific required spreadsheet functions.
-   {
-     "criterion": "Matching Rubric Criterion Name",
-     "type": "function_check",
-     "range": "E2:E20",
-     "acceptedFunctions": ["XLOOKUP", "VLOOKUP", "INDEX_MATCH"]
-   }
+A. "formula_range_check":
+Verifies that a column/range contains dynamic formulas without static hardcoded numbers or anti-cheat violations.
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "formula_range_check",
+  "range": "F2:F20",
+  "mustBeFormula": true,
+  "forbiddenConstants": true,
+  "acceptedFunctions": ["SUM", "AVERAGE"] // Optional: list required functions
+}
 
-3. "value_check": Verifies that an explicit cell or anchor label calculates to or matches the expected value.
-   {
-     "criterion": "Matching Rubric Criterion Name",
-     "type": "value_check",
-     "anchor": "Net Profit",
-     "direction": "right",
-     "expectedValue": 25000,
-     "tolerance": 0.05
-   }
-   (Alternatively, use "cell": "E20" instead of "anchor" if explicit cell address is specified).
+B. "function_check":
+Verifies specific spreadsheet functions are used (Text, Logic, Lookups, Cleaners).
+- Text manipulation (CONCAT, LEFT, MID, RIGHT, PROPER, TRIM):
+  {
+    "criterion": "<Exact Rubric Criterion Name>",
+    "type": "function_check",
+    "range": "B2:B20",
+    "acceptedFunctions": ["PROPER", "TRIM"]
+  }
+- Logical conditions (IF, AND, OR, IFERROR):
+  {
+    "criterion": "<Exact Rubric Criterion Name>",
+    "type": "function_check",
+    "range": "G2:G20",
+    "acceptedFunctions": ["IF", "AND", "OR", "IFERROR"]
+  }
+- Lookup functions (VLOOKUP, XLOOKUP, INDEX, MATCH):
+  {
+    "criterion": "<Exact Rubric Criterion Name>",
+    "type": "function_check",
+    "range": "E2:E20",
+    "acceptedFunctions": ["VLOOKUP", "XLOOKUP"],
+    "requireAbsoluteReferences": true // Set true if table array must use absolute references ($)
+  }
 
-4. "format_check": Verifies cell styling, headers, borders, and number formatting.
-   {
-     "criterion": "Data Formatting & Structure",
-     "type": "format_check",
-     "range": "A1:C1",
-     "bold": true,
-     "align": "center",
-     "hasFill": true,
-     "hasBorder": true
-   }
-   (For currency formatting):
-   {
-     "criterion": "Data Formatting & Structure",
-     "type": "format_check",
-     "range": "C2:C5",
-     "numberFormat": "currency"
-   }
+C. "value_check":
+CRITICAL ANTI-HALLUCINATION RULE:
+- ONLY generate a "value_check" with "expectedValue" IF the assignment instructions EXPLICITLY specify the exact input numbers (e.g. quantity, price, student marks) so you can calculate the exact mathematical answer.
+- If specific data numbers are NOT given in the instructions (or students enter their own data), DO NOT GUESS OR INVENT NUMBERS, AND NEVER USE "expectedValue": 0! Instead, verify the calculation using "function_check" (acceptedFunctions: ["SUM", "AVERAGE", etc.]) or "formula_range_check"!
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "value_check",
+  "cell": "F21",
+  "expectedValue": 25000,
+  "tolerance": 0.05
+}
 
-5. "data_check": Verifies that all table cells in a range contain non-empty entered data (catches missing rows or deleted cell values).
-   {
-     "criterion": "Enter Data",
-     "type": "data_check",
-     "range": "A2:C6"
-   }
+D. "format_check":
+CRITICAL INSTRUCTION FIDELITY RULE:
+- ONLY test formatting properties that are EXPLICITLY requested in the instructions or rubric!
+- DO NOT set "hasFill": true unless the instructions specifically say "fill background color", "highlight", or "shading".
+- DO NOT set "hasBorder": true unless the instructions explicitly say "border".
+- DO NOT set "bold": true unless the instructions explicitly say "bold".
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "format_check",
+  "range": "A1:F1",
+  "bold": true
+}
+(For decimal or currency formatting):
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "format_check",
+  "range": "F2:F21",
+  "numberFormat": "decimal", // Options: "decimal" (for 0.00), "currency", "percent"
+  "hasBorder": true
+}
 
-6. "chart_check": Verifies that a chart or graph exists with specified type and title.
-   {
-     "criterion": "Charts & Visualizations",
-     "type": "chart_check",
-     "chartType": "bar",
-     "title": "Sales by Product"
-   }
+E. "data_check":
+Verifies that all table cells in a range contain non-empty entered data (catches missing rows or unremoved duplicates).
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "data_check",
+  "range": "A2:E10",
+  "disallowBlanks": true
+}
 
-7. "pivot_check": Verifies that native Pivot Table exists with required data fields.
-   {
-     "criterion": "Pivot Tables & Aggregations",
-     "type": "pivot_check",
-     "minPivotTables": 1,
-     "requiredField": "Price"
-   }
+F. "chart_check":
+Verifies that a chart or graph exists with specified type and title.
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "chart_check",
+  "chartType": "column", // Options: "column", "bar", "line", "pie", "area"
+  "title": "Sales Performance"
+}
 
-8. "macro_check": Verifies that VBA macros and subroutines exist in workbook.
-   {
-     "criterion": "VBA & Macros Automation",
-     "type": "macro_check",
-     "requireVba": true,
-     "requiredSub": "CalculateTotal"
-   }
+G. "pivot_check":
+Verifies that native Pivot Table exists with required data fields.
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "pivot_check",
+  "minPivotTables": 1,
+  "requiredField": "Sales"
+}
 
-9. "formula_behavior_check": Tests formula responsiveness by mutating input cells on temporary copies and verifying updated outputs.
-   {
-     "criterion": "Formulas & Dynamic Calculations",
-     "type": "formula_behavior_check",
-     "inputs": [{ "cell": "B2", "value": 15000 }],
-     "expectedOutputs": [{ "cell": "C2", "expectedValue": 1500 }]
-   }
+H. "macro_check":
+Verifies that VBA macros and subroutines exist in workbook.
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "macro_check",
+  "requireVba": true,
+  "requiredSub": "CalculateTotal"
+}
 
-CRITICAL RULE FOR BEGINNER / FORMATTING ASSIGNMENTS:
-If the instructions ask students to enter data and apply formatting (bold headers, background fill, borders, currency formatting) with NO formulas or calculations mentioned, DO NOT generate "formula_range_check". Instead, generate "data_check" to verify data presence in all rows, "value_check" to verify values, and "format_check" to verify formatting!
+I. "formula_behavior_check":
+Tests formula responsiveness by mutating input cells on temporary copies and verifying updated outputs.
+{
+  "criterion": "<Exact Rubric Criterion Name>",
+  "type": "formula_behavior_check",
+  "inputs": [{ "cell": "B2", "value": 15000 }],
+  "expectedOutputs": [{ "cell": "C2", "expectedValue": 1500 }]
+}
 
-Do not include any explanation. Output ONLY the raw JSON array.`;
+3. SHEET TARGETING:
+If the instructions mention a specific worksheet name (e.g. "on a sheet named 'Sales'" or "Sheet: Marksheet"), you MUST include "sheet": "Sales" in EVERY generated test case!
+
+4. CRITICAL RULE FOR INTRODUCTORY / DATA ENTRY ASSIGNMENTS:
+If the instructions only ask students to enter data and format it (bold headers, borders, currency formatting) with NO calculations or formulas requested, DO NOT generate "formula_range_check". Instead, generate "data_check" for data completeness and "format_check" for styling!
+
+Do not include any explanation. Output ONLY the raw JSON array starting with [ and ending with ].`;
     } else {
       systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
     
@@ -1518,7 +1565,7 @@ Instructions:
 ${instructions}
 
 Evaluation Rubric:
-${rubric ? JSON.stringify(rubric, null, 2) : 'No rubric provided'}`;
+${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric provided'}`;
 
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "deepseek-chat",
@@ -1538,6 +1585,41 @@ ${rubric ? JSON.stringify(rubric, null, 2) : 'No rubric provided'}`;
 
     // Verify it parses correctly
     const parsedJson = JSON.parse(rawJson);
+
+    // Deterministic Post-processing Sanitizer Guard for Excel test cases
+    if (evaluatorType?.toLowerCase() === 'excel' && Array.isArray(parsedJson)) {
+      const lowerInstructions = (instructions || '').toLowerCase();
+      const mentionsZero = lowerInstructions.includes('zero') || lowerInstructions.includes(' 0');
+      const mentionsFill = lowerInstructions.includes('fill') || lowerInstructions.includes('background') || lowerInstructions.includes('shading') || lowerInstructions.includes('color');
+      const sheetMatch = instructions.match(/(?:sheet|worksheet)\s+(?:named|called)\s+["']?([^"'\s.,;]+)["']?/i);
+      const targetSheet = sheetMatch && sheetMatch[1] ? sheetMatch[1].trim() : null;
+
+      for (let i = parsedJson.length - 1; i >= 0; i--) {
+        const tc = parsedJson[i];
+        if (!tc) continue;
+
+        // Auto-inject sheet name if specified in instructions and not set
+        if (targetSheet && !tc.sheet) {
+          tc.sheet = targetSheet;
+        }
+
+        // Sanitize value_check: Eliminate 0-trap when exact numbers were not provided
+        if (tc.type === 'value_check' && (tc.expectedValue === 0 || tc.expectedValue === '0') && !mentionsZero) {
+          // Convert to function_check on the cell so student is verified for using correct formula without failing
+          tc.type = 'function_check';
+          tc.range = tc.cell || tc.range || 'A1';
+          tc.acceptedFunctions = tc.acceptedFunctions || ['SUM'];
+          delete tc.cell;
+          delete tc.expectedValue;
+          delete tc.tolerance;
+        }
+
+        // Sanitize format_check: Strip hasFill if instructions never asked for background fill
+        if (tc.type === 'format_check' && tc.hasFill && !mentionsFill) {
+          delete tc.hasFill;
+        }
+      }
+    }
 
     return res.json({
       success: true,
@@ -1565,23 +1647,21 @@ CRITICAL RULES:
 1. The output MUST be a JSON array of objects.
 2. Each object must have exactly three keys: "name" (string), "description" (string), and "weight" (number).
 3. The sum of all "weight" values MUST equal exactly 100.
-4. Each "name" must be UNIQUE. Do not use the same name twice.
-5. Do not include any explanation.
-6. ASSIGNMENT COMPLEXITY ADAPTATION:
+4. If the user instructions include an existing rubric with a different total (e.g. 20 marks or 50 marks), you MUST proportionally scale each criterion's weight so the total equals exactly 100.
+5. Each "name" must be UNIQUE. Do not use the same name twice.
+6. Do not include any explanation.
+7. ASSIGNMENT COMPLEXITY ADAPTATION:
 Identify the complexity of the assignment based on the title and instructions:
 - **Simple / Introductory Class Exercise** (e.g., introductory topics, basic tags, simple scripts, small practice tasks):
   - Generate 2-3 simple, highly focused criteria.
   - ONLY assess features explicitly mentioned in the instructions.
-  - DO NOT include advanced/generic engineering constraints like ARIA/accessibility, responsive design, complex optimization, database index scaling, security/encryption, or robust error handling unless explicitly requested in the instructions. Keep criteria simple and direct.
 - **Standard Project / Mid-level Assignment** (e.g., building a complete component, a landing page, a standard CRUD feature):
   - Generate 3-4 criteria.
-  - May include standard development practices (e.g., basic code structure, clean formatting, simple responsive layout if HTML/CSS).
-- **Advanced / Complex Assignment** (e.g., production-grade features, complex workflows, full applications):
-  - Generate 4-6 strict criteria.
-  - Include rigorous requirements like edge-case handling, security/auth, ARIA/accessibility, performance, and advanced architecture patterns.`;
+- **Advanced / Complex Assignment** (e.g., production-grade features, complex workflows, full applications, capstones):
+  - Generate 4-7 strict criteria.`;
 
     if (evaluatorType === 'react') {
-      systemPrompt += `\n7. For React assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For React assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "Components Render Correctly" (Use for UI rendering / layout)
 - "State Updates" (Use for React state management, hooks)
 - "Props Handling" (Use for props passing, data flow)
@@ -1590,7 +1670,7 @@ Identify the complexity of the assignment based on the title and instructions:
 - "Code Structure" (Use for clean code, standard practices)
 You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType === 'backend' || evaluatorType === 'AI') {
-      systemPrompt += `\n7. For Backend assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For Backend assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "API Endpoints" (Use for routing, endpoints, HTTP methods)
 - "Database Operations" (Use for Models, Schemas, Queries, CRUD)
 - "Middleware & Auth" (Use for error handling, JWT, authentication)
@@ -1598,7 +1678,7 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Code Structure" (Use for clean code, separation of concerns, MVC)
 You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType?.toLowerCase() === 'fullstack') {
-      systemPrompt += `\n7. For Fullstack assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For Fullstack assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "Frontend UI & Components" (Use for React rendering, responsive design, structure)
 - "Frontend State & Data Fetching" (Use for React state, hooks, fetch/axios)
 - "Backend API & Routing" (Use for Express routes, HTTP methods, CORS)
@@ -1607,19 +1687,22 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Code Quality & Structure" (Use for clean code, file structure, package.json across both environments)
 You must select 3-6 criteria from this list that cover both Frontend and Backend, based on the instructions and complexity rules above. YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType?.toLowerCase() === 'excel') {
-      systemPrompt += `\n7. For Excel Spreadsheet assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
-- "Formulas & Dynamic Calculations" (Use for SUM, AVERAGE, basic arithmetic, and dynamic cell references without static hardcoding)
-- "Lookup & Reference Functions" (Use for VLOOKUP, XLOOKUP, INDEX/MATCH)
-- "Logical & Error Handling" (Use for IF, nested IF, IFERROR, ISNUMBER)
-- "Summary & Numerical Accuracy" (Use for Grand Totals, Net Profit, final calculated totals matching scenarios)
-- "Pivot Tables & Aggregations" (Use for Pivot Tables, SUMIFS, COUNTIFS, two-way matrix tables)
-- "Charts & Visualizations" (Use for Bar Charts, Line Charts, Pie Charts, visual representations of data)
-- "VBA & Macros Automation" (Use for VBA Sub/Function code, macros, automated workbook operations)
-- "Data Entry & Table Completeness" (Use for entering product/table rows, completing all required data fields without leaving blank or missing cells)
-- "Data Formatting & Structure" (Use for Currency, Percentage, Dates, neat sheet layout, borders, bold headers)
-You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.
-
-CRITICAL RULE FOR EXCEL: If the instructions only ask students to enter data and format it (e.g., Day 1 introductory assignments with products, prices, borders, currency format) with NO calculations or formulas requested, DO NOT include "Formulas & Dynamic Calculations". Use "Data Entry & Table Completeness" and "Data Formatting & Structure".`;
+      systemPrompt += `\n8. For Excel Spreadsheet assignments, generate criteria tailored dynamically to the tasks described in the instructions.
+- If the instructions provide specific milestones or rubric criteria (e.g., SUM formula, AVERAGE formula, Text to Columns, VLOOKUP, Absolute references, Pivot Table, Conditional Formatting, Charts), generate criteria names that directly reflect those milestones.
+- Otherwise, use clear descriptive names representing the core competencies:
+  - "Formulas & Dynamic Calculations" (SUM, AVERAGE, arithmetic, dynamic cell references)
+  - "Text & String Functions" (CONCAT, LEFT, MID, RIGHT, PROPER, TRIM)
+  - "Lookup & Reference Functions" (VLOOKUP, XLOOKUP, INDEX/MATCH, absolute reference $)
+  - "Logical & Error Handling" (IF, nested IF, AND, OR, IFERROR)
+  - "Summary & Numerical Accuracy" (Grand Totals, Net Profit, calculated accuracy)
+  - "Pivot Tables & Aggregations" (Pivot Tables, rows, values, summaries)
+  - "Charts & Visualizations" (Charts, graphs, dashboards, KPIs)
+  - "Data Cleaning & Deduplication" (Removing duplicates, filling blanks, splitting text)
+  - "Data Entry & Table Completeness" (Populated rows, no missing data)
+  - "Data Formatting & Structure" (Borders, bold headers, decimal 0.00, currency formatting)
+  - "VBA & Macros Automation" (VBA procedures, automation)
+- CRITICAL RULE FOR EXCEL: If the instructions only ask students to enter data and format it (e.g., introductory table entries) with NO calculations or formulas requested, DO NOT include "Formulas & Dynamic Calculations". Use "Data Entry & Table Completeness" and "Data Formatting & Structure".
+- REMINDER: Weights MUST sum to exactly 100. Scale proportionally if original marks are given.`;
     }
 
     systemPrompt += `
@@ -1652,6 +1735,23 @@ ${instructions}`;
     rawJson = rawJson.trim();
 
     const parsedJson = JSON.parse(rawJson);
+
+    // Deterministic Normalization Guard: Guarantee sum of weights is ALWAYS exactly 100
+    if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+      const currentTotal = parsedJson.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+      if (currentTotal > 0 && currentTotal !== 100) {
+        let runningSum = 0;
+        parsedJson.forEach((item, index) => {
+          if (index === parsedJson.length - 1) {
+            item.weight = Math.max(1, 100 - runningSum);
+          } else {
+            const scaled = Math.round((Number(item.weight) / currentTotal) * 100);
+            item.weight = Math.max(1, scaled);
+            runningSum += item.weight;
+          }
+        });
+      }
+    }
 
     return res.json({
       success: true,

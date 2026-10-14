@@ -127,12 +127,23 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
     }
     setGenerating(true);
     try {
+      let rubricPayload: any = undefined;
+      if (rubric.trim()) {
+        try {
+          const parsed = JSON.parse(rubric);
+          rubricPayload = Array.isArray(parsed) ? parsed : (parsed.criteria || parsed.rubric || parsed);
+        } catch {
+          // ignore if invalid JSON
+        }
+      }
+
       // @ts-ignore
       const { default: apiClient } = await import('@/services/api');
       const res = await apiClient.post('/evaluations/generate-test-cases', {
         title,
         instructions,
-        evaluatorType
+        evaluatorType,
+        rubric: rubricPayload
       });
       if (res.data.success && res.data.testCases) {
         setTestCases(res.data.testCases);
@@ -201,10 +212,10 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
 
     let finalTestCases = testCases.trim();
     const upperType = (evaluatorType || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON');
+    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL');
 
     if (isTestCasesRequired && !finalTestCases) {
-      toast.error('Test Cases / Spec are required for JavaScript and Python. Please add or click "Generate Test Cases".');
+      toast.error('Test Cases / Spec are required for Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
       return;
     }
     if (upperType === 'REACT' || upperType === 'AI' || upperType === 'FULLSTACK' || upperType === 'BACKEND') {

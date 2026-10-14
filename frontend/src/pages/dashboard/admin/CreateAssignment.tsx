@@ -560,17 +560,17 @@ export default function CreateAssignment() {
       }
     }
 
-    // Test cases validation (Required only for JavaScript and Python)
+    // Test cases validation (Required for Excel, JavaScript and Python)
     const upperAiType = (aiEvaluationType || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON');
+    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON') || upperAiType.includes('EXCEL');
     if (isTestCasesRequired) {
       if (testCaseViewMode === 'builder') {
         if (testCases.length === 0) {
-          missing.push('Test Cases (Required for JavaScript & Python)');
+          missing.push('Test Cases (Required for Excel, JavaScript & Python)');
         }
       } else {
         if (!testCasesJson.trim()) {
-          missing.push('Test Cases / Spec (Required for JavaScript & Python)');
+          missing.push('Test Cases / Spec (Required for Excel, JavaScript & Python)');
         }
       }
     }

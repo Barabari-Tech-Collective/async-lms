@@ -454,11 +454,11 @@ exports.createAssignment = async (req, res) => {
   }
 
   const upperEvalType = String(evaluator_type || '').toUpperCase();
-  const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON');
+  const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
   if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
     return res.status(400).json({
       success: false,
-      message: 'test_cases is required for JavaScript and Python assignments',
+      message: 'test_cases is required for Excel, JavaScript, and Python assignments',
     });
   }
 
