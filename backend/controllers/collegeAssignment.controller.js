@@ -439,6 +439,29 @@ exports.createAssignment = async (req, res) => {
       });
   }
 
+  if (!evaluator_type || !String(evaluator_type).trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'evaluator_type is required',
+    });
+  }
+
+  if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
+    return res.status(400).json({
+      success: false,
+      message: 'rubric is required and cannot be empty',
+    });
+  }
+
+  const upperEvalType = String(evaluator_type || '').toUpperCase();
+  const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON');
+  if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
+    return res.status(400).json({
+      success: false,
+      message: 'test_cases is required for JavaScript and Python assignments',
+    });
+  }
+
   // Facilitators may only create assignments for their own colleges and assigned subjects
   if (req.user.role === 'facilitator') {
     const allowed = req.user.college_ids || [];
@@ -1424,9 +1447,6 @@ exports.getFilteredAssignments = async (req, res) => {
       const searchIdx = getNextIndex(`%${search}%`);
       query += ` AND LOWER(title) LIKE LOWER($${searchIdx})`;
     }
-
-    // Only show assignments that have at least one submission matching the criteria
-    query += ` AND submissions_count > 0`;
 
     query += ` ORDER BY created_at DESC NULLS LAST, title ASC`;
 

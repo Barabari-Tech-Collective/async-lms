@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { Search, ChevronLeft, ChevronRight, Square } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Square, Eye, ExternalLink } from 'lucide-react';
+import { Link, useLocation } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import apiClient from '@/services/api';
@@ -22,150 +23,12 @@ type Props = {
   onRefresh?: () => void;
 };
 
-// Evaluator feedback comes back in different shapes depending on evaluator
-// type: a plain string (Python), or a JSON string/object with `summary`/`feedback`
-// field plus optional `strengths`/`issues`/`breakdown` arrays (JS/Visual/React).
-// Parse it defensively and render something readable either way.
-const FeedbackCell = ({ feedback }: { feedback: string | object | null }) => {
-  if (!feedback) return <span className="text-slate-400">—</span>;
 
-  let parsed: any = null;
-
-  if (typeof feedback === 'object') {
-    // pg already deserialized JSONB
-    parsed = feedback;
-  } else {
-    const str = String(feedback).trim();
-    if (!str || str === '""' || str === "''" || str === '"{}"' || str === '{}') {
-      return <span className="text-slate-400">—</span>;
-    }
-    try {
-      parsed = JSON.parse(str);
-    } catch {
-      // not JSON — plain string feedback, render as-is
-      return <span className="text-sm text-slate-700 leading-snug">{str}</span>;
-    }
-  }
-
-  if (typeof parsed === 'string') {
-    const clean = parsed.trim();
-    if (!clean || clean === '""' || clean === "''") {
-      return <span className="text-slate-400">—</span>;
-    }
-    return <span className="text-sm text-slate-700 leading-snug">{clean}</span>;
-  }
-
-  if (!parsed || typeof parsed !== 'object') {
-    return <span className="text-slate-400">—</span>;
-  }
-
-  // If summary is itself a stringified JSON (from legacy DB records), safely unwrap it
-  if (typeof parsed.summary === 'string' && parsed.summary.trim().startsWith('{')) {
-    try {
-      const inner = JSON.parse(parsed.summary);
-      if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
-        parsed = {
-          ...parsed,
-          ...inner,
-          summary: inner.summary || inner.feedback || parsed.summary,
-          strengths: (Array.isArray(inner.strengths) && inner.strengths.length > 0) ? inner.strengths : parsed.strengths,
-          issues: (Array.isArray(inner.issues) && inner.issues.length > 0) ? inner.issues : parsed.issues,
-          breakdown: (Array.isArray(inner.breakdown) && inner.breakdown.length > 0)
-            ? inner.breakdown
-            : (Array.isArray(inner.rubric_breakdown) && inner.rubric_breakdown.length > 0 ? inner.rubric_breakdown : parsed.breakdown),
-        };
-      }
-    } catch {
-      // not valid JSON, keep as is
-    }
-  }
-
-  // Handle arrays (e.g. syntax or validation errors from the evaluator)
-  if (Array.isArray(parsed)) {
-    return (
-      <ul className="list-disc list-inside text-red-600 text-xs mt-1">
-        {parsed.map((err, i) => (
-          <li key={i}>{err.feedback || err.error || JSON.stringify(err)}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  const breakdownData = Array.isArray(parsed.breakdown) && parsed.breakdown.length > 0
-    ? parsed.breakdown
-    : (Array.isArray(parsed.rubric_breakdown) && parsed.rubric_breakdown.length > 0 ? parsed.rubric_breakdown : []);
-
-  const cellEvidenceData: any[] = Array.isArray(parsed.cell_evidence)
-    ? parsed.cell_evidence
-    : (Array.isArray(parsed.assertion_results) ? parsed.assertion_results : []);
-
-  const failedCellEvidence = cellEvidenceData.filter((c: any) => c.passed === false);
-  const displayCellEvidence = (failedCellEvidence.length > 0 ? failedCellEvidence : cellEvidenceData.slice(0, 5)).map((c: any) => {
-    const sheetPrefix = c.sheet ? `${c.sheet}!` : '';
-    const cellRef = c.cell ? `[${sheetPrefix}${c.cell}] ` : (c.sheet ? `[${c.sheet}] ` : '');
-    const symbol = c.passed ? '✓' : '✗';
-    return `${symbol} ${cellRef}${c.reason || c.criterion || 'Cell assertion'}`;
-  });
-
-  const summary: string | undefined = parsed.summary || parsed.feedback;
-  const lists: { label: string; items: string[]; color?: string }[] = [
-    {
-      label: '✅ Strengths',
-      items: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-      color: 'text-emerald-600',
-    },
-    {
-      label: '⚠️ Issues',
-      items: Array.isArray(parsed.issues) ? parsed.issues : [],
-      color: 'text-red-500',
-    },
-    {
-      label: '📊 Score Breakdown',
-      items: breakdownData.map(
-        (b: any) => `${b.item || b.criterion || b.name || 'Criterion'}: ${b.awarded ?? b.points_awarded ?? b.score ?? 0}/${b.max ?? b.max_points ?? b.weight ?? ''} pts — ${b.reason || b.feedback || ''}`
-      ),
-      color: 'text-slate-600',
-    },
-    {
-      label: '🔍 Cell-Level Evidence',
-      items: displayCellEvidence,
-      color: failedCellEvidence.length > 0 ? 'text-amber-700' : 'text-slate-600',
-    },
-  ].filter((l) => l.items.length > 0);
-
-  return (
-    <div className="max-w-xs">
-      {summary && <p className="text-sm text-slate-700 leading-snug">{summary}</p>}
-      {lists.length > 0 && (
-        <details className="mt-2 text-xs">
-          <summary className="cursor-pointer select-none font-medium text-slate-500 hover:text-slate-700">
-            View Details
-          </summary>
-          {lists.map((l) => (
-            <div key={l.label} className="mt-2">
-              <span className={`font-semibold ${l.color || 'text-slate-600'}`}>
-                {l.label}:
-              </span>
-              <ul className="list-disc list-inside mt-0.5 space-y-0.5">
-                {l.items.map((item, i) => (
-                  <li key={i} className={l.color || 'text-slate-500'}>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </details>
-      )}
-      {!summary && lists.length === 0 && (
-        <span className="text-slate-400">No feedback details available.</span>
-      )}
-    </div>
-  );
-};
 
 
 const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) => {
+  const location = useLocation();
+  const basePath = location.pathname.includes('/facilitator/') ? '/dashboard/facilitator' : '/dashboard/admin';
   const [selectedSubmissions, setSelectedSubmissions] = useState<string[]>([]);
   const [bulkEvaluatorType, setBulkEvaluatorType] = useState<string>('');
   const [bulkReEvaluating, setBulkReEvaluating] = useState(false);
@@ -403,26 +266,26 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                   </div>
                 </div>
 
-                {/* Feedback */}
-                {item.feedback && (
-                  <div className="text-[11px] bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 text-slate-700">
-                    <FeedbackCell feedback={item.feedback} />
-                  </div>
-                )}
-
-                {/* Action */}
-                <div className="flex items-center justify-end pt-1">
+                {/* Action Bar */}
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <Link
+                    to={`${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`}
+                    state={{ studentResult: item, evaluation }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition"
+                    title="View detailed student evaluation result"
+                  >
+                    <Eye size={13} />
+                    <span>View Details</span>
+                  </Link>
                   {item.submission_link ? (
-                    <a href={item.submission_link} target="_blank" rel="noreferrer" className="text-blue-600 text-xs font-semibold hover:underline flex items-center gap-1 bg-blue-50 px-2.5 py-1 rounded-lg">
-                      View Link
+                    <a href={item.submission_link} target="_blank" rel="noreferrer" className="text-slate-600 hover:text-slate-800 text-xs font-medium bg-slate-100 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1">
+                      <ExternalLink size={12} /> Link
                     </a>
                   ) : item.submission_file_url ? (
-                    <a href={item.submission_file_url} target="_blank" rel="noreferrer" className="text-blue-600 text-xs font-semibold hover:underline flex items-center gap-1 bg-blue-50 px-2.5 py-1 rounded-lg">
-                      View File
+                    <a href={item.submission_file_url} target="_blank" rel="noreferrer" className="text-slate-600 hover:text-slate-800 text-xs font-medium bg-slate-100 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1">
+                      <ExternalLink size={12} /> File
                     </a>
-                  ) : (
-                    <span className="text-slate-400 text-xs">—</span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );
@@ -446,7 +309,6 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
               <th className="p-3 text-left font-semibold">Student</th>
               <th className="p-3 font-semibold text-center">Status</th>
               <th className="p-3 font-semibold text-center">Score</th>
-              <th className="p-3 font-semibold">Feedback</th>
               <th className="p-3 font-semibold text-right">Action</th>
             </tr>
           </thead>
@@ -454,7 +316,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
           <tbody>
             {filteredResults.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-4 text-center text-slate-400 text-xs sm:text-sm">
+                <td colSpan={5} className="p-4 text-center text-slate-400 text-xs sm:text-sm">
                   No matching student results found.
                 </td>
               </tr>
@@ -494,20 +356,26 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                       item.marks
                     )}
                   </td>
-                  <td className="p-3"><FeedbackCell feedback={item.feedback} /></td>
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <Link
+                        to={`${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`}
+                        state={{ studentResult: item, evaluation }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 transition shadow-2xs"
+                        title="View detailed student feedback and rubric breakdown"
+                      >
+                        <Eye size={13} />
+                        <span>View Details</span>
+                      </Link>
                       {item.submission_link ? (
-                        <a href={item.submission_link} target="_blank" rel="noreferrer" className="text-blue-600 text-xs sm:text-sm font-semibold hover:underline flex items-center gap-1">
-                          View Link
+                        <a href={item.submission_link} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-800 text-xs font-medium px-2 py-1 rounded-md hover:bg-slate-100 transition flex items-center gap-1" title="View Submitted Link">
+                          <ExternalLink size={12} /> Link
                         </a>
                       ) : item.submission_file_url ? (
-                        <a href={item.submission_file_url} target="_blank" rel="noreferrer" className="text-blue-600 text-xs sm:text-sm font-semibold hover:underline flex items-center gap-1">
-                          View File
+                        <a href={item.submission_file_url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-800 text-xs font-medium px-2 py-1 rounded-md hover:bg-slate-100 transition flex items-center gap-1" title="Download Submitted File">
+                          <ExternalLink size={12} /> File
                         </a>
-                      ) : (
-                        <span className="text-slate-400 text-xs sm:text-sm">—</span>
-                      )}
+                      ) : null}
                     </div>
                   </td>
                 </tr>

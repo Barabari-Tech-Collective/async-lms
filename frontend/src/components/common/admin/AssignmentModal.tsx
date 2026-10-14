@@ -179,9 +179,34 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       toast.error('Max score must be greater than 0');
       return;
     }
+    if (!evaluatorType || !evaluatorType.trim()) {
+      toast.error('Evaluator Type is required. Please select an evaluator.');
+      return;
+    }
+    if (!rubric.trim()) {
+      toast.error('Rubric is required. Please add or click "Generate Rubric".');
+      return;
+    }
+    try {
+      const parsedRubric = JSON.parse(rubric);
+      const list = Array.isArray(parsedRubric) ? parsedRubric : (parsedRubric.criteria || parsedRubric.rubric);
+      if (!Array.isArray(list) || list.length === 0) {
+        toast.error('Rubric must contain at least one criterion');
+        return;
+      }
+    } catch (e) {
+      toast.error('Rubric must be valid JSON');
+      return;
+    }
 
     let finalTestCases = testCases.trim();
     const upperType = (evaluatorType || '').toUpperCase();
+    const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON');
+
+    if (isTestCasesRequired && !finalTestCases) {
+      toast.error('Test Cases / Spec are required for JavaScript and Python. Please add or click "Generate Test Cases".');
+      return;
+    }
     if (upperType === 'REACT' || upperType === 'AI' || upperType === 'FULLSTACK' || upperType === 'BACKEND') {
       const isJs = !finalTestCases.startsWith('{') && !finalTestCases.startsWith('[');
       if (isJs && finalTestCases) {
@@ -200,14 +225,6 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
         JSON.parse(finalTestCases);
       } catch (e) {
         toast.error('Test Cases must be valid JSON or JavaScript Spec');
-        return;
-      }
-    }
-    if (rubric.trim()) {
-      try {
-        JSON.parse(rubric);
-      } catch (e) {
-        toast.error('Rubric must be valid JSON');
         return;
       }
     }
@@ -321,7 +338,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
 
           <div>
             <label className='mb-2 block text-sm font-medium text-slate-700'>
-              Evaluator Type (Optional)
+              Evaluator Type
             </label>
             <select
               value={evaluatorType}
@@ -479,7 +496,9 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
 
           <div>
             <div className='mb-2 flex items-center justify-between'>
-              <label className='text-sm font-medium text-slate-700'>Test Cases (JSON)</label>
+              <label className='text-sm font-medium text-slate-700'>
+                Test Cases (JSON) {['JS', 'PYTHON'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional)</span>}
+              </label>
               <Button
                 type='button'
                 variant='outline'

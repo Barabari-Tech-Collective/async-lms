@@ -547,6 +547,33 @@ export default function CreateAssignment() {
     if (!topicId) missing.push('Subject');
     if (!deadline) missing.push('Deadline');
     if (allowedSubmissionTypes.length === 0) missing.push('At least one Submission Method');
+    if (!aiEvaluationType || !aiEvaluationType.trim()) missing.push('Evaluator Type');
+
+    // Rubric validation
+    if (rubricViewMode === 'builder') {
+      if (rubrics.length === 0 || rubrics.some((r) => !r.criteria.trim())) {
+        missing.push('Rubrics (at least 1 criterion name required)');
+      }
+    } else {
+      if (!rubricJson.trim()) {
+        missing.push('Rubrics JSON');
+      }
+    }
+
+    // Test cases validation (Required only for JavaScript and Python)
+    const upperAiType = (aiEvaluationType || '').toUpperCase();
+    const isTestCasesRequired = ['JS', 'PYTHON'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON');
+    if (isTestCasesRequired) {
+      if (testCaseViewMode === 'builder') {
+        if (testCases.length === 0) {
+          missing.push('Test Cases (Required for JavaScript & Python)');
+        }
+      } else {
+        if (!testCasesJson.trim()) {
+          missing.push('Test Cases / Spec (Required for JavaScript & Python)');
+        }
+      }
+    }
 
     if (missing.length > 0) {
       toast.error(
@@ -1007,9 +1034,11 @@ export default function CreateAssignment() {
                   <div className='w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-mono text-xs font-bold'>
                     &gt;_
                   </div>
-                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Test Cases</CardTitle>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
+                    Test Cases {['JS', 'PYTHON'].includes((aiEvaluationType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional)</span>}
+                  </CardTitle>
                 </div>
-                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules matching your selected evaluator</p>
+                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules {['JS', 'PYTHON'].includes((aiEvaluationType || '').toUpperCase()) ? '(Required for JavaScript & Python)' : '(Optional for other evaluators)'}</p>
               </div>
 
               <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
