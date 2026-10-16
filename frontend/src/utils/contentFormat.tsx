@@ -1,7 +1,9 @@
+/* eslint-disable react-refresh/only-export-components */
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 /**
  * Checks if a string appears to be markdown that was accidentally wrapped
@@ -248,12 +250,15 @@ export const FormattedContent: React.FC<{
     );
   }
 
-  // True HTML
+  // True HTML (Sanitized against stored XSS)
   if (isHtmlContent(content)) {
+    const cleanHtml = DOMPurify.sanitize(content, {
+      ADD_ATTR: ['target'],
+    });
     return (
       <div
         className={className}
-        dangerouslySetInnerHTML={{ __html: content }}
+        dangerouslySetInnerHTML={{ __html: cleanHtml }}
       />
     );
   }
