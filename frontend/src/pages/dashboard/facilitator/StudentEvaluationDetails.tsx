@@ -69,6 +69,33 @@ export default function StudentEvaluationDetails() {
     }
   }, [id, submissionId]);
 
+  // Active polling while evaluation is running or pending
+  useEffect(() => {
+    const isPending = studentResult?.status === 'pending' || reEvaluating;
+    const evalId = evaluation?.id || id;
+    if (!evalId || !isPending) return;
+
+    let retries = 0;
+    const maxRetries = 120; // ~5 minutes at 2.5s interval
+
+    const poll = async () => {
+      if (retries >= maxRetries) return;
+      retries++;
+      try {
+        // Sync with central evaluator to process and save completed results
+        await apiClient.get(`/evaluations/sync/${evalId}`, {
+          params: { _t: Date.now() },
+        });
+        await fetchDetails(false);
+      } catch (err) {
+        console.error('Failed to sync student evaluation status:', err);
+      }
+    };
+
+    const interval = setInterval(poll, 2500);
+    return () => clearInterval(interval);
+  }, [studentResult?.status, reEvaluating, evaluation?.id, id]);
+
   const handleReEvaluate = async () => {
     const subId = studentResult?.submission_id || submissionId;
     const evalId = evaluation?.id || id;
@@ -78,14 +105,19 @@ export default function StudentEvaluationDetails() {
     }
 
     setReEvaluating(true);
+    // Optimistically update status to 'pending' so UI shows Evaluating... and triggers the polling loop immediately
+    setStudentResult((prev: any) => prev ? { ...prev, status: 'pending' } : prev);
+
     try {
+      const type = evaluation?.evaluator_type || 'EXCEL';
       const res = await apiClient.post('/evaluations/re-evaluate', {
+        submissionIds: [subId],
         submissionId: subId,
         evaluationId: evalId,
+        evaluatorType: type,
       });
       if (res.data?.success) {
         toast.success('Re-evaluation queued! Refreshing in a few moments...');
-        setTimeout(() => fetchDetails(false), 3000);
       } else {
         toast.error(res.data?.message || 'Failed to trigger re-evaluation');
       }

@@ -6,6 +6,14 @@ import MarkdownEditor from '@/components/common/MarkdownEditor';
 import toast from 'react-hot-toast';
 import type { SubmissionType } from '@/utils/types';
 import { ALL_SUBMISSION_TYPES } from '@/utils/types';
+import {
+  detectEditorType,
+  cleanCorruptedMarkdown,
+  isCorruptedMarkdown,
+  markdownToHtml,
+  htmlToMarkdown,
+  isHtmlContent,
+} from '@/utils/contentFormat';
 
 interface CapstoneModalProps {
   isOpen: boolean;
@@ -100,7 +108,14 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setTitle(editData?.title ?? '');
-      setInstructions(editData?.instructions ?? '');
+      const raw = editData?.instructions ?? '';
+      const initialType = detectEditorType(raw);
+      setEditorType(initialType);
+      if (initialType === 'markdown') {
+        setInstructions(isCorruptedMarkdown(raw) ? cleanCorruptedMarkdown(raw) : (isHtmlContent(raw) ? htmlToMarkdown(raw) : raw));
+      } else {
+        setInstructions(raw);
+      }
       setMaxScore(editData?.max_score ?? 100);
       setEvaluatorType(editData?.evaluator_type || '');
       setAllowedSubmissionTypes(parseAllowedTypes(editData?.allowed_submission_types));
@@ -108,6 +123,16 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
       setRubric(editData?.rubric ? (typeof editData.rubric === 'string' ? editData.rubric : JSON.stringify(editData.rubric, null, 2)) : '');
     }
   }, [isOpen, editData]);
+
+  const handleSwitchEditor = (newType: 'rich' | 'markdown') => {
+    if (newType === editorType) return;
+    if (newType === 'rich') {
+      setInstructions((prev) => markdownToHtml(prev));
+    } else {
+      setInstructions((prev) => htmlToMarkdown(prev));
+    }
+    setEditorType(newType);
+  };
 
   const toggleSubmissionType = (type: SubmissionType) => {
     setAllowedSubmissionTypes((prev) => {
@@ -132,6 +157,13 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
       toast.error('Title and Instructions are required to generate test cases.');
       return;
     }
+
+    const isExcel = (evaluatorType || '').toUpperCase() === 'EXCEL';
+    if (isExcel && !rubric.trim()) {
+      toast.error('Please generate or provide the Rubric first. Excel test cases must bind directly to your Rubric criteria names.');
+      return;
+    }
+
     setGenerating(true);
     try {
       let rubricPayload: any = undefined;
@@ -311,14 +343,14 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
                 <div className='flex items-center gap-1 border border-slate-200 rounded-md p-0.5 bg-slate-50'>
                   <button
                     type='button'
-                    onClick={() => setEditorType('rich')}
+                    onClick={() => handleSwitchEditor('rich')}
                     className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${editorType === 'rich' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                   >
                     Rich Text
                   </button>
                   <button
                     type='button'
-                    onClick={() => setEditorType('markdown')}
+                    onClick={() => handleSwitchEditor('markdown')}
                     className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${editorType === 'markdown' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                   >
                     Markdown
@@ -514,11 +546,47 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
               </div>
             </div>
 
+            {/* 1. Evaluation Rubric First */}
             <div>
               <div className='mb-2 flex flex-wrap items-center justify-between gap-1.5'>
                 <label className='text-sm font-medium text-slate-700'>
-                  Test Cases (JSON / Spec) {['JS', 'PYTHON'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional)</span>}
+                  Rubric (JSON) <span className='text-red-500'>*</span>
                 </label>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateRubric}
+                  disabled={generatingRubric || !evaluatorType}
+                  className='h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
+                >
+                  {generatingRubric ? (
+                    <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
+                  ) : (
+                    <Wand2 className='mr-1.5 h-3.5 w-3.5 text-emerald-600' />
+                  )}
+                  ✨ Auto-Generate Rubric
+                </Button>
+              </div>
+              <textarea
+                value={rubric}
+                onChange={(e) => setRubric(e.target.value)}
+                placeholder='[\n  { "name": "Functionality", "weight": 50, "description": "Core features work properly" },\n  { "name": "Code Quality", "weight": 50, "description": "Clean, modular code structure" }\n]'
+                className='w-full min-h-[130px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200'
+              />
+            </div>
+
+            {/* 2. Automated Test Cases Second */}
+            <div>
+              <div className='mb-2 flex flex-wrap items-center justify-between gap-1.5'>
+                <div>
+                  <label className='text-sm font-medium text-slate-700'>
+                    Test Cases (JSON / Spec) {['JS', 'PYTHON', 'EXCEL'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
+                  </label>
+                  {(evaluatorType || '').toUpperCase() === 'EXCEL' && !rubric.trim() && (
+                    <p className='text-[11px] text-amber-600 font-medium mt-0.5'>Generate the Rubric above first so Excel test cases automatically bind to criteria.</p>
+                  )}
+                </div>
                 <Button
                   type='button'
                   variant='outline'
@@ -539,33 +607,6 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
                 value={testCases}
                 onChange={(e) => setTestCases(e.target.value)}
                 placeholder='{\n  "evaluationMode": "script",\n  "expectedLogs": []\n}'
-                className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200'
-              />
-            </div>
-
-            <div>
-              <div className='mb-2 flex flex-wrap items-center justify-between gap-1.5'>
-                <label className='text-sm font-medium text-slate-700'>Rubric (JSON)</label>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={handleGenerateRubric}
-                  disabled={generatingRubric || !evaluatorType}
-                  className='h-7 text-xs bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 hover:text-amber-800'
-                >
-                  {generatingRubric ? (
-                    <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                  ) : (
-                    <Wand2 className='mr-1.5 h-3.5 w-3.5' />
-                  )}
-                  ✨ Auto-Generate Rubric
-                </Button>
-              </div>
-              <textarea
-                value={rubric}
-                onChange={(e) => setRubric(e.target.value)}
-                placeholder='[\n  { "name": "Functionality", "weight": 50, "description": "Core features work properly" },\n  { "name": "Code Quality", "weight": 50, "description": "Clean, modular code structure" }\n]'
                 className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200'
               />
             </div>

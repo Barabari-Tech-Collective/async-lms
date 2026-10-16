@@ -1392,140 +1392,206 @@ exports.generateTestCases = async (req, res) => {
 
     let systemPrompt;
     if (evaluatorType?.toLowerCase() === 'excel') {
-      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated Excel spreadsheet grading system across ANY assignment domain (finance, sales, HR, operations, science, basic marksheet, lookups, pivots, dashboards, or capstones).
+      systemPrompt = `You are the world's foremost expert technical curriculum designer and spreadsheet engineer. Your task is to generate flawless, production-grade JSON test case configurations for an automated Excel spreadsheet grading system across ANY assignment domain (finance, business analysis, sales, HR, operations, science, engineering, basic marksheets, lookups, pivots, dashboards, text processing, or capstones).
     
-Based on the Assignment Title, Instructions, and Evaluation Rubric provided by the user, you must output ONLY a raw JSON array of test case objects. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with [ and ending with ].
+Based on the Assignment Title, Instructions, and Evaluation Rubric provided, output ONLY a raw JSON array of test case objects. DO NOT output any markdown code blocks or explanations, just the raw JSON starting with [ and ending with ].
 
-CRITICAL DYNAMIC MAPPING RULES:
-1. STRICT 1-TO-1 CRITERIA BINDING:
-   - When an Evaluation Rubric is provided, EVERY generated test case MUST contain a "criterion" property whose value EXACTLY and VERBATIM matches the "name" of one of the criteria in the provided Evaluation Rubric.
-   - Every criterion in the provided rubric MUST have at least one corresponding test case.
-   - If no rubric is provided, dynamically analyze the instructions to identify the core deliverables (e.g. Data Entry, Formulas, Formatting, Lookups, Charts), create clear descriptive criterion names, and assign test cases to them.
+=============================================================
+CRITICAL ARCHITECTURAL RULES (ZERO TOLERANCE FOR DEVIATION)
+=============================================================
 
-2. DYNAMIC TEST CASE TYPES & SCHEMAS:
-Use the appropriate test case type depending on what each criterion evaluates:
+1. STRICT 1-TO-1 RUBRIC CRITERIA BINDING:
+   - When an Evaluation Rubric is provided, EVERY generated test case MUST contain a "criterion" property whose value is an EXACT, VERBATIM, CHARACTER-FOR-CHARACTER copy of one of the "name" fields from the provided Evaluation Rubric.
+   - DO NOT rephrase, DO NOT shorten, DO NOT append parentheticals like "(Text Functions)", and DO NOT invent custom criteria names.
+   - EVERY criterion in the provided rubric MUST have at least one corresponding test case. If a criterion evaluates multiple aspects (e.g. "Table Formatting & Professional Structure" evaluating bold headers, currency, and percentages), create multiple distinct test cases all sharing that exact criterion name.
+   - If no rubric is provided, analyze the instructions to generate 3-5 clean, professional criterion names and bind all test cases to them.
 
-A. "formula_range_check":
-Verifies that a column/range contains dynamic formulas without static hardcoded numbers or anti-cheat violations.
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "formula_range_check",
-  "range": "F2:F20",
-  "mustBeFormula": true,
-  "forbiddenConstants": true,
-  "acceptedFunctions": ["SUM", "AVERAGE"] // Optional: list required functions
-}
+2. SPREADSHEET GRID GEOMETRY & COLUMN ALIGNMENT:
+   - CAREFULLY check the column specifications in the instructions:
+     * If the instructions define columns starting at Column A (e.g. "Col A", "Column A", "Cell A1", "Cell A3", "| Col A |"), you MUST use Column A! (e.g. Date in Col A, Sales Rep in Col A, Amount in Col B).
+     * ONLY if the instructions explicitly mention a blank margin or state that data begins in Column B, should you shift to Column B.
+     * NEVER shift tables to Columns B and C when the instructions state they reside in Columns A and B!
+   - Identify which specific columns hold formulas, text, currency, and percentages based on the exact column letters or order described in the instructions.
 
-B. "function_check":
-Verifies specific spreadsheet functions are used (Text, Logic, Lookups, Cleaners).
-- Text manipulation (CONCAT, LEFT, MID, RIGHT, PROPER, TRIM):
-  {
-    "criterion": "<Exact Rubric Criterion Name>",
-    "type": "function_check",
-    "range": "B2:B20",
-    "acceptedFunctions": ["PROPER", "TRIM"]
-  }
-- Logical conditions (IF, AND, OR, IFERROR):
-  {
-    "criterion": "<Exact Rubric Criterion Name>",
-    "type": "function_check",
-    "range": "G2:G20",
-    "acceptedFunctions": ["IF", "AND", "OR", "IFERROR"]
-  }
-- Lookup functions (VLOOKUP, XLOOKUP, INDEX, MATCH):
-  {
-    "criterion": "<Exact Rubric Criterion Name>",
-    "type": "function_check",
-    "range": "E2:E20",
-    "acceptedFunctions": ["VLOOKUP", "XLOOKUP"],
-    "requireAbsoluteReferences": true // Set true if table array must use absolute references ($)
-  }
+3. DYNAMIC TEST CASE SCHEMAS WITH HEADER ANCHORS:
+   - VERTICAL COLUMN ANCHORS: Include an "anchor" property containing the target column header name (e.g. "Profit Margin", "Contact", "Revenue", "Department") for vertical data and formula columns. This empowers the evaluation engine to dynamically find the student's column even if they insert helper columns or shift margins.
+   - HORIZONTAL HEADER EXCLUSION RULE: DO NOT add an "anchor" property on "format_check" when checking a horizontal table header row (e.g. range "A1:F1" or "B2:I2")! Anchors are column finders and will collapse horizontal multi-column ranges into a single column.
+   - SUMMARY FORMULA EXCLUSION RULE: DO NOT add an "anchor" on "function_check" when evaluating a summary total cell (e.g. range "F5:F5" with acceptedFunctions: ["SUM"])! The anchor label (e.g. "Grand Total") resides in an adjacent text cell (E5); adding the anchor redirects the function check to the text cell and causes a false failure. Use "range" directly without an anchor.
+   - SUMMARY VALUE CHECKS: For "value_check", DO use the summary label as an anchor with direction "right" and offset 1 (e.g. anchor: "Grand Total", direction: "right", offset: 1, expectedValue: 8000).
+   - NEVER specify a multi-column rectangle (like "D4:E35") when evaluating a single formula or function! Target ONLY the single formula column (e.g. "E4:E35") and provide the "anchor".
 
-C. "value_check":
-CRITICAL ANTI-HALLUCINATION RULE:
-- ONLY generate a "value_check" with "expectedValue" IF the assignment instructions EXPLICITLY specify the exact input numbers (e.g. quantity, price, student marks) so you can calculate the exact mathematical answer.
-- If specific data numbers are NOT given in the instructions (or students enter their own data), DO NOT GUESS OR INVENT NUMBERS, AND NEVER USE "expectedValue": 0! Instead, verify the calculation using "function_check" (acceptedFunctions: ["SUM", "AVERAGE", etc.]) or "formula_range_check"!
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "value_check",
-  "cell": "F21",
-  "expectedValue": 25000,
-  "tolerance": 0.05
-}
+A. "formula_range_check" (Dynamic Calculations & Anti-Cheat):
+   Verifies that a column contains dynamic calculated formulas without static hardcoded numbers or static math cheats (e.g. =1000).
+   CRITICAL ARITHMETIC RULE: In Excel, basic math operations (multiplication *, division /, addition +, subtraction -) use operators like =F2*G2, NOT named functions! For all basic arithmetic operations, ALWAYS and ONLY use "formula_range_check". NEVER use "function_check" with "PRODUCT"!
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "formula_range_check",
+     "sheet": "<Sheet Name>",
+     "range": "J4:J35",
+     "anchor": "Profit Margin",
+     "mustBeFormula": true,
+     "forbiddenConstants": true
+   }
 
-D. "format_check":
-CRITICAL INSTRUCTION FIDELITY RULE:
-- ONLY test formatting properties that are EXPLICITLY requested in the instructions or rubric!
-- DO NOT set "hasFill": true unless the instructions specifically say "fill background color", "highlight", or "shading".
-- DO NOT set "hasBorder": true unless the instructions explicitly say "border".
-- DO NOT set "bold": true unless the instructions explicitly say "bold".
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "format_check",
-  "range": "A1:F1",
-  "bold": true
-}
-(For decimal or currency formatting):
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "format_check",
-  "range": "F2:F21",
-  "numberFormat": "decimal", // Options: "decimal" (for 0.00), "currency", "percent"
-  "hasBorder": true
-}
+B. "function_check" (Specific Required Named Excel Functions):
+   Verifies that specific built-in named Excel functions are actively used in formulas.
+   DO NOT use function_check for simple arithmetic (*, +, -, /) or "PRODUCT".
+   - Text cleaning (PROPER, TRIM, UPPER, LOWER):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "E4:E35",
+       "anchor": "Contact",
+       "acceptedFunctions": ["PROPER", "TRIM"]
+     }
+   - Text extraction & separation (LEFT, MID, RIGHT, FIND, SEARCH, TEXTBEFORE, TEXTAFTER, TRIM):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "D4:D35",
+       "anchor": "First Name",
+       "acceptedFunctions": ["LEFT", "MID", "RIGHT", "FIND", "SEARCH", "TEXTBEFORE", "TEXTAFTER", "TRIM"]
+     }
+   - Lookup functions (VLOOKUP, XLOOKUP, INDEX, MATCH):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "E4:E35",
+       "anchor": "Department",
+       "acceptedFunctions": ["VLOOKUP", "XLOOKUP", "INDEX"],
+       "requireAbsoluteReferences": true
+     }
+   - Conditional aggregations & math (SUMIF, SUMIFS, COUNTIF, COUNTIFS, AVERAGEIF):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "B4:B13",
+       "anchor": "Sum of Amount",
+       "acceptedFunctions": ["SUMIF", "SUMIFS"]
+     }
+   - Summary total function check (DO NOT provide anchor; target exact formula cell):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "F5:F5",
+       "acceptedFunctions": ["SUM"],
+       "mustBeFormula": true
+     }
+   - Logical conditions (IF, IFS, AND, OR, IFERROR):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "G4:G35",
+       "anchor": "Status",
+       "acceptedFunctions": ["IF", "AND", "OR", "IFERROR"]
+     }
 
-E. "data_check":
-Verifies that all table cells in a range contain non-empty entered data (catches missing rows or unremoved duplicates).
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "data_check",
-  "range": "A2:E10",
-  "disallowBlanks": true
-}
+C. "format_check" (Styling, Headers, Currency, Percentages):
+   Tests styling and number formatting. ONLY test attributes explicitly requested in instructions!
+   - Bold Table Header (HORIZONTAL ROW: DO NOT include anchor):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "A1:F1",
+       "bold": true
+     }
+   - Bold Summary / Total Row:
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "A14:B14",
+       "bold": true
+     }
+   - Currency Formatting (VERTICAL COLUMN: include anchor):
+     NOTE: In multi-sheet assignments, ONLY check currency on the presentation/Dashboard sheet where explicit currency styling was requested! Do NOT demand currency on raw database sheets unless explicitly asked.
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "G4:H35",
+       "anchor": "Sum of Amount",
+       "numberFormat": "currency"
+     }
+   - Percentage Formatting (for Profit Margin, Growth Rates, Tax Rates):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "J4:J35",
+       "anchor": "Profit Margin",
+       "numberFormat": "percent"
+     }
 
-F. "chart_check":
-Verifies that a chart or graph exists with specified type and title.
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "chart_check",
-  "chartType": "column", // Options: "column", "bar", "line", "pie", "area"
-  "title": "Sales Performance"
-}
+D. "data_check" (Data Entry Completeness & Non-Empty Records):
+   Verifies that data rows are fully entered and no required fields are blank.
+   Always target the actual populated columns (e.g. B4:I35), never blank spacer margins!
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "data_check",
+     "sheet": "<Sheet Name>",
+     "range": "B4:I35",
+     "disallowBlanks": true
+   }
 
-G. "pivot_check":
-Verifies that native Pivot Table exists with required data fields.
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "pivot_check",
-  "minPivotTables": 1,
-  "requiredField": "Sales"
-}
+E. "value_check" (Specific Fixed Numerical or Text Answers):
+   CRITICAL ANTI-HALLUCINATION RULE:
+   ONLY use "value_check" with "expectedValue" if the assignment instructions EXPLICITLY specify the exact starting numbers so the mathematical answer is uniquely determined.
+   If students entered their own data or numbers were not given, NEVER use "value_check" with invented numbers or 0. Use "formula_range_check" or "function_check" instead!
+   When checking totals, prefer dynamic anchors:
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "value_check",
+     "sheet": "<Sheet Name>",
+     "anchor": "Grand Total",
+     "direction": "right",
+     "offset": 1,
+     "expectedValue": 25000,
+     "tolerance": 1.0
+   }
 
-H. "macro_check":
-Verifies that VBA macros and subroutines exist in workbook.
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "macro_check",
-  "requireVba": true,
-  "requiredSub": "CalculateTotal"
-}
+F. "chart_check" (Charts & Graphs):
+   The engine scans all sheets across the workbook. Always keep chartType simple (e.g. "column", "bar", "line", "pie") and set minCharts to 1:
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "chart_check",
+     "sheet": "<Sheet Name>",
+     "minCharts": 1,
+     "chartType": "column",
+     "title": "Sales Performance"
+   }
 
-I. "formula_behavior_check":
-Tests formula responsiveness by mutating input cells on temporary copies and verifying updated outputs.
-{
-  "criterion": "<Exact Rubric Criterion Name>",
-  "type": "formula_behavior_check",
-  "inputs": [{ "cell": "B2", "value": 15000 }],
-  "expectedOutputs": [{ "cell": "C2", "expectedValue": 1500 }]
-}
+G. "pivot_check" (Pivot Tables):
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "pivot_check",
+     "minPivotTables": 1,
+     "requiredField": "Department"
+   }
 
-3. SHEET TARGETING:
-If the instructions mention a specific worksheet name (e.g. "on a sheet named 'Sales'" or "Sheet: Marksheet"), you MUST include "sheet": "Sales" in EVERY generated test case!
+H. "macro_check" (VBA Macros):
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "macro_check",
+     "requireVba": true,
+     "requiredSub": "CalculateTotal"
+   }
 
-4. CRITICAL RULE FOR INTRODUCTORY / DATA ENTRY ASSIGNMENTS:
-If the instructions only ask students to enter data and format it (bold headers, borders, currency formatting) with NO calculations or formulas requested, DO NOT generate "formula_range_check". Instead, generate "data_check" for data completeness and "format_check" for styling!
+4. RESILIENT SHEET TARGETING & ANCHORS:
+   - If the instructions mention a worksheet name (e.g. "Sales Database", "Dashboard", "Summary"), include "sheet": "<Sheet Name>".
+   - CRITICAL: Always include "anchor" on every test case. The engine uses a 6-tier fuzzy resolver with synonyms (e.g. "Dashboard" matches "Summary", "Overview", "Sheet2") and scans cell anchors to find the correct sheet even if students keep default names like "Sheet1" or "Sheet2".
 
-Do not include any explanation. Output ONLY the raw JSON array starting with [ and ending with ].`;
+5. INTRODUCTORY / DATA ENTRY ONLY:
+   If the instructions only ask students to enter data and format it with NO calculations requested, DO NOT generate "formula_range_check". Use "data_check" and "format_check".
+
+Output ONLY the raw JSON array starting with [ and ending with ].`;
     } else {
       systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
     
@@ -1559,13 +1625,28 @@ If you are unsure or it doesn't fit neatly into function mode, fallback to scrip
 Do not include any explanation.`;
     }
 
-    const userPrompt = `Assignment Title: ${title || 'Untitled'}
+    let rubricList = [];
+    if (Array.isArray(normalizedRubric)) {
+      rubricList = normalizedRubric;
+    } else if (normalizedRubric && Array.isArray(normalizedRubric.criteria)) {
+      rubricList = normalizedRubric.criteria;
+    }
+    const rubricNames = rubricList.map((r) => (typeof r === 'string' ? r : r.name || '')).filter(Boolean);
+
+    let userPrompt = `Assignment Title: ${title || 'Untitled'}
 
 Instructions:
 ${instructions}
 
 Evaluation Rubric:
 ${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric provided'}`;
+
+    if (evaluatorType?.toLowerCase() === 'excel' && rubricNames.length > 0) {
+      userPrompt += `\n\nCRITICAL BINDING CONTRACT:
+The following are the EXACT allowed criteria names. Every test case's "criterion" property MUST be one of these exact strings (copy verbatim):
+${rubricNames.map((n) => `- "${n}"`).join('\n')}
+Do NOT alter spelling, casing, punctuation, or add parentheticals. Every criterion above must have at least one test case.`;
+    }
 
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "deepseek-chat",
@@ -1591,16 +1672,77 @@ ${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric prov
       const lowerInstructions = (instructions || '').toLowerCase();
       const mentionsZero = lowerInstructions.includes('zero') || lowerInstructions.includes(' 0');
       const mentionsFill = lowerInstructions.includes('fill') || lowerInstructions.includes('background') || lowerInstructions.includes('shading') || lowerInstructions.includes('color');
-      const sheetMatch = instructions.match(/(?:sheet|worksheet)\s+(?:named|called)\s+["']?([^"'\s.,;]+)["']?/i);
+      const sheetMatch = instructions.match(/(?:sheet|worksheet)\s+(?:named|called|titled)?\s*["']?([A-Za-z0-9_ \(\)-]+?)["']?(?:[.,;\n\r]|$)/i);
       const targetSheet = sheetMatch && sheetMatch[1] ? sheetMatch[1].trim() : null;
+
+      // Fuzzy matching helper to snap any slight paraphrasing to exact rubric name
+      const snapToExactRubricName = (criterionName) => {
+        if (!criterionName || rubricNames.length === 0) return criterionName;
+        if (rubricNames.includes(criterionName)) return criterionName;
+
+        const cleanCrit = criterionName.toLowerCase().trim();
+        // 1. Direct case-insensitive match
+        for (const rName of rubricNames) {
+          if (rName.toLowerCase().trim() === cleanCrit) return rName;
+        }
+
+        // 2. Substring match
+        for (const rName of rubricNames) {
+          const cleanR = rName.toLowerCase().trim();
+          if (cleanR.includes(cleanCrit) || cleanCrit.includes(cleanR)) return rName;
+        }
+
+        // 3. Token overlap match
+        const critTokens = new Set(cleanCrit.replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean));
+        let bestMatch = null;
+        let maxOverlap = 0;
+
+        for (const rName of rubricNames) {
+          const rTokens = new Set(rName.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean));
+          const intersection = [...critTokens].filter((t) => rTokens.has(t));
+          const union = new Set([...critTokens, ...rTokens]);
+          const score = union.size > 0 ? intersection.length / union.size : 0;
+          if (score > maxOverlap) {
+            maxOverlap = score;
+            bestMatch = rName;
+          }
+        }
+
+        return maxOverlap >= 0.25 ? bestMatch : criterionName;
+      };
 
       for (let i = parsedJson.length - 1; i >= 0; i--) {
         const tc = parsedJson[i];
         if (!tc) continue;
 
+        // Auto-snap criterion name to exact rubric name
+        if (tc.criterion && rubricNames.length > 0) {
+          tc.criterion = snapToExactRubricName(tc.criterion);
+        }
+
         // Auto-inject sheet name if specified in instructions and not set
         if (targetSheet && !tc.sheet) {
           tc.sheet = targetSheet;
+        }
+
+        // Sanitize Column A in data_check: only rewrite to B if instructions didn't specify Column A
+        if (tc.type === 'data_check' && tc.range && typeof tc.range === 'string') {
+          const rangeMatch = tc.range.match(/^A([0-9]+):([A-Z]+[0-9]+)$/i);
+          const hasColAData = /col\s*a|column\s*a|cell\s*a|[|]\s*[*]*col\s*a/i.test(lowerInstructions);
+          if (rangeMatch && !hasColAData) {
+            tc.range = `B${rangeMatch[1]}:${rangeMatch[2]}`;
+          }
+        }
+
+        // Align column letter with anchor if AI shifted column to B/C unnecessarily
+        if (tc.range && typeof tc.range === 'string') {
+          if (tc.anchor === 'Sales Rep' && /^[BC]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[BC]/i, 'A');
+          } else if (tc.anchor === 'Sum of Amount' && /^[C]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[C]/i, 'B').replace(/:[C]/i, ':B');
+          } else if (tc.anchor === 'Grand Total' && /^[BC]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[BC]/i, 'A');
+          }
         }
 
         // Sanitize value_check: Eliminate 0-trap when exact numbers were not provided
@@ -1614,9 +1756,108 @@ ${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric prov
           delete tc.tolerance;
         }
 
+        // Sanitize function_check: eliminate arithmetic PRODUCT trap (students write =A*B, not =PRODUCT(A,B))
+        if (tc.type === 'function_check' && Array.isArray(tc.acceptedFunctions)) {
+          const isOnlyProduct = tc.acceptedFunctions.every(f => f.toUpperCase() === 'PRODUCT');
+          if (isOnlyProduct) {
+            tc.type = 'formula_range_check';
+            tc.mustBeFormula = true;
+            tc.forbiddenConstants = true;
+            delete tc.acceptedFunctions;
+          }
+        }
+
+        // Auto-inject anchor if missing based on criterion keywords
+        if (!tc.anchor && tc.criterion) {
+          const lowerC = tc.criterion.toLowerCase();
+          if (lowerC.includes('margin') || lowerC.includes('profit margin')) {
+            tc.anchor = 'Profit Margin';
+          } else if (lowerC.includes('contact') || lowerC.includes('name')) {
+            tc.anchor = 'Contact';
+          } else if (lowerC.includes('department') || lowerC.includes('dept')) {
+            tc.anchor = 'Department';
+          } else if (lowerC.includes('revenue') || lowerC.includes('sales')) {
+            tc.anchor = 'Revenue';
+          }
+        }
+
+        // Sanitize format_check: Strip anchor if range is a multi-column horizontal row (e.g. A1:F1 or B2:I2)
+        if (tc.type === 'format_check' && tc.range) {
+          const headerRowMatch = tc.range.match(/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/i);
+          if (headerRowMatch && headerRowMatch[2] === headerRowMatch[4] && headerRowMatch[1].toUpperCase() !== headerRowMatch[3].toUpperCase()) {
+            delete tc.anchor; // Horizontal row range: DO NOT anchor to a single column!
+          }
+        }
+
+        // Sanitize function_check: Strip anchor if checking summary formulas (e.g. F5 or F5:F5 with SUM)
+        if (tc.type === 'function_check' && tc.anchor && /total|sum|grand/i.test(tc.anchor)) {
+          delete tc.anchor;
+        }
+
+        // Sanitize data_check: Strip anchor if checking a multi-column data range (e.g. A2:C3, B1:F4)
+        if (tc.type === 'data_check' && tc.range && tc.anchor) {
+          const multiColDataMatch = tc.range.match(/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/i);
+          if (multiColDataMatch && multiColDataMatch[1].toUpperCase() !== multiColDataMatch[3].toUpperCase()) {
+            delete tc.anchor;
+          }
+        }
+
+        // Multi-column formula narrowing: if range spans multiple columns for a single formula (e.g. D4:E35), target the rightmost formula column
+        if ((tc.type === 'function_check' || tc.type === 'formula_range_check') && tc.range && typeof tc.range === 'string') {
+          const multiColMatch = tc.range.match(/^([A-Z])([0-9]+):([A-Z])([0-9]+)$/i);
+          if (multiColMatch && multiColMatch[1].toUpperCase() !== multiColMatch[3].toUpperCase()) {
+            tc.range = `${multiColMatch[3].toUpperCase()}${multiColMatch[2]}:${multiColMatch[3].toUpperCase()}${multiColMatch[4]}`;
+          }
+        }
+
         // Sanitize format_check: Strip hasFill if instructions never asked for background fill
         if (tc.type === 'format_check' && tc.hasFill && !mentionsFill) {
           delete tc.hasFill;
+        }
+
+        // De-duplicate redundant formula_range_checks for the same sheet and anchor
+        if (tc.type === 'formula_range_check') {
+          const dupIndex = parsedJson.findIndex((other, idx) => 
+            idx !== i && other && other.type === 'formula_range_check' && 
+            other.sheet === tc.sheet && other.anchor === tc.anchor && other.criterion === tc.criterion
+          );
+          if (dupIndex !== -1 && dupIndex < i) {
+            parsedJson.splice(i, 1);
+            continue;
+          }
+        }
+      }
+
+      // Guarantee every single rubric criterion has at least one test case
+      if (rubricNames.length > 0) {
+        const coveredCriteria = new Set(parsedJson.map((t) => t.criterion));
+        for (const rName of rubricNames) {
+          if (!coveredCriteria.has(rName)) {
+            const lowerR = rName.toLowerCase();
+            let fallbackType = 'data_check';
+            let fallbackProps = { range: 'B4:I35', disallowBlanks: true };
+
+            if (lowerR.includes('formula') || lowerR.includes('calc') || lowerR.includes('profit') || lowerR.includes('margin') || lowerR.includes('sum')) {
+              fallbackType = 'formula_range_check';
+              fallbackProps = { range: 'I4:I35', mustBeFormula: true, forbiddenConstants: true };
+            } else if (lowerR.includes('format') || lowerR.includes('style') || lowerR.includes('bold')) {
+              fallbackType = 'format_check';
+              fallbackProps = { range: 'B2:I3', bold: true };
+            } else if (lowerR.includes('text') || lowerR.includes('clean') || lowerR.includes('proper') || lowerR.includes('trim')) {
+              fallbackType = 'function_check';
+              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['PROPER', 'TRIM'] };
+            } else if (lowerR.includes('lookup') || lowerR.includes('xlookup') || lowerR.includes('vlookup')) {
+              fallbackType = 'function_check';
+              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['VLOOKUP', 'XLOOKUP', 'INDEX'] };
+            }
+
+            parsedJson.push({
+              criterion: rName,
+              type: fallbackType,
+              ...(targetSheet ? { sheet: targetSheet } : {}),
+              ...fallbackProps
+            });
+          }
         }
       }
     }
@@ -1639,9 +1880,9 @@ exports.generateRubric = async (req, res) => {
       return res.status(400).json({ success: false, message: "Instructions are required to generate a rubric." });
     }
 
-    let systemPrompt = `You are an expert technical curriculum designer. Your task is to generate a strict JSON evaluation rubric for an automated code grading system.
+    let systemPrompt = `You are the world's foremost expert technical curriculum designer and spreadsheet engineer. Your task is to generate a strict JSON evaluation rubric for an automated code and spreadsheet grading system.
     
-Based on the Assignment Title and Instructions provided by the user, you must output ONLY a raw JSON array of objects. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with [ and ending with ].
+Based on the Assignment Title and Instructions provided by the user, you must output ONLY a raw JSON array of objects. DO NOT output any markdown code blocks or explanations, just output the raw JSON string starting with [ and ending with ].
 
 CRITICAL RULES:
 1. The output MUST be a JSON array of objects.
@@ -1652,13 +1893,9 @@ CRITICAL RULES:
 6. Do not include any explanation.
 7. ASSIGNMENT COMPLEXITY ADAPTATION:
 Identify the complexity of the assignment based on the title and instructions:
-- **Simple / Introductory Class Exercise** (e.g., introductory topics, basic tags, simple scripts, small practice tasks):
-  - Generate 2-3 simple, highly focused criteria.
-  - ONLY assess features explicitly mentioned in the instructions.
-- **Standard Project / Mid-level Assignment** (e.g., building a complete component, a landing page, a standard CRUD feature):
-  - Generate 3-4 criteria.
-- **Advanced / Complex Assignment** (e.g., production-grade features, complex workflows, full applications, capstones):
-  - Generate 4-7 strict criteria.`;
+- Simple / Introductory Class Exercise: Generate 2-3 focused criteria.
+- Standard Project / Mid-level Assignment: Generate 3-5 distinct, balanced criteria.
+- Advanced / Capstone Assignment: Generate 5-7 comprehensive criteria.`;
 
     if (evaluatorType === 'react') {
       systemPrompt += `\n8. For React assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
@@ -1687,31 +1924,32 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Code Quality & Structure" (Use for clean code, file structure, package.json across both environments)
 You must select 3-6 criteria from this list that cover both Frontend and Backend, based on the instructions and complexity rules above. YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType?.toLowerCase() === 'excel') {
-      systemPrompt += `\n8. For Excel Spreadsheet assignments, generate criteria tailored dynamically to the tasks described in the instructions.
-- If the instructions provide specific milestones or rubric criteria (e.g., SUM formula, AVERAGE formula, Text to Columns, VLOOKUP, Absolute references, Pivot Table, Conditional Formatting, Charts), generate criteria names that directly reflect those milestones.
-- Otherwise, use clear descriptive names representing the core competencies:
-  - "Formulas & Dynamic Calculations" (SUM, AVERAGE, arithmetic, dynamic cell references)
-  - "Text & String Functions" (CONCAT, LEFT, MID, RIGHT, PROPER, TRIM)
-  - "Lookup & Reference Functions" (VLOOKUP, XLOOKUP, INDEX/MATCH, absolute reference $)
-  - "Logical & Error Handling" (IF, nested IF, AND, OR, IFERROR)
-  - "Summary & Numerical Accuracy" (Grand Totals, Net Profit, calculated accuracy)
-  - "Pivot Tables & Aggregations" (Pivot Tables, rows, values, summaries)
-  - "Charts & Visualizations" (Charts, graphs, dashboards, KPIs)
-  - "Data Cleaning & Deduplication" (Removing duplicates, filling blanks, splitting text)
-  - "Data Entry & Table Completeness" (Populated rows, no missing data)
-  - "Data Formatting & Structure" (Borders, bold headers, decimal 0.00, currency formatting)
-  - "VBA & Macros Automation" (VBA procedures, automation)
-- CRITICAL RULE FOR EXCEL: If the instructions only ask students to enter data and format it (e.g., introductory table entries) with NO calculations or formulas requested, DO NOT include "Formulas & Dynamic Calculations". Use "Data Entry & Table Completeness" and "Data Formatting & Structure".
-- REMINDER: Weights MUST sum to exactly 100. Scale proportionally if original marks are given.`;
+      systemPrompt += `\n8. For Excel Spreadsheet assignments, generate clean, professional, and distinct rubric criteria reflecting the core skills and milestones in the instructions:
+- Generate 3 to 5 clear, descriptive criteria names tailored dynamically to the assignment.
+- Standard skill categories to draw from or adapt based on instructions:
+  - "Table Formatting & Professional Structure" (Bold headers, proper borders, currency $, percentages %, alignment)
+  - "Contact Name Cleaning with Text Functions" or "Data Cleaning & Text Manipulation" (PROPER, TRIM, CONCAT, TEXTSPLIT, casing)
+  - "Client & Ticker Separation" or "Data Splitting & Extraction" (Separating columns, delimiters, LEFT/MID/RIGHT)
+  - "Dynamic Profit Margin Calculation" or "Formulas & Dynamic Calculations" (SUM, AVERAGE, ratios, arithmetic, cell referencing)
+  - "Department Categorization & Completeness" or "Data Entry & Completeness" (No missing records, complete rows, categories)
+  - "Lookup & Reference Functions" (VLOOKUP, XLOOKUP, INDEX/MATCH, absolute $)
+  - "Logical & Conditional Calculations" (IF, IFS, AND, OR, IFERROR)
+  - "Pivot Tables & Data Summaries" (Native Pivot tables, data fields, aggregations)
+  - "Data Visualizations & Charts" (Column/Bar charts, line graphs, KPIs)
+- CRITICAL RULES FOR EXCEL RUBRICS:
+  - Use concise, elegant, professional criteria names (2-5 words).
+  - DO NOT include generic programming terms like "Code Quality" or "MVC Architecture" for spreadsheet assignments.
+  - Weights MUST sum to exactly 100 with clean, rounded numbers (e.g., 25, 25, 20, 15, 15 or 30, 30, 20, 20).
+  - Every criterion name must be clear so that automated test cases can bind to it with 100% precision.`;
     }
 
     systemPrompt += `
 
 Example output:
 [
-  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Formulas & Dynamic Calculations' : 'Feature A')))}", "description": "Implements calculations correctly.", "weight": 40 },
-  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Summary & Numerical Accuracy' : 'Feature B')))}", "description": "Totals match expected values.", "weight": 40 },
-  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Formatting & Structure' : 'Code Quality & Structure'}", "description": "Clean and readable layout.", "weight": 20 }
+  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Table Formatting & Professional Structure' : 'Feature A')))}", "description": "Meets formatting and layout standards.", "weight": 25 },
+  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Dynamic Calculations & Formulas' : 'Feature B')))}", "description": "Formulas compute dynamic values accurately.", "weight": 35 },
+  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Entry & Completeness' : 'Code Quality & Structure'}", "description": "Clean, populated, complete records.", "weight": 40 }
 ]`;
 
     const userPrompt = `Assignment Title: ${title || 'Untitled'}
@@ -1759,14 +1997,22 @@ ${instructions}`;
     });
   } catch (error) {
     console.error("AI Generation Error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error during generation" });
+    return serverError(res, error);
   }
 };
 
 exports.reEvaluateSubmission = async (req, res) => {
-  let { evaluationId, assignmentId, submissionIds, evaluatorType } = req.body;
-  if (!submissionIds || !Array.isArray(submissionIds) || submissionIds.length === 0 || !evaluatorType) {
-    return res.status(400).json({ success: false, message: 'an array of submissionIds, and evaluatorType are required' });
+  let { evaluationId, assignmentId, submissionIds, submissionId, evaluatorType } = req.body;
+
+  // Normalize single submissionId to submissionIds array
+  if (!submissionIds && submissionId) {
+    submissionIds = [submissionId];
+  } else if (typeof submissionIds === 'string') {
+    submissionIds = [submissionIds];
+  }
+
+  if (!submissionIds || !Array.isArray(submissionIds) || submissionIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'an array of submissionIds is required' });
   }
 
   const client = await pool.connect();

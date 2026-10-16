@@ -7,6 +7,13 @@ import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignme
 import toast from 'react-hot-toast';
 import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
+import {
+  detectEditorType,
+  cleanCorruptedMarkdown,
+  isCorruptedMarkdown,
+  markdownToHtml,
+  htmlToMarkdown,
+} from '@/utils/contentFormat';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -155,6 +162,18 @@ export default function CreateAssignment() {
   // ─── Editor Type ───
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
 
+  const handleSwitchEditor = (newType: 'rich' | 'markdown') => {
+    if (newType === editorType) return;
+    if (newType === 'rich') {
+      setDescription((prev: string) => markdownToHtml(prev));
+      setAssignmentDescription((prev: string) => markdownToHtml(prev));
+    } else {
+      setDescription((prev: string) => htmlToMarkdown(prev));
+      setAssignmentDescription((prev: string) => htmlToMarkdown(prev));
+    }
+    setEditorType(newType);
+  };
+
   // ─── Test Cases ───
   const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
   const [testCasesJson, setTestCasesJson] = useState<string>(
@@ -233,8 +252,12 @@ export default function CreateAssignment() {
         if (!d) return;
 
         if (d.title) setTitle(d.title);
-        if (d.description) setDescription(d.description);
-        if (d.assignment_description) setAssignmentDescription(d.assignment_description);
+        if (d.description) {
+          setDescription(isCorruptedMarkdown(d.description) ? cleanCorruptedMarkdown(d.description) : d.description);
+        }
+        if (d.assignment_description) {
+          setAssignmentDescription(isCorruptedMarkdown(d.assignment_description) ? cleanCorruptedMarkdown(d.assignment_description) : d.assignment_description);
+        }
         if (d.course) setCourse(d.course);
         if (d.college_id) {
           setCollege(String(d.college_id));
@@ -266,7 +289,11 @@ export default function CreateAssignment() {
         }
         if (d.weightage || d.max_score) setWeightage(String(d.weightage || d.max_score));
         if (typeof d.enable_plagiarism === 'boolean') setEnablePlagiarism(d.enable_plagiarism);
-        if (d.editor_type === 'rich' || d.editor_type === 'markdown') setEditorType(d.editor_type);
+        if (d.editor_type === 'rich' || d.editor_type === 'markdown') {
+          setEditorType(d.editor_type);
+        } else {
+          setEditorType(detectEditorType(d.assignment_description || d.description));
+        }
 
         // Test Cases
         if (d.test_cases) {
@@ -367,14 +394,22 @@ export default function CreateAssignment() {
       return;
     }
 
+    const isExcel = (aiEvaluationType || '').toUpperCase() === 'EXCEL';
+    let rubricPayload: any = null;
+    try {
+      rubricPayload = JSON.parse(rubricJson);
+    } catch {
+      rubricPayload = rubrics.map((r) => ({ name: r.criteria, description: r.description, weight: r.maxScore }));
+    }
+    const hasRubric = Array.isArray(rubricPayload) ? rubricPayload.length > 0 : Boolean(rubricPayload?.criteria?.length);
+
+    if (isExcel && !hasRubric) {
+      toast.error('Please generate or provide the Rubric first. Excel test cases must bind directly to your Rubric criteria names.');
+      return;
+    }
+
     setGeneratingTestCases(true);
     try {
-      let rubricPayload: any = null;
-      try {
-        rubricPayload = JSON.parse(rubricJson);
-      } catch {
-        rubricPayload = rubrics.map((r) => ({ name: r.criteria, description: r.description, weight: r.maxScore }));
-      }
 
       const res = await apiClient.post<{ success: boolean; testCases: string }>('/evaluations/generate-test-cases', {
         title: title.trim(),
@@ -756,7 +791,7 @@ export default function CreateAssignment() {
             <div className='space-y-1.5'>
               <div className='flex items-center justify-between flex-wrap gap-2'>
                 <Label className='text-xs sm:text-sm text-slate-600'>Description</Label>
-                <EditorToggle value={editorType} onChange={setEditorType} />
+                <EditorToggle value={editorType} onChange={handleSwitchEditor} />
               </div>
               {editorType === 'rich' ? (
                 <RichTextEditor
@@ -1022,194 +1057,10 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 3 — Test Cases & Evaluation Rubrics
+            SECTION 3 — Evaluation Rubrics & Automated Test Cases
         ================================================================ */}
 
-        {/* ─── Test Cases Card ─── */}
-        <Card className='border-none shadow-sm overflow-hidden bg-white'>
-          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
-            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
-              <div>
-                <div className='flex items-center gap-2'>
-                  <div className='w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-mono text-xs font-bold'>
-                    &gt;_
-                  </div>
-                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-                    Test Cases {['JS', 'PYTHON'].includes((aiEvaluationType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional)</span>}
-                  </CardTitle>
-                </div>
-                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules {['JS', 'PYTHON'].includes((aiEvaluationType || '').toUpperCase()) ? '(Required for JavaScript & Python)' : '(Optional for other evaluators)'}</p>
-              </div>
-
-              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
-                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
-                  <button
-                    type='button'
-                    onClick={() => setTestCaseViewMode('json')}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                      testCaseViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    JSON / Spec
-                  </button>
-                  <button
-                    type='button'
-                    onClick={() => setTestCaseViewMode('builder')}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                      testCaseViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    Builder
-                  </button>
-                </div>
-
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={handleGenerateTestCases}
-                  disabled={generatingTestCases}
-                  className='h-8 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800 font-semibold gap-1.5 shadow-2xs'
-                >
-                  {generatingTestCases ? (
-                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
-                  ) : (
-                    <Sparkles className='w-3.5 h-3.5 text-indigo-600' />
-                  )}
-                  Auto-Generate Test Cases
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className='p-4 sm:p-6 space-y-3'>
-            {testCaseViewMode === 'json' ? (
-              <div className='space-y-2'>
-                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all'>
-                  <textarea
-                    value={testCasesJson}
-                    onChange={(e) => setTestCasesJson(e.target.value)}
-                    rows={8}
-                    placeholder={`{\n  "evaluationMode": "script",\n  "expectedLogs": ["Hello World"]\n}`}
-                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
-                  />
-                </div>
-                <p className='text-[11px] text-slate-400'>
-                  Note: For React, Fullstack, or Backend assignments, you can also paste JavaScript test spec files directly. It will be packaged automatically upon save.
-                </p>
-              </div>
-            ) : (
-              <div className='space-y-3'>
-                <div className='flex items-center justify-between pb-1'>
-                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
-                    <span>Total:</span>
-                    <span className='text-indigo-600'>{totalTestCaseScore} Points</span>
-                  </div>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    className='gap-1.5 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 font-semibold'
-                    onClick={addTestCase}
-                  >
-                    <Plus className='w-3.5 h-3.5' /> Add Test Case
-                  </Button>
-                </div>
-
-                {testCases.length === 0 ? (
-                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
-                    <p className='text-xs text-slate-500'>No test cases added yet.</p>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={handleGenerateTestCases}
-                      className='text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium'
-                    >
-                      <Sparkles className='w-3.5 h-3.5 mr-1 text-indigo-500' /> Auto-Generate with AI
-                    </Button>
-                  </div>
-                ) : (
-                  <div className='space-y-2.5'>
-                    {/* Desktop Column Headers */}
-                    <div className='hidden sm:grid sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
-                      <span>Input (Arguments)</span>
-                      <span>Expected Output</span>
-                      <span className='text-center'>Score</span>
-                      <span></span>
-                    </div>
-
-                    {testCases.map((tc, idx) => (
-                      <div
-                        key={tc.id}
-                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
-                      >
-                        {/* Mobile Header */}
-                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
-                          <span className='text-xs font-semibold text-slate-700'>Test Case #{idx + 1}</span>
-                          <button
-                            type='button'
-                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
-                            onClick={() => removeTestCase(tc.id)}
-                            title='Delete test case'
-                          >
-                            <Trash2 className='w-4 h-4' />
-                          </button>
-                        </div>
-
-                        {/* Row Layout */}
-                        <div className='grid grid-cols-1 sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 items-center'>
-                          <div className='space-y-1 sm:space-y-0'>
-                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Input (Arguments)</span>
-                            <Input
-                              value={tc.input}
-                              onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
-                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
-                              placeholder='e.g. 5, 10'
-                            />
-                          </div>
-
-                          <div className='space-y-1 sm:space-y-0'>
-                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Expected Output</span>
-                            <Input
-                              value={tc.output}
-                              onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
-                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
-                              placeholder='e.g. 15'
-                            />
-                          </div>
-
-                          <div className='space-y-1 sm:space-y-0'>
-                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Score (pts)</span>
-                            <Input
-                              type='number'
-                              value={tc.score}
-                              onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
-                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
-                              min={0}
-                            />
-                          </div>
-
-                          <div className='hidden sm:flex items-center justify-center'>
-                            <button
-                              type='button'
-                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
-                              onClick={() => removeTestCase(tc.id)}
-                              title='Delete test case'
-                            >
-                              <Trash2 className='w-4 h-4' />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ─── Evaluation Rubrics Card ─── */}
+        {/* ─── 1. Evaluation Rubrics Card (First) ─── */}
         <Card className='border-none shadow-sm overflow-hidden bg-white'>
           <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
@@ -1377,6 +1228,193 @@ export default function CreateAssignment() {
                               className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
                               onClick={() => removeRubric(rubric.id)}
                               title='Delete criterion'
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ─── 2. Test Cases Card (Second) ─── */}
+        <Card className='border-none shadow-sm overflow-hidden bg-white'>
+          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <div className='w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-mono text-xs font-bold'>
+                    &gt;_
+                  </div>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
+                    Test Cases {['JS', 'PYTHON', 'EXCEL'].includes((aiEvaluationType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
+                  </CardTitle>
+                </div>
+                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules {['JS', 'PYTHON', 'EXCEL'].includes((aiEvaluationType || '').toUpperCase()) ? `(Required for ${(aiEvaluationType || '').toUpperCase()})` : '(Optional for other evaluators)'}</p>
+                {(aiEvaluationType || '').toUpperCase() === 'EXCEL' && !rubricJson.trim() && rubrics.length === 0 && (
+                  <p className='text-[11px] text-amber-600 font-medium mt-1'>Generate the Rubric first so Excel test cases automatically bind to your criteria.</p>
+                )}
+              </div>
+
+              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
+                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('json')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    JSON / Spec
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('builder')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Builder
+                  </button>
+                </div>
+
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateTestCases}
+                  disabled={generatingTestCases}
+                  className='h-8 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800 font-semibold gap-1.5 shadow-2xs'
+                >
+                  {generatingTestCases ? (
+                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-3.5 h-3.5 text-indigo-600' />
+                  )}
+                  Auto-Generate Test Cases
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className='p-4 sm:p-6 space-y-3'>
+            {testCaseViewMode === 'json' ? (
+              <div className='space-y-2'>
+                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all'>
+                  <textarea
+                    value={testCasesJson}
+                    onChange={(e) => setTestCasesJson(e.target.value)}
+                    rows={8}
+                    placeholder={`{\n  "evaluationMode": "script",\n  "expectedLogs": ["Hello World"]\n}`}
+                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
+                  />
+                </div>
+                <p className='text-[11px] text-slate-400'>
+                  Note: For React, Fullstack, or Backend assignments, you can also paste JavaScript test spec files directly. It will be packaged automatically upon save.
+                </p>
+              </div>
+            ) : (
+              <div className='space-y-3'>
+                <div className='flex items-center justify-between pb-1'>
+                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
+                    <span>Total:</span>
+                    <span className='text-indigo-600'>{totalTestCaseScore} Points</span>
+                  </div>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='gap-1.5 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 font-semibold'
+                    onClick={addTestCase}
+                  >
+                    <Plus className='w-3.5 h-3.5' /> Add Test Case
+                  </Button>
+                </div>
+
+                {testCases.length === 0 ? (
+                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
+                    <p className='text-xs text-slate-500'>No test cases added yet.</p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleGenerateTestCases}
+                      className='text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium'
+                    >
+                      <Sparkles className='w-3.5 h-3.5 mr-1 text-indigo-500' /> Auto-Generate with AI
+                    </Button>
+                  </div>
+                ) : (
+                  <div className='space-y-2.5'>
+                    {/* Desktop Column Headers */}
+                    <div className='hidden sm:grid sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+                      <span>Input (Arguments)</span>
+                      <span>Expected Output</span>
+                      <span className='text-center'>Score</span>
+                      <span></span>
+                    </div>
+
+                    {testCases.map((tc, idx) => (
+                      <div
+                        key={tc.id}
+                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
+                      >
+                        {/* Mobile Header */}
+                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
+                          <span className='text-xs font-semibold text-slate-700'>Test Case #{idx + 1}</span>
+                          <button
+                            type='button'
+                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                            onClick={() => removeTestCase(tc.id)}
+                            title='Delete test case'
+                          >
+                            <Trash2 className='w-4 h-4' />
+                          </button>
+                        </div>
+
+                        {/* Row Layout */}
+                        <div className='grid grid-cols-1 sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 items-center'>
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Input (Arguments)</span>
+                            <Input
+                              value={tc.input}
+                              onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 5, 10'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Expected Output</span>
+                            <Input
+                              value={tc.output}
+                              onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 15'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Score (pts)</span>
+                            <Input
+                              type='number'
+                              value={tc.score}
+                              onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
+                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              min={0}
+                            />
+                          </div>
+
+                          <div className='hidden sm:flex items-center justify-center'>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                              onClick={() => removeTestCase(tc.id)}
+                              title='Delete test case'
                             >
                               <Trash2 className='w-4 h-4' />
                             </button>
