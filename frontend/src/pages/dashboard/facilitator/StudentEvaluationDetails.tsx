@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router';
 import { 
   ArrowLeft, 
@@ -195,6 +195,21 @@ export default function StudentEvaluationDetails() {
 
   const { summary, strengths, issues, breakdown, cellEvidence } = parseFeedback(studentResult?.feedback);
 
+  const rubricCriteria = useMemo(() => {
+    const raw = evaluation?.rubric;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }, [evaluation?.rubric]);
+
   const marks = Number(studentResult?.marks ?? 0);
   const maxScore = Number(evaluation?.max_score ?? 100);
   const percentage = Math.min(100, Math.round((marks / (maxScore || 100)) * 100));
@@ -381,20 +396,48 @@ export default function StudentEvaluationDetails() {
                   ) : (
                     <div className="space-y-4">
                       {breakdown.map((item: any, idx: number) => {
-                        const critScore = Number(item.score ?? item.awarded ?? item.points ?? 0);
-                        const critMax = Number(item.max_score ?? item.weight ?? item.maxScore ?? 20);
+                        const critScore = Number(item.score ?? item.awarded ?? item.points ?? item.marks ?? 0);
+                        const critMax = Number(
+                          item.max ??
+                          item.max_score ??
+                          item.max_points ??
+                          item.weight ??
+                          item.maxScore ??
+                          rubricCriteria[idx]?.weight ??
+                          rubricCriteria[idx]?.max ??
+                          20
+                        );
                         const critPct = Math.min(100, Math.round((critScore / (critMax || 1)) * 100));
+
+                        const criterionTitle =
+                          item.item ||
+                          item.criterion ||
+                          item.name ||
+                          item.title ||
+                          item.label ||
+                          rubricCriteria[idx]?.name ||
+                          rubricCriteria[idx]?.title ||
+                          rubricCriteria[idx]?.item ||
+                          `Criterion ${idx + 1}`;
+
+                        const explanation =
+                          item.reason ||
+                          item.reasoning ||
+                          item.description ||
+                          item.feedback ||
+                          rubricCriteria[idx]?.description ||
+                          '';
 
                         return (
                           <div key={idx} className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
                             <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h3 className="text-xs sm:text-sm font-bold text-slate-800">
-                                  {item.criterion || item.name || `Criterion ${idx + 1}`}
+                              <div className="min-w-0 flex-1">
+                                <h3 className="text-xs sm:text-sm font-bold text-slate-800 break-words">
+                                  {criterionTitle}
                                 </h3>
-                                {item.description && (
-                                  <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                                    {item.description}
+                                {explanation && (
+                                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                                    {explanation}
                                   </p>
                                 )}
                               </div>

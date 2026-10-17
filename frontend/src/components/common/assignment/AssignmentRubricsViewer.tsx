@@ -96,7 +96,7 @@ export const AssignmentRubricsViewer: React.FC<AssignmentRubricsViewerProps> = (
                   </div>
                   <div>
                     <h4 className='text-sm font-semibold text-slate-800 leading-snug'>
-                      {item.name || `Criterion ${idx + 1}`}
+                      {item.item || item.name || item.title || item.criterion || item.label || `Criterion ${idx + 1}`}
                     </h4>
                     {item.description && (
                       <p className='text-xs sm:text-sm text-slate-600 mt-1 leading-relaxed'>

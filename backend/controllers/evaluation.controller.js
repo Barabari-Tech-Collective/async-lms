@@ -297,6 +297,12 @@ exports.runEvaluation = async (req, res) => {
             AND r.status IN ('completed', 'failed')
             AND r.submission_id != ALL($3::uuid[])
             AND (r.student_id IS NULL OR r.student_id != ALL($4::uuid[]))
+            AND (
+              r.submission_id IS NULL OR r.submission_id IN (
+                SELECT id FROM ${isCollegeAssignment ? 'college_assignment_submissions' : isProject ? 'project_submissions' : 'assignment_submissions'}
+                WHERE ${isCollegeAssignment ? 'assignment_id' : isProject ? 'project_id' : 'assignment_id'} = $2
+              )
+            )
           ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
         ) prev
         ON CONFLICT (evaluation_id, submission_id) DO NOTHING
@@ -989,7 +995,8 @@ exports.getResultsByAssignment = async (req, res) => {
 
     // Check if evaluation exists
     const evalRes = await pool.query(
-      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name
+      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name,
+              COALESCE(a.rubric, c.rubric, p.rubric) as rubric
        FROM evaluations e
        LEFT JOIN assignments a ON e.assignment_id = a.id
        LEFT JOIN college_assignments c ON e.college_assignment_id = c.id
@@ -1024,12 +1031,18 @@ exports.getResultsByAssignment = async (req, res) => {
                 col.id as college_id
          FROM evaluation_results r
          JOIN evaluations e ON r.evaluation_id = e.id
-         LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
-         LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
-         LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
+         LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL AND s.assignment_id = e.assignment_id
+         LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL AND cs.assignment_id = e.college_assignment_id
+         LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL AND ps.project_id = e.project_id
          LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
          LEFT JOIN colleges col ON sp.college_id = col.id
          WHERE (e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1 OR e.id::text = $1)
+           AND (
+             (e.assignment_id IS NOT NULL AND s.id IS NOT NULL) OR
+             (e.college_assignment_id IS NOT NULL AND cs.id IS NOT NULL) OR
+             (e.project_id IS NOT NULL AND ps.id IS NOT NULL) OR
+             r.submission_id IS NULL
+           )
            ${collegeFilter}
          ORDER BY COALESCE(r.student_id, r.submission_id),
                   e.created_at DESC,
@@ -1259,6 +1272,7 @@ exports.getEvaluationResults = async (req, res) => {
 
     const evalRes = await pool.query(
       `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name,
+              COALESCE(a.rubric, c.rubric, p.rubric) as rubric,
               COALESCE(t.subject_id, pt.subject_id) as curriculum_subject_id,
               c.college_id as college_assignment_college_id,
               c.course as college_assignment_course,
@@ -1329,12 +1343,18 @@ exports.getEvaluationResults = async (req, res) => {
               col.id as college_id
        FROM evaluation_results r
        JOIN evaluations e ON r.evaluation_id = e.id
-       LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
-       LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
-       LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
+       LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL AND s.assignment_id = e.assignment_id
+       LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL AND cs.assignment_id = e.college_assignment_id
+       LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL AND ps.project_id = e.project_id
        LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
        LEFT JOIN colleges col ON sp.college_id = col.id
-       WHERE r.evaluation_id = $1${collegeFilter}`,
+       WHERE r.evaluation_id = $1${collegeFilter}
+         AND (
+           (e.assignment_id IS NOT NULL AND s.id IS NOT NULL) OR
+           (e.college_assignment_id IS NOT NULL AND cs.id IS NOT NULL) OR
+           (e.project_id IS NOT NULL AND ps.id IS NOT NULL) OR
+           r.submission_id IS NULL
+         )`,
       values,
     );
 
@@ -2051,17 +2071,17 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           WHERE s.id::text = ANY($1::text[])`
+           WHERE s.assignment_id::text = $2::text AND s.id::text = ANY($1::text[])`
         : isProject
         ? `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id::text = ANY($1::text[])`
+           WHERE s.project_id::text = $2::text AND s.id::text = ANY($1::text[])`
         : `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id::text = ANY($1::text[])`,
-        [submissionIds]
+           WHERE s.assignment_id::text = $2::text AND s.id::text = ANY($1::text[])`,
+        [submissionIds, assignmentId]
       );
       
       for (const s of initialSubmissionsRes.rows) {
@@ -2107,7 +2127,7 @@ exports.reEvaluateSubmission = async (req, res) => {
             AND (r.student_id IS NULL OR r.student_id::text != ALL($4::text[]))
             AND r.submission_id::text IN (
               SELECT id::text FROM ${isCollegeAssignment ? 'college_assignment_submissions' : isProject ? 'project_submissions' : 'assignment_submissions'}
-              WHERE ${isCollegeAssignment ? 'college_assignment_id' : isProject ? 'project_id' : 'assignment_id'}::text = $2::text
+              WHERE ${isCollegeAssignment ? 'assignment_id' : isProject ? 'project_id' : 'assignment_id'}::text = $2::text
             )
           ORDER BY COALESCE(r.student_id::text, r.submission_id::text), e.created_at DESC, r.created_at DESC
         ) prev
@@ -2160,24 +2180,33 @@ exports.reEvaluateSubmission = async (req, res) => {
       ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
          FROM college_assignment_submissions s
          JOIN users u ON s.student_id = u.id
-         WHERE s.id::text = ANY($1::text[])
-            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
-            OR s.student_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
+         WHERE s.assignment_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.student_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`
       : isProject
       ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
          FROM project_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id::text = ANY($1::text[])
-            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
-            OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`
+         WHERE s.project_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`
       : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
          FROM assignment_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id::text = ANY($1::text[])
-            OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
-            OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)`;
+         WHERE s.assignment_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`;
          
-    const submissionsRes = await client.query(queryStr, [submissionIds, evaluationId]);
+    const submissionsRes = await client.query(queryStr, [submissionIds, evaluationId, assignmentId]);
     const submissions = submissionsRes.rows;
 
     if (!submissions.length) {
@@ -2186,20 +2215,20 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.student_id::text
-           WHERE er.evaluation_id::text = $1::text`
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.student_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.assignment_id::text = $2::text`
         : isProject
         ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
-           WHERE er.evaluation_id::text = $1::text`
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.project_id::text = $2::text`
         : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text
-           WHERE er.evaluation_id::text = $1::text`;
-      const fallbackRes = await client.query(fallbackQuery, [evaluationId]);
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.assignment_id::text = $2::text`;
+      const fallbackRes = await client.query(fallbackQuery, [evaluationId, assignmentId]);
       if (fallbackRes.rows.length > 0) {
         submissions.push(...fallbackRes.rows);
       } else {

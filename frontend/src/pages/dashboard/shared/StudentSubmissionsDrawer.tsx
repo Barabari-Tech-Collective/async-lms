@@ -648,15 +648,15 @@ export function StudentSubmissionsDrawer({
                           <div className="divide-y divide-slate-100">
                             {rubricList.map((crit, idx) => {
                               const title =
-                                crit.criterion || crit.title || crit.name || `Criterion ${idx + 1}`;
+                                crit.item || crit.criterion || crit.title || crit.name || crit.label || `Criterion ${idx + 1}`;
                               const awarded = Number(
-                                crit.score ?? crit.marks ?? crit.awarded ?? 0
+                                crit.score ?? crit.marks ?? crit.awarded ?? crit.points ?? 0
                               );
                               const maxP = Number(
-                                crit.max_score ?? crit.max_points ?? crit.max ?? 10
+                                crit.max ?? crit.max_score ?? crit.max_points ?? crit.weight ?? crit.maxScore ?? 10
                               );
                               const pct = maxP > 0 ? Math.round((awarded / maxP) * 100) : 0;
-                              const comments = crit.feedback || crit.comments;
+                              const comments = crit.reason || crit.reasoning || crit.feedback || crit.comments || crit.description;
 
                               return (
                                 <div key={idx} className="py-2 sm:py-2.5 first:pt-0 last:pb-0 space-y-1 sm:space-y-1.5">

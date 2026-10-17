@@ -435,7 +435,7 @@ export default function CollegeAssignmentView() {
                             ? rawPoints
                             : Number(rawPoints);
                           const title =
-                            item.name || item.title || item.criterion || `Criterion ${idx + 1}`;
+                            item.item || item.name || item.title || item.criterion || item.label || `Criterion ${idx + 1}`;
 
                           return (
                             <div
