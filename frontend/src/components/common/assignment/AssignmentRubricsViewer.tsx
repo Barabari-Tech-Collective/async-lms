@@ -4,11 +4,16 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 export interface RubricItem {
-  name: string;
+  name?: string;
+  item?: string;
+  title?: string;
+  criterion?: string;
+  label?: string;
   description?: string;
   weight?: number;
   score?: number;
   points?: number;
+  [key: string]: any;
 }
 
 interface AssignmentRubricsViewerProps {

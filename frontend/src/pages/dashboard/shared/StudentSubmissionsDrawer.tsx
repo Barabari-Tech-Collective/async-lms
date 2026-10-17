@@ -45,27 +45,45 @@ export type SubmissionItem = {
       criterion?: string;
       title?: string;
       name?: string;
+      item?: string;
+      label?: string;
       score?: number;
       marks?: number;
       awarded?: number;
+      points?: number;
       max_score?: number;
       max_points?: number;
       max?: number;
+      maxScore?: number;
+      weight?: number;
       feedback?: string;
       comments?: string;
+      reason?: string;
+      reasoning?: string;
+      description?: string;
+      [key: string]: any;
     }>;
     rubric_breakdown?: Array<{
       criterion?: string;
       title?: string;
       name?: string;
+      item?: string;
+      label?: string;
       score?: number;
       marks?: number;
       awarded?: number;
+      points?: number;
       max_score?: number;
       max_points?: number;
       max?: number;
+      maxScore?: number;
+      weight?: number;
       feedback?: string;
       comments?: string;
+      reason?: string;
+      reasoning?: string;
+      description?: string;
+      [key: string]: any;
     }>;
     test_results?: Array<{
       name?: string;
@@ -646,7 +664,7 @@ export function StudentSubmissionsDrawer({
                           </div>
 
                           <div className="divide-y divide-slate-100">
-                            {rubricList.map((crit, idx) => {
+                            {rubricList.map((crit: any, idx: number) => {
                               const title =
                                 crit.item || crit.criterion || crit.title || crit.name || crit.label || `Criterion ${idx + 1}`;
                               const awarded = Number(
