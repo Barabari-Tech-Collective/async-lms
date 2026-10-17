@@ -10,7 +10,30 @@ const pool = require('../config/pg');
  */
 exports.calculateSubjectProgress = async (userId, subjectId) => {
   if (!userId || !subjectId) {
-    return { total: 0, completed: 0, percent: 0 };
+    return { total: 0, completed: 0, percent: 0, is_completed: false, has_new_content: false, new_content_count: 0 };
+  }
+
+  // 1. Fast-Path O(1) Exit: Check existing enrollment state
+  let storedPercent = 0;
+  let isAlreadyCompleted = false;
+  let certificateId = null;
+  let completedAt = null;
+
+  try {
+    const enrollment = await pool.query(
+      `SELECT progress_percent, COALESCE(is_completed, false) as is_completed, certificate_id, completed_at 
+       FROM user_subjects 
+       WHERE user_id = $1 AND subject_id = $2`,
+      [userId, subjectId]
+    );
+    if (enrollment.rows.length > 0) {
+      storedPercent = enrollment.rows[0].progress_percent || 0;
+      isAlreadyCompleted = Boolean(enrollment.rows[0].is_completed);
+      certificateId = enrollment.rows[0].certificate_id;
+      completedAt = enrollment.rows[0].completed_at;
+    }
+  } catch (err) {
+    console.warn('[Progress] Could not query user_subjects enrollment:', err.message);
   }
 
   const query = `
@@ -97,12 +120,60 @@ exports.calculateSubjectProgress = async (userId, subjectId) => {
   const { rows } = await pool.query(query, [userId, subjectId]);
   const total = rows[0]?.total_items || 0;
   const completed = rows[0]?.completed_items || 0;
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  return { total, completed, percent };
+
+  // State-Based New Content Detection for completed students
+  const uncompletedCount = Math.max(0, total - completed);
+  const hasNewContent = (isAlreadyCompleted || storedPercent >= 100) && uncompletedCount > 0;
+  const newContentCount = hasNewContent ? uncompletedCount : 0;
+
+  // Permanent completion lock: if course was already completed, freeze at 100%
+  if (isAlreadyCompleted || storedPercent >= 100) {
+    return { 
+      total, 
+      completed, 
+      percent: 100, 
+      is_completed: true, 
+      has_new_content: hasNewContent, 
+      new_content_count: newContentCount,
+      certificate_id: certificateId,
+      completed_at: completedAt
+    };
+  }
+
+  // Curriculum Pruning Rule: If completed active items >= total active items, auto-graduate to 100%
+  if (total > 0 && completed >= total) {
+    return { 
+      total, 
+      completed, 
+      percent: 100, 
+      is_completed: true, 
+      has_new_content: false, 
+      new_content_count: 0,
+      certificate_id: certificateId,
+      completed_at: completedAt
+    };
+  }
+
+  const rawPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const percent = Math.min(100, Math.max(storedPercent, rawPercent));
+  const isCompleted = percent >= 100;
+
+  return { 
+    total, 
+    completed, 
+    percent, 
+    rawPercent,
+    is_completed: isCompleted, 
+    has_new_content: false, 
+    new_content_count: 0,
+    certificate_id: certificateId,
+    completed_at: completedAt
+  };
 };
 
 /**
- * Recalculates course progress for a user and subject, and saves it in the database.
+ * Recalculates course progress for a user and subject on a learning action,
+ * using proportional step accumulation so progress never drops and never freezes.
  * 
  * @param {string} userId - User ID (UUID)
  * @param {string} subjectId - Subject ID (UUID)
@@ -113,16 +184,60 @@ exports.syncUserSubjectProgress = async (userId, subjectId) => {
     console.warn('[Progress] syncUserSubjectProgress called with missing userId or subjectId');
     return 0;
   }
-  const { total, completed, percent } = await exports.calculateSubjectProgress(userId, subjectId);
-  console.log(`[Progress] calculateSubjectProgress → userId=${userId} subjectId=${subjectId} total=${total} completed=${completed} percent=${percent}%`);
-  const updateRes = await pool.query(
-    'UPDATE user_subjects SET progress_percent = $1 WHERE user_id = $2 AND subject_id = $3 RETURNING user_id',
-    [percent, userId, subjectId]
+
+  // 1. Check if user already finished this course (O(1) fast-path)
+  const enrollment = await pool.query(
+    'SELECT progress_percent, COALESCE(is_completed, false) as is_completed, certificate_id FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+    [userId, subjectId]
   );
+  const enrolledRow = enrollment.rows[0];
+
+  if (enrolledRow?.is_completed || (enrolledRow?.progress_percent >= 100)) {
+    return 100;
+  }
+
+  const { total, completed, percent, rawPercent, is_completed } = await exports.calculateSubjectProgress(userId, subjectId);
+  const currentPercent = enrolledRow?.progress_percent || 0;
+  let finalPercent = percent;
+
+  // Curriculum Pruning Rule
+  if (total > 0 && completed >= total) {
+    finalPercent = 100;
+  } else if (currentPercent > rawPercent) {
+    // Proportional Step Accumulation (Killing the Dead Zone):
+    // When total items increase and rawPercent < currentPercent,
+    // distribute the remaining percentage (100 - currentPercent) proportionally
+    // across remaining items so completing an item moves progress forward immediately.
+    const remainingNeeded = Math.max(0, 100 - currentPercent);
+    const remainingItems = Math.max(1, total - completed);
+    const step = Math.max(1, Math.round(remainingNeeded / (remainingItems + 1)));
+    finalPercent = Math.min(99, currentPercent + step);
+  }
+
+  // Absolute Monotonic Guarantee: progress can never decrease below current earned watermark
+  finalPercent = Math.max(currentPercent, finalPercent);
+
+  const finalIsCompleted = is_completed || finalPercent >= 100;
+
+  console.log(`[Progress] syncUserSubjectProgress → userId=${userId} subjectId=${subjectId} total=${total} completed=${completed} finalPercent=${finalPercent}% isCompleted=${finalIsCompleted}`);
+
+  const updateRes = await pool.query(
+    `UPDATE user_subjects 
+     SET progress_percent = $1,
+         is_completed = CASE WHEN $2 = true THEN true ELSE is_completed END,
+         completed_at = CASE WHEN $2 = true AND completed_at IS NULL THEN NOW() ELSE completed_at END,
+         certificate_issued_at = CASE WHEN $2 = true AND certificate_issued_at IS NULL THEN NOW() ELSE certificate_issued_at END
+     WHERE user_id = $3 AND subject_id = $4 
+     RETURNING user_id, progress_percent, is_completed, certificate_id, completed_at`,
+    [finalPercent, finalIsCompleted, userId, subjectId]
+  );
+
   if (updateRes.rowCount === 0) {
     console.warn(`[Progress] syncUserSubjectProgress → no row updated. userId=${userId} may not be enrolled in subjectId=${subjectId}`);
   } else {
-    console.log(`[Progress] user_subjects.progress_percent updated to ${percent}% → userId=${userId} subjectId=${subjectId}`);
+    console.log(`[Progress] user_subjects updated to ${finalPercent}% (completed: ${finalIsCompleted}) → userId=${userId} subjectId=${subjectId}`);
   }
-  return percent;
+  return finalPercent;
 };
+
+

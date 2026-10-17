@@ -17,9 +17,8 @@ import {
 import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
 import type { StudentAssignmentOverviewItem, SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
+import { FormattedContent } from '@/utils/contentFormat';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -418,21 +417,11 @@ export default function CapstoneView() {
           </p>
         </div>
         <div className='bg-white px-4 py-6 sm:px-6 sm:py-8'>
-          {capstone.instructions ? (
-            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
-              {/^<[a-z][\s\S]*>/i.test(capstone.instructions.trimStart()) ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: capstone.instructions }}
-                />
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {capstone.instructions}
-                </ReactMarkdown>
-              )}
-            </div>
-          ) : (
-            <p className='italic text-slate-400 text-sm'>No instructions provided.</p>
-          )}
+          <FormattedContent
+            content={capstone.instructions}
+            className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'
+            fallback={<p className='italic text-slate-400 text-sm'>No instructions provided.</p>}
+          />
         </div>
       </Card>
 

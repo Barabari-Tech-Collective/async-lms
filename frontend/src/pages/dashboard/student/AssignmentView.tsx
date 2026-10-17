@@ -12,8 +12,6 @@ import {
   FileText,
   ExternalLink,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +21,7 @@ import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
+import { FormattedContent } from '@/utils/contentFormat';
 import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
 import type { SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
@@ -357,17 +356,11 @@ export default function AssignmentView() {
           <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>Read carefully before submitting</p>
         </div>
         <div className='px-4 py-5 sm:px-8 sm:py-6'>
-          {assignment.instructions ? (
-            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
-              {/^<[a-z][\s\S]*>/i.test(assignment.instructions.trimStart()) ? (
-                <div dangerouslySetInnerHTML={{ __html: assignment.instructions }} />
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{assignment.instructions}</ReactMarkdown>
-              )}
-            </div>
-          ) : (
-            <p className='italic text-slate-400 text-sm'>No instructions provided.</p>
-          )}
+          <FormattedContent
+            content={assignment.instructions}
+            className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'
+            fallback={<p className='italic text-slate-400 text-sm'>No instructions provided.</p>}
+          />
         </div>
       </Card>
 
