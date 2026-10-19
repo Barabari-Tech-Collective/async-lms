@@ -39,6 +39,7 @@ export interface AiLesson {
   resource_links?: string[];
   is_new?: boolean;
   is_modified?: boolean;
+  is_updated?: boolean;
 }
 
 export interface AiAssignment {
@@ -66,6 +67,7 @@ export interface AiTopic {
   lessons: AiLesson[];
   is_new?: boolean;
   is_modified?: boolean;
+  is_updated?: boolean;
 }
 
 export interface AiModule {
@@ -80,6 +82,7 @@ export interface AiModule {
   topics: AiTopic[];
   is_new?: boolean;
   is_modified?: boolean;
+  is_updated?: boolean;
 }
 
 export interface CourseReview {
@@ -125,6 +128,9 @@ export interface AiCourse {
     new_modules: number;
     new_topics: number;
     new_lessons: number;
+    modified_lessons?: number;
+    new_quizzes?: number;
+    new_assignments?: number;
     total: number;
   };
   created_at: string;

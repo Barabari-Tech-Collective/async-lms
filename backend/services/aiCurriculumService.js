@@ -29,7 +29,7 @@ function safeJsonParse(content) {
 
 async function callLlmJson({ prompt, maxTokens = 3000, temperature = 0.7 }) {
   const client = getPrimaryClient();
-  const primaryModel = process.env.OPENAI_MODEL || 'deepseek-v4-flash';
+  const primaryModel = process.env.OPENAI_MODEL || 'deepseek-chat';
 
   try {
     const response = await client.chat.completions.create({

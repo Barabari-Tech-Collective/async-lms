@@ -19,9 +19,12 @@ const sendMail = async ({ to, subject, html, text }) => {
     fromEmail = 'onboarding@resend.dev';
   }
 
-  // Debug API Key properties safely in production
+  const brevoKey = (process.env.BREVO_API_KEY || pass).trim().replace(/\s+/g, '');
+
+  // Safe production mail configuration log
   if (isProduction) {
-    console.log(`[mailer] DEBUG: SMTP_PASS length is ${pass.length} | Starts with: ${pass.substring(0, 12)}... | Ends with: ...${pass.substring(pass.length - 12)}`);
+    const activeKey = host.includes('brevo.com') ? brevoKey : pass;
+    console.log(`[mailer] Production mail configured (key configured: ${Boolean(activeKey)}, length: ${activeKey ? activeKey.length : 0})`);
   }
 
   // ------------------------------------------------------------------
@@ -31,11 +34,15 @@ const sendMail = async ({ to, subject, html, text }) => {
     console.log(`[mailer] Production: dispatching via HTTP API to bypass SMTP restrictions...`);
 
     // A. BREVO HTTP API
-    if (host.includes('brevo.com')) {
+    if (host.includes('brevo.com') || process.env.BREVO_API_KEY) {
+      if (brevoKey.startsWith('xsmtpsib-')) {
+        console.warn('[mailer] WARNING: Brevo key starts with "xsmtpsib-" (SMTP key). Brevo HTTP API requires a REST API key starting with "xkeysib-".');
+      }
+
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
-          'api-key': pass, // Brevo API key is the SMTP password
+          'api-key': brevoKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -48,7 +55,13 @@ const sendMail = async ({ to, subject, html, text }) => {
       });
 
       if (!response.ok) {
-        const errorDetails = await response.json();
+        let errorDetails = {};
+        try {
+          errorDetails = await response.json();
+        } catch {
+          errorDetails = { message: response.statusText };
+        }
+        console.error(`[mailer] Brevo HTTP API Error ${response.status}:`, errorDetails);
         throw new Error(`Brevo HTTP API Error: ${response.status} - ${JSON.stringify(errorDetails)}`);
       }
 

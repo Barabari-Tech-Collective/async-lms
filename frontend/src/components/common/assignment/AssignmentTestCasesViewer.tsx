@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Terminal, Check, Copy, Code2, Cpu, Lock } from 'lucide-react';
+import { Terminal, Check, Copy, Code2, Cpu, Lock, FileSpreadsheet, BarChart3, Layers } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -59,6 +59,20 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
       };
     }
 
+    // Excel evaluation mode or list of Excel assertions (prevents false function mode match)
+    const isExcelFormat =
+      evaluatorType === 'EXCEL' ||
+      (Array.isArray(data) && data.some((i: any) => i && (i.criterion || i.range || i.anchor || i.type === 'formula_behavior_check' || i.type === 'value_check' || i.type === 'formula_range_check' || i.type === 'format_check' || i.type === 'chart_check' || i.type === 'pivot_check' || i.type === 'data_check' || i.type === 'macro_check'))) ||
+      (Array.isArray(data?.testCases) && data.testCases.some((i: any) => i && (i.criterion || i.range || i.anchor || i.type === 'formula_behavior_check' || i.type === 'value_check' || i.type === 'formula_range_check' || i.type === 'format_check' || i.type === 'chart_check' || i.type === 'pivot_check' || i.type === 'data_check' || i.type === 'macro_check')));
+
+    if (isExcelFormat) {
+      const items = Array.isArray(data) ? data : Array.isArray(data.testCases) ? data.testCases : [];
+      return {
+        type: 'list',
+        items,
+      };
+    }
+
     // Function mode format
     if (data.evaluationMode === 'function' || Array.isArray(data.testCases)) {
       return {
@@ -85,7 +99,7 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
     }
 
     return { type: 'json', content: JSON.stringify(data, null, 2) };
-  }, [testCases]);
+  }, [testCases, evaluatorType]);
 
   if (!parsed) return null;
 
@@ -112,8 +126,12 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
         </div>
         <div className='flex items-center gap-2'>
           {evaluatorType && (
-            <Badge className='bg-indigo-50 text-indigo-700 border-indigo-200 text-xs font-semibold px-2.5 py-0.5 uppercase'>
-              <Cpu className='h-3 w-3 mr-1 inline' />
+            <Badge className={`${evaluatorType === 'EXCEL' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} text-xs font-semibold px-2.5 py-0.5 uppercase`}>
+              {evaluatorType === 'EXCEL' ? (
+                <FileSpreadsheet className='h-3 w-3 mr-1 inline' />
+              ) : (
+                <Cpu className='h-3 w-3 mr-1 inline' />
+              )}
               {evaluatorType} Evaluator
             </Badge>
           )}
@@ -247,43 +265,194 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
           </div>
         )}
 
-        {/* LIST MODE */}
+        {/* LIST MODE (Generic & Excel Test Cases) */}
         {parsed.type === 'list' && (
           <div className='grid gap-2.5'>
-            {parsed.items?.map((item: any, idx: number) => (
-              <div
-                key={idx}
-                className='p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm'
-              >
-                <div className='flex items-center gap-2.5'>
-                  <span className='w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0'>
-                    {idx + 1}
-                  </span>
+            {parsed.items?.map((item: any, idx: number) => {
+              const isExcelItem = item.criterion || item.type || item.range || item.anchor || item.expectedValue !== undefined;
+              return (
+                <div
+                  key={idx}
+                  className='p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm'
+                >
+                  <div className='flex items-start sm:items-center gap-2.5'>
+                    <span className='w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 sm:mt-0'>
+                      {idx + 1}
+                    </span>
+                    <div className='space-y-1'>
+                      <div className='flex items-center gap-2 flex-wrap'>
+                        <span className='text-xs font-semibold text-slate-800'>
+                          {item.criterion || item.name || `Test Case #${idx + 1}`}
+                        </span>
+                        {item.type && (
+                          <span className='text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase'>
+                            {String(item.type).replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Excel-specific descriptors */}
+                      {isExcelItem && (
+                        <div className='flex items-center gap-1.5 flex-wrap text-xs text-slate-600'>
+                          {item.range && (
+                            <code className='bg-white px-1.5 py-0.5 rounded border border-slate-200 text-indigo-700 font-mono text-[11px] font-semibold'>
+                              Range: {item.range}
+                            </code>
+                          )}
+                          {item.anchor && (
+                            <code className='bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono text-[11px]'>
+                              Anchor: &quot;{item.anchor}&quot; ({item.direction || 'right'})
+                            </code>
+                          )}
+                          {item.cell && (
+                            <code className='bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono text-[11px]'>
+                              Cell: {item.cell}
+                            </code>
+                          )}
+                          {item.acceptedFunctions && Array.isArray(item.acceptedFunctions) && (
+                            <span className='inline-flex items-center gap-1 text-[11px] text-slate-600'>
+                              Allowed: <span className='font-mono font-medium text-emerald-700'>{item.acceptedFunctions.join(', ')}</span>
+                            </span>
+                          )}
+                          {item.mustBeFormula && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium'>
+                              Dynamic Formula Required
+                            </span>
+                          )}
+                          {/* Behavior mutation check */}
+                          {item.type === 'formula_behavior_check' && (
+                            <div className='flex items-center gap-1.5 flex-wrap mt-0.5'>
+                              {item.inputs && Array.isArray(item.inputs) && item.inputs.map((inp: any, iIdx: number) => (
+                                <span key={iIdx} className='inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-semibold'>
+                                  Mutate {inp.cell} ➔ {inp.value}
+                                </span>
+                              ))}
+                              <span className='text-slate-400 text-xs'>➔</span>
+                              {item.expectedOutputs && Array.isArray(item.expectedOutputs) && item.expectedOutputs.map((out: any, oIdx: number) => (
+                                <span key={oIdx} className='inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold'>
+                                  Expect {out.cell} ➔ {out.expectedValue}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Chart check */}
+                          {(item.type === 'chart_check' || item.chartType) && (
+                            <div className='flex items-center gap-1.5 flex-wrap mt-0.5'>
+                              <span className='inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium'>
+                                <BarChart3 className='w-3 h-3' />
+                                Chart Type: {item.chartType || 'Any'}
+                              </span>
+                              {item.title && (
+                                <span className='text-[11px] text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 font-medium'>
+                                  Title: &quot;{item.title}&quot;
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Pivot check */}
+                          {(item.type === 'pivot_check' || item.minPivotTables) && (
+                            <div className='flex items-center gap-1.5 flex-wrap mt-0.5'>
+                              <span className='inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-cyan-50 text-cyan-800 border border-cyan-200 font-medium'>
+                                <Layers className='w-3 h-3' />
+                                Pivot Table {item.minPivotTables ? `(${item.minPivotTables}+)` : ''}
+                              </span>
+                              {(item.requiredField || item.requiredFields) && (
+                                <span className='text-[11px] text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 font-mono'>
+                                  Field: {item.requiredField || (Array.isArray(item.requiredFields) ? item.requiredFields.join(', ') : item.requiredFields)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Macro / VBA check */}
+                          {(item.type === 'macro_check' || item.requireVba) && (
+                            <div className='flex items-center gap-1.5 flex-wrap mt-0.5'>
+                              <span className='inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-medium'>
+                                VBA Automation
+                              </span>
+                              {item.requiredSub && (
+                                <span className='text-[11px] text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 font-mono'>
+                                  Sub: {item.requiredSub}()
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Data completeness check */}
+                          {item.type === 'data_check' && (
+                            <span className='text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-medium'>
+                              Non-Empty Data in Range {item.range || 'Table'}
+                            </span>
+                          )}
+
+                          {item.bold && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold'>
+                              Bold
+                            </span>
+                          )}
+                          {item.align && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700'>
+                              Align: {item.align}
+                            </span>
+                          )}
+                          {item.hasFill && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200'>
+                              Header Fill
+                            </span>
+                          )}
+                          {item.hasBorder && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700'>
+                              Borders
+                            </span>
+                          )}
+                          {item.numberFormat && (
+                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium'>
+                              Format: {item.numberFormat}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Standard JS input if present */}
+                      {!isExcelItem && item.input && (
+                        <code className='bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700 font-mono text-xs'>
+                          Input: {typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input)}
+                        </code>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expected Output / Value */}
                   <div>
-                    <span className='text-xs text-slate-500 block'>{item.name || `Test Case #${idx + 1}`}</span>
-                    {item.input && (
-                      <code className='bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700 font-mono text-xs'>
-                        Input: {typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input)}
-                      </code>
-                    )}
+                    {isExcelItem && item.expectedValue !== undefined ? (
+                      isStaff ? (
+                        <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
+                          Expected: {String(item.expectedValue)}{item.tolerance ? ` (±${item.tolerance * 100}%)` : ''}
+                        </code>
+                      ) : (
+                        <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                          <Lock className='w-3 h-3 text-slate-400' />
+                          Locked
+                        </span>
+                      )
+                    ) : item.output ? (
+                      isStaff ? (
+                        <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
+                          Expected: {typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output)}
+                        </code>
+                      ) : (
+                        <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
+                          <Lock className='w-3 h-3 text-slate-400' />
+                          Locked
+                        </span>
+                      )
+                    ) : null}
                   </div>
                 </div>
-                {item.output && (
-                  <div>
-                    {isStaff ? (
-                      <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
-                        Expected: {typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output)}
-                      </code>
-                    ) : (
-                      <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>
-                        <Lock className='w-3 h-3 text-slate-400' />
-                        Locked
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

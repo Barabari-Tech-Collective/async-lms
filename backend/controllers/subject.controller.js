@@ -243,6 +243,8 @@ exports.getCourseStructure = async (req, res) => {
         st.slug AS subtopic_slug,
         st.description AS subtopic_description,
         st.order_index AS subtopic_order,
+        (st.created_at >= NOW() - INTERVAL '7 days') AS subtopic_is_new,
+        (st.updated_at >= NOW() - INTERVAL '7 days' AND st.updated_at > st.created_at + INTERVAL '10 seconds') AS subtopic_is_updated,
         CASE WHEN
           -- Fast path: user_subtopic_progress explicitly marks it done
           COALESCE(usp.is_completed, false) = true
@@ -276,12 +278,16 @@ exports.getCourseStructure = async (req, res) => {
         lc.estimated_read_time AS lesson_read_time,
         lc.version AS lesson_version,
         lc.video_url AS lesson_video_url,
+        (lc.created_at >= NOW() - INTERVAL '7 days') AS lesson_is_new,
+        (lc.updated_at >= NOW() - INTERVAL '7 days' AND lc.updated_at > lc.created_at + INTERVAL '10 seconds') AS lesson_is_updated,
         COALESCE(ulp.is_completed, false) AS lesson_is_completed,
 
         -- Quiz (presence only — questions/options fetched on demand via /subjects/quiz/:id)
         q.id AS quiz_id,
         q.passing_score AS quiz_passing_score,
         q.max_score AS quiz_max_score,
+        (q.created_at >= NOW() - INTERVAL '7 days') AS quiz_is_new,
+        (q.updated_at >= NOW() - INTERVAL '7 days' AND q.updated_at > q.created_at + INTERVAL '10 seconds') AS quiz_is_updated,
         (
           SELECT EXISTS(
             SELECT 1 FROM quiz_attempts qa
@@ -300,6 +306,8 @@ exports.getCourseStructure = async (req, res) => {
         a.title AS assignment_title,
         a.instructions AS assignment_instructions,
         a.max_score AS assignment_max_score,
+        (a.created_at >= NOW() - INTERVAL '7 days') AS assignment_is_new,
+        (a.updated_at >= NOW() - INTERVAL '7 days' AND a.updated_at > a.created_at + INTERVAL '10 seconds') AS assignment_is_updated,
         (
           SELECT EXISTS(
             SELECT 1 FROM assignment_submissions asub
@@ -397,17 +405,26 @@ exports.getCourseStructure = async (req, res) => {
       const unit = topic.units.get(row.unit_id);
 
       // Subtopic
-      if (row.subtopic_id && unit && !unit.subtopics.has(row.subtopic_id)) {
-        unit.subtopics.set(row.subtopic_id, {
-          id: row.subtopic_id,
-          title: row.subtopic_title,
-          slug: row.subtopic_slug,
-          description: row.subtopic_description,
-          order_index: row.subtopic_order,
-          is_completed: !!row.subtopic_is_completed,
-          lesson_content: [],
-          exercises: [],
-        });
+      if (row.subtopic_id && unit) {
+        const isUpdated = !!row.subtopic_is_updated || !!row.lesson_is_updated;
+        if (!unit.subtopics.has(row.subtopic_id)) {
+          unit.subtopics.set(row.subtopic_id, {
+            id: row.subtopic_id,
+            title: row.subtopic_title,
+            slug: row.subtopic_slug,
+            description: row.subtopic_description,
+            order_index: row.subtopic_order,
+            is_new: !!row.subtopic_is_new && !isUpdated,
+            is_updated: isUpdated,
+            is_completed: !!row.subtopic_is_completed,
+            lesson_content: [],
+            exercises: [],
+          });
+        } else if (isUpdated) {
+          const sub = unit.subtopics.get(row.subtopic_id);
+          sub.is_updated = true;
+          sub.is_new = false;
+        }
       }
 
       const subtopic = unit ? unit.subtopics.get(row.subtopic_id) : null;
@@ -415,6 +432,7 @@ exports.getCourseStructure = async (req, res) => {
       // Lesson Content
       if (row.lesson_id && subtopic) {
         if (!subtopic.lesson_content.some((l) => l.id === row.lesson_id)) {
+          const lcUpdated = !!row.lesson_is_updated;
           subtopic.lesson_content.push({
             id: row.lesson_id,
             content_type: row.lesson_type,
@@ -422,17 +440,22 @@ exports.getCourseStructure = async (req, res) => {
             estimated_read_time: row.lesson_read_time,
             version: row.lesson_version,
             video_url: row.lesson_video_url,
+            is_new: !!row.lesson_is_new && !lcUpdated,
+            is_updated: lcUpdated,
           });
         }
       }
 
       // Quiz (presence only)
       if (row.quiz_id && unit) {
+        const quizUpdated = !!row.quiz_is_updated;
         if (!unit.quizzes.has(row.quiz_id)) {
           unit.quizzes.set(row.quiz_id, {
             id: row.quiz_id,
             passing_score: row.quiz_passing_score,
             max_score: row.quiz_max_score,
+            is_new: !!row.quiz_is_new && !quizUpdated,
+            is_updated: quizUpdated,
             is_passed: row.quiz_is_passed || false,
           });
         }
@@ -452,12 +475,15 @@ exports.getCourseStructure = async (req, res) => {
 
       // Assignment (unit-level)
       if (row.assignment_id && unit) {
+        const asgnUpdated = !!row.assignment_is_updated;
         if (!unit.assignments.some((a) => a.id === row.assignment_id)) {
           unit.assignments.push({
             id: row.assignment_id,
             title: row.assignment_title,
             instructions: row.assignment_instructions,
             max_score: row.assignment_max_score,
+            is_new: !!row.assignment_is_new && !asgnUpdated,
+            is_updated: asgnUpdated,
             is_submitted: row.assignment_is_submitted || false,
           });
         }
