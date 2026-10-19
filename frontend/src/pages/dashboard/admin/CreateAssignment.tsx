@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Upload, Plus, Trash2, Loader2, FileText, X, ChevronDown, Check, Sparkles, Eye, ClipboardList } from 'lucide-react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 import toast from 'react-hot-toast';
 import apiClient from '@/services/api';
 import { getErrorMessage } from '@/lib/utils';
@@ -87,12 +88,15 @@ export default function CreateAssignment() {
   const dashboardType = location.pathname.includes('/dashboard/admin') ? 'admin' : 'facilitator';
   const basePath = `/dashboard/${dashboardType}`;
 
-  // ── Basic Information ──
-  const editId = editData.editId || null;
+  // ─── Basic Information ───
+  const queryParams = new URLSearchParams(location.search);
+  const editId = editData.editId || queryParams.get('editId') || null;
+  const [loadingAssignment, setLoadingAssignment] = useState<boolean>(!!editId);
+
   const [title, setTitle] = useState(editData.title || '');
   const [description, setDescription] = useState(editData.description || '');
   const [course, setCourse] = useState(editData.course || '');
-  const [college] = useState(editData.collegeId || '');
+  const [college, setCollege] = useState(editData.collegeId || '');
   const [selectedColleges, setSelectedColleges] = useState<string[]>(
     editData.collegeId ? [editData.collegeId] : []
   );
@@ -103,17 +107,73 @@ export default function CreateAssignment() {
   const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
   const [availableTopics, setAvailableTopics] = useState<{value: string, label: string}[]>([]);
 
-  // ── Colleges & Evaluators from API ──
+  // ─── Colleges & Evaluators from API ───
   const [colleges, setColleges] = useState<College[]>([]);
   const [evaluators, setEvaluators] = useState<{id: string; name: string}[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Instruction Document Upload ──
+  // ─── Instruction Document Upload ───
   const [instructionFile, setInstructionFile] = useState<File | null>(null);
   const [instructionUrl, setInstructionUrl] = useState(editData.instruction_file_url || '');
   const [instructionName, setInstructionName] = useState(editData.instruction_file_name || '');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── Evaluation Setup ───
+  const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
+  const [aiEvaluationType, setAiEvaluationType] = useState(editData.aiEvaluationType || '');
+  const [weightage, setWeightage] = useState(editData.weightage || '100');
+  const [enablePlagiarism, setEnablePlagiarism] = useState(editData.enablePlagiarism || false);
+
+  // ─── Rubrics & Test Cases State ───
+  const [rubrics, setRubrics] = useState<RubricItem[]>(editData.rubricsList || []);
+  const [rubricJson, setRubricJson] = useState<string>(
+    editData.rubric
+      ? typeof editData.rubric === 'string'
+        ? editData.rubric
+        : JSON.stringify(editData.rubric, null, 2)
+      : JSON.stringify(
+          [
+            {
+              name: 'Code Correctness',
+              description: 'Fulfills primary requirements and handles edge cases.',
+              weight: 50,
+            },
+            {
+              name: 'Structure & Quality',
+              description: 'Clean formatting, modular architecture, and standards.',
+              weight: 50,
+            },
+          ],
+          null,
+          2
+        )
+  );
+  const [rubricViewMode, setRubricViewMode] = useState<'json' | 'builder'>(editData.rubricsList?.length ? 'builder' : 'json');
+  const [generatingRubric, setGeneratingRubric] = useState(false);
+
+  // ─── Editor Type ───
+  const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
+
+  // ─── Test Cases ───
+  const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
+  const [testCasesJson, setTestCasesJson] = useState<string>(
+    editData.test_cases
+      ? typeof editData.test_cases === 'string'
+        ? editData.test_cases
+        : JSON.stringify(editData.test_cases, null, 2)
+      : JSON.stringify(
+          {
+            evaluationMode: 'script',
+            expectedLogs: ['Hello World'],
+          },
+          null,
+          2
+        )
+  );
+  const [testCaseViewMode, setTestCaseViewMode] = useState<'json' | 'builder'>(editData.testCasesList?.length ? 'builder' : 'json');
+  const [generatingTestCases, setGeneratingTestCases] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const handleFileUpload = async (file: File) => {
     const allowed = ['.pdf', '.docx', '.txt', '.doc'];
@@ -143,6 +203,7 @@ export default function CreateAssignment() {
     }
   };
 
+  // ─── Load Reference Data on Mount ───
   useEffect(() => {
     apiClient
       .get<{ data: College[] }>('/facilitator/colleges')
@@ -160,6 +221,115 @@ export default function CreateAssignment() {
       .catch((error) => console.error('Failed to load courses', error));
   }, []);
 
+  // ─── Load Assignment Details on Edit ───
+  useEffect(() => {
+    if (!editId) return;
+
+    setLoadingAssignment(true);
+    apiClient
+      .get<{ success: boolean; data: any }>(`/college-assignments/${editId}`)
+      .then((res) => {
+        const d = res.data.data;
+        if (!d) return;
+
+        if (d.title) setTitle(d.title);
+        if (d.description) setDescription(d.description);
+        if (d.assignment_description) setAssignmentDescription(d.assignment_description);
+        if (d.course) setCourse(d.course);
+        if (d.college_id) {
+          setCollege(String(d.college_id));
+          setSelectedColleges([String(d.college_id)]);
+        }
+        if (d.topic_id) setTopicId(String(d.topic_id));
+        if (d.due_date) {
+          try {
+            const dt = new Date(d.due_date);
+            if (!isNaN(dt.getTime())) {
+              const year = dt.getFullYear();
+              const month = String(dt.getMonth() + 1).padStart(2, '0');
+              const day = String(dt.getDate()).padStart(2, '0');
+              const hours = String(dt.getHours()).padStart(2, '0');
+              const minutes = String(dt.getMinutes()).padStart(2, '0');
+              setDeadline(`${year}-${month}-${day}T${hours}:${minutes}`);
+            } else {
+              setDeadline(d.due_date.slice(0, 16));
+            }
+          } catch {
+            setDeadline(d.due_date.slice(0, 16));
+          }
+        }
+        if (d.evaluator_type) setAiEvaluationType(d.evaluator_type);
+        if (d.instruction_file_url) setInstructionUrl(d.instruction_file_url);
+        if (d.instruction_file_name) setInstructionName(d.instruction_file_name);
+        if (d.allowed_submission_types && Array.isArray(d.allowed_submission_types)) {
+          setAllowedSubmissionTypes(d.allowed_submission_types);
+        }
+        if (d.weightage || d.max_score) setWeightage(String(d.weightage || d.max_score));
+        if (typeof d.enable_plagiarism === 'boolean') setEnablePlagiarism(d.enable_plagiarism);
+        if (d.editor_type === 'rich' || d.editor_type === 'markdown') setEditorType(d.editor_type);
+
+        // Test Cases
+        if (d.test_cases) {
+          let parsedTc: any = d.test_cases;
+          if (typeof parsedTc === 'string') {
+            try { parsedTc = JSON.parse(parsedTc); } catch {}
+          }
+          if (Array.isArray(parsedTc) && parsedTc.length > 0) {
+            setTestCases(parsedTc.map((tc: any, i: number) => ({
+              id: Date.now() + i,
+              input: tc.input ?? '',
+              output: tc.output ?? '',
+              score: Number(tc.score) || 10,
+            })));
+            setTestCasesJson(JSON.stringify(parsedTc, null, 2));
+            setTestCaseViewMode('builder');
+          } else if (typeof parsedTc === 'object' && parsedTc !== null) {
+            setTestCasesJson(JSON.stringify(parsedTc, null, 2));
+            setTestCaseViewMode('json');
+          }
+        }
+
+        // Rubrics
+        if (d.rubric) {
+          let parsedRubric: any = d.rubric;
+          if (typeof parsedRubric === 'string') {
+            try { parsedRubric = JSON.parse(parsedRubric); } catch {}
+          }
+          if (Array.isArray(parsedRubric) && parsedRubric.length > 0) {
+            setRubrics(parsedRubric.map((r: any, i: number) => ({
+              id: Date.now() + i,
+              criteria: r.name || r.criteria || '',
+              description: r.description || '',
+              maxScore: Number(r.score || r.weight || r.maxScore) || 10,
+            })));
+            setRubricJson(JSON.stringify(parsedRubric, null, 2));
+            setRubricViewMode('builder');
+          } else if (typeof parsedRubric === 'object' && parsedRubric !== null) {
+            setRubricJson(JSON.stringify(parsedRubric, null, 2));
+            setRubricViewMode('json');
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load assignment details for editing', err);
+      })
+      .finally(() => {
+        setLoadingAssignment(false);
+      });
+  }, [editId]);
+
+  // Normalize course value to UUID when availableCourses loads
+  useEffect(() => {
+    if (!course || availableCourses.length === 0) return;
+    const match = availableCourses.find(
+      (c) => c.value === course || c.label.toLowerCase() === course.toLowerCase() || c.slug === course
+    );
+    if (match && match.value !== course) {
+      setCourse(match.value);
+    }
+  }, [availableCourses, course]);
+
+  // Fetch topics when course changes
   useEffect(() => {
     if (!course) {
       setAvailableTopics([]);
@@ -167,29 +337,155 @@ export default function CreateAssignment() {
     }
     apiClient
       .get<{ data: any[] }>(`/college-assignments/courses/${course}/topics`)
-      .then((res) => setAvailableTopics(res.data.data || []))
+      .then((res) => {
+        const topics = res.data.data || [];
+        setAvailableTopics(topics);
+      })
       .catch((error) => console.error('Failed to load topics', error));
   }, [course]);
 
-  // ── Evaluation Setup ──
-  const [assignmentDescription, setAssignmentDescription] = useState(editData.assignmentDescription || '');
-  const [aiEvaluationType, setAiEvaluationType] = useState(editData.aiEvaluationType || '');
-  const [weightage, setWeightage] = useState(editData.weightage || '100');
-  const [enablePlagiarism, setEnablePlagiarism] = useState(editData.enablePlagiarism || false);
+  // Normalize topicId when availableTopics loads
+  useEffect(() => {
+    if (!topicId || availableTopics.length === 0) return;
+    const match = availableTopics.find(
+      (t) => t.value === topicId || t.label.toLowerCase() === topicId.toLowerCase()
+    );
+    if (match && match.value !== topicId) {
+      setTopicId(match.value);
+    }
+  }, [availableTopics, topicId]);
 
-  // ── Rubrics ──
-  const [rubrics, setRubrics] = useState<RubricItem[]>(editData.rubricsList || []);
+  // ─── AI Auto-Generate Handlers ───
+  const handleGenerateTestCases = async () => {
+    const instructionsText = assignmentDescription.trim() || description.trim();
+    if (!title.trim() || !instructionsText) {
+      toast.error('Please provide an Assignment Title and Description / Instructions first');
+      return;
+    }
+    if (!aiEvaluationType) {
+      toast.error('Please select an Evaluation Type before generating test cases');
+      return;
+    }
 
-  // ── Editor Type ──
-  const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
+    setGeneratingTestCases(true);
+    try {
+      let rubricPayload: any = null;
+      try {
+        rubricPayload = JSON.parse(rubricJson);
+      } catch {
+        rubricPayload = rubrics.map((r) => ({ name: r.criteria, description: r.description, weight: r.maxScore }));
+      }
 
-  // ── Test Cases ──
-  const [testCases, setTestCases] = useState<{ id: number; input: string; output: string; score: number }[]>(editData.testCasesList || []);
+      const res = await apiClient.post<{ success: boolean; testCases: string }>('/evaluations/generate-test-cases', {
+        title: title.trim(),
+        instructions: instructionsText,
+        evaluatorType: aiEvaluationType,
+        rubric: rubricPayload,
+      });
 
-  // ── Submission Settings ──
-  const [allowGithubLink, setAllowGithubLink] = useState(editData.allowGithubLink ?? true);
+      if (res.data.success && res.data.testCases) {
+        setTestCasesJson(res.data.testCases);
+        try {
+          const parsed = JSON.parse(res.data.testCases);
+          if (Array.isArray(parsed)) {
+            setTestCases(
+              parsed.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                input: typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
+                output: typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output || item.expected || ''),
+                score: Number(item.score || item.points || 10),
+              }))
+            );
+          } else if (parsed.testCases && Array.isArray(parsed.testCases)) {
+            setTestCases(
+              parsed.testCases.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                input: typeof item.input === 'object' ? JSON.stringify(item.input) : String(item.input || ''),
+                output: typeof item.expected === 'object' ? JSON.stringify(item.expected) : String(item.expected || item.output || ''),
+                score: Number(item.score || 10),
+              }))
+            );
+          }
+        } catch {}
+        toast.success('Test cases generated successfully!');
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to generate test cases');
+    } finally {
+      setGeneratingTestCases(false);
+    }
+  };
 
-  // ── Rubrics helpers ──
+  const handleGenerateRubric = async () => {
+    const instructionsText = assignmentDescription.trim() || description.trim();
+    if (!title.trim() || !instructionsText) {
+      toast.error('Please provide an Assignment Title and Description / Instructions first');
+      return;
+    }
+
+    setGeneratingRubric(true);
+    try {
+      const res = await apiClient.post<{ success: boolean; rubric: string }>('/evaluations/generate-rubric', {
+        title: title.trim(),
+        instructions: instructionsText,
+        evaluatorType: aiEvaluationType || 'JS',
+      });
+
+      if (res.data.success && res.data.rubric) {
+        setRubricJson(res.data.rubric);
+        try {
+          const parsed = JSON.parse(res.data.rubric);
+          if (Array.isArray(parsed)) {
+            setRubrics(
+              parsed.map((item: any, idx: number) => ({
+                id: Date.now() + idx,
+                criteria: item.name || item.criteria || `Criterion ${idx + 1}`,
+                description: item.description || '',
+                maxScore: Number(item.weight || item.score || item.maxScore || 10),
+              }))
+            );
+          }
+        } catch {}
+        toast.success('Rubric generated successfully!');
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to generate rubric');
+    } finally {
+      setGeneratingRubric(false);
+    }
+  };
+
+  // ─── Submission Settings ───
+  const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<string[]>(
+    editData.allowed_submission_types || editData.allowedSubmissionTypes || [
+      'file',
+      'github',
+      'docs',
+      'figma',
+      'excel',
+      'url',
+    ]
+  );
+
+  const toggleSubmissionType = (typeId: string) => {
+    setAllowedSubmissionTypes((prev) => {
+      if (prev.includes(typeId)) {
+        if (prev.length <= 1) {
+          toast.error('At least one submission method must be enabled');
+          return prev;
+        }
+        return prev.filter((t) => t !== typeId);
+      } else {
+        return [...prev, typeId];
+      }
+    });
+  };
+
+  const selectAllSubmissionTypes = () => {
+    setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+  };
+
+  // ─── Rubrics helpers ───
   const totalScore = rubrics.reduce((sum, r) => sum + r.maxScore, 0);
 
   const addRubric = () => {
@@ -209,7 +505,7 @@ export default function CreateAssignment() {
     );
   };
 
-  // ── Test Cases helpers ──
+  // ─── Test Cases helpers ───
   const totalTestCaseScore = testCases.reduce((sum, tc) => sum + tc.score, 0);
 
   const addTestCase = () => {
@@ -231,7 +527,7 @@ export default function CreateAssignment() {
 
   const isCodeEvaluator = ['JS', 'PYTHON', 'JAVA'].includes(aiEvaluationType);
 
-  // ── Validation & Submit ──
+  // ─── Validation & Submit ───
   const handleCreate = async () => {
     const missing: string[] = [];
 
@@ -240,6 +536,7 @@ export default function CreateAssignment() {
     if (editId ? !college : selectedColleges.length === 0) missing.push('College');
     if (!topicId) missing.push('Subject');
     if (!deadline) missing.push('Deadline');
+    if (allowedSubmissionTypes.length === 0) missing.push('At least one Submission Method');
 
     if (missing.length > 0) {
       toast.error(
@@ -256,20 +553,49 @@ export default function CreateAssignment() {
 
     setSubmitting(true);
     try {
+      let finalTestCases: any = null;
+      if (testCaseViewMode === 'json' && testCasesJson.trim()) {
+        try {
+          finalTestCases = JSON.parse(testCasesJson);
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Test Cases: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        finalTestCases = testCases.map((t) => ({ input: t.input, output: t.output, score: t.score }));
+      }
+
+      let finalRubric: any = null;
+      if (rubricViewMode === 'json' && rubricJson.trim()) {
+        try {
+          finalRubric = JSON.parse(rubricJson);
+        } catch (e: any) {
+          toast.error(`Invalid JSON in Rubrics: ${e?.message || 'Check syntax'}`);
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        finalRubric = rubrics.map((r) => ({ name: r.criteria, score: r.maxScore, description: r.description }));
+      }
+
+      const formattedDueDate = deadline ? new Date(deadline).toISOString() : null;
+
       let resId = editId;
       if (editId) {
         await apiClient.put(`/college-assignments/${editId}`, {
           title: title.trim(),
           description: description.trim() || null,
-          due_date: deadline || null,
+          due_date: formattedDueDate,
           course: course || null,
           topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
           instruction_file_name: instructionName || null,
-          test_cases: testCases.map((t) => ({ input: t.input, output: t.output, score: t.score })),
-          rubric: rubrics.map((r) => ({ name: r.criteria, score: r.maxScore })),
+          test_cases: finalTestCases,
+          rubric: finalRubric,
           evaluator_type: aiEvaluationType || null,
           assignment_description: assignmentDescription.trim() || null,
+          allowed_submission_types: allowedSubmissionTypes,
         });
         toast.success('Assignment updated successfully!');
       } else {
@@ -277,15 +603,16 @@ export default function CreateAssignment() {
           college_ids: selectedColleges,
           title: title.trim(),
           description: description.trim() || null,
-          due_date: deadline || null,
+          due_date: formattedDueDate,
           course: course || null,
           topic_id: topicId || null,
           instruction_file_url: instructionUrl || null,
           instruction_file_name: instructionName || null,
-          test_cases: testCases.map((t) => ({ input: t.input, output: t.output, score: t.score })),
-          rubric: rubrics.map((r) => ({ name: r.criteria, score: r.maxScore })),
+          test_cases: finalTestCases,
+          rubric: finalRubric,
           evaluator_type: aiEvaluationType || null,
           assignment_description: assignmentDescription.trim() || null,
+          allowed_submission_types: allowedSubmissionTypes,
         });
         resId = res.data.data.id;
         toast.success('Assignment created successfully!');
@@ -312,7 +639,7 @@ export default function CreateAssignment() {
           aiEvaluationType,
           weightage,
           enablePlagiarism,
-          allowGithubLink,
+          allowed_submission_types: allowedSubmissionTypes,
           totalMarks: isCodeEvaluator ? totalTestCaseScore : totalScore,
           rubricsList: rubrics,
           testCasesList: testCases,
@@ -336,7 +663,7 @@ export default function CreateAssignment() {
   return (
     <div className='min-h-screen bg-slate-50/60'>
       <div className='max-w-3xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 animate-in fade-in duration-500 min-w-0'>
-        {/* ── Page Header ── */}
+        {/* ─── Page Header ─── */}
         <div className='flex items-center gap-3'>
           <button
             className='p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition min-h-[38px] min-w-[38px] flex items-center justify-center'
@@ -345,8 +672,20 @@ export default function CreateAssignment() {
             <ArrowLeft className='w-5 h-5' />
           </button>
           <div className='min-w-0'>
-            <h1 className='text-lg sm:text-xl font-bold text-slate-900 truncate'>Create Assignment</h1>
-            <p className='text-xs sm:text-sm text-slate-500 truncate'>Set up a new assignment for a branch</p>
+            <div className='flex items-center gap-2'>
+              <h1 className='text-lg sm:text-xl font-bold text-slate-900 truncate'>
+                {editId ? 'Edit Assignment' : 'Create Assignment'}
+              </h1>
+              {loadingAssignment && (
+                <div className='flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs font-medium'>
+                  <Loader2 className='w-3 h-3 animate-spin' />
+                  <span>Loading details...</span>
+                </div>
+              )}
+            </div>
+            <p className='text-xs sm:text-sm text-slate-500 truncate'>
+              {editId ? 'Update details, evaluation rules, and submissions' : 'Set up a new assignment for a branch'}
+            </p>
           </div>
         </div>
 
@@ -413,7 +752,7 @@ export default function CreateAssignment() {
                 <Label className='text-xs sm:text-sm text-slate-600'>College</Label>
                 {editId ? (
                   <Input
-                    value={colleges.find((c) => String(c.id) === college)?.name || college || 'Loading...'}
+                    value={colleges.find((c) => String(c.id) === (selectedColleges[0] || college))?.name || (editData.college || college || 'Loading...')}
                     disabled
                     className="bg-slate-100/80 border-slate-200 text-slate-500 font-medium text-xs sm:text-sm h-10"
                   />
@@ -503,7 +842,7 @@ export default function CreateAssignment() {
               <div className='space-y-1.5'>
                 <Label className='text-xs sm:text-sm text-slate-600'>Deadline</Label>
                 <Input
-                  type='date'
+                  type='datetime-local'
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
                   className='text-xs sm:text-sm h-10'
@@ -640,183 +979,580 @@ export default function CreateAssignment() {
         </Card>
 
         {/* ================================================================
-            SECTION 3 — Evaluation Rubrics / Test Cases
+            SECTION 3 — Test Cases & Evaluation Rubrics
         ================================================================ */}
-        {isCodeEvaluator ? (
-          <Card className='border-none shadow-sm'>
-            <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
-              <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
-                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Test Cases Builder</CardTitle>
-                <div className='flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto'>
-                  <span className='text-xs sm:text-sm text-slate-500'>
-                    Total: <span className='font-semibold text-blue-600'>{totalTestCaseScore}</span> Points
-                  </span>
+
+        {/* ─── Test Cases Card ─── */}
+        <Card className='border-none shadow-sm overflow-hidden bg-white'>
+          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <div className='w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-mono text-xs font-bold'>
+                    &gt;_
+                  </div>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Test Cases</CardTitle>
+                </div>
+                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules matching your selected evaluator</p>
+              </div>
+
+              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
+                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('json')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    JSON / Spec
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setTestCaseViewMode('builder')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      testCaseViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Builder
+                  </button>
+                </div>
+
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateTestCases}
+                  disabled={generatingTestCases}
+                  className='h-8 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800 font-semibold gap-1.5 shadow-2xs'
+                >
+                  {generatingTestCases ? (
+                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-3.5 h-3.5 text-indigo-600' />
+                  )}
+                  Auto-Generate Test Cases
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className='p-4 sm:p-6 space-y-3'>
+            {testCaseViewMode === 'json' ? (
+              <div className='space-y-2'>
+                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all'>
+                  <textarea
+                    value={testCasesJson}
+                    onChange={(e) => setTestCasesJson(e.target.value)}
+                    rows={8}
+                    placeholder={`{\n  "evaluationMode": "script",\n  "expectedLogs": ["Hello World"]\n}`}
+                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
+                  />
+                </div>
+                <p className='text-[11px] text-slate-400'>
+                  Note: For React, Fullstack, or Backend assignments, you can also paste JavaScript test spec files directly. It will be packaged automatically upon save.
+                </p>
+              </div>
+            ) : (
+              <div className='space-y-3'>
+                <div className='flex items-center justify-between pb-1'>
+                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
+                    <span>Total:</span>
+                    <span className='text-indigo-600'>{totalTestCaseScore} Points</span>
+                  </div>
                   <Button
                     variant='outline'
                     size='sm'
-                    className='gap-1 text-xs sm:text-sm text-blue-600 border-blue-200 hover:bg-blue-50'
+                    className='gap-1.5 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 font-semibold'
                     onClick={addTestCase}
                   >
                     <Plus className='w-3.5 h-3.5' /> Add Test Case
                   </Button>
                 </div>
-              </div>
-            </CardHeader>
 
-            <CardContent className='space-y-3 px-4 sm:px-6 pb-4 sm:pb-6'>
-              {testCases.map((tc) => (
-                <div
-                  key={tc.id}
-                  className='flex flex-col sm:grid sm:grid-cols-[1fr_1fr_80px_40px] gap-2.5 sm:gap-3 items-stretch sm:items-center p-3 sm:p-0 bg-slate-50 sm:bg-transparent rounded-xl sm:rounded-none border border-slate-100 sm:border-0'
-                >
-                  <div className='space-y-1'>
-                    <Label className='text-[11px] sm:text-xs text-slate-400'>Input (Arguments)</Label>
-                    <Input
-                      value={tc.input}
-                      onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
-                      className='text-xs sm:text-sm font-mono h-9 sm:h-10'
-                      placeholder='e.g. 5, 10'
-                    />
+                {testCases.length === 0 ? (
+                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
+                    <p className='text-xs text-slate-500'>No test cases added yet.</p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleGenerateTestCases}
+                      className='text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium'
+                    >
+                      <Sparkles className='w-3.5 h-3.5 mr-1 text-indigo-500' /> Auto-Generate with AI
+                    </Button>
                   </div>
-                  <div className='space-y-1'>
-                    <Label className='text-[11px] sm:text-xs text-slate-400'>Expected Output</Label>
-                    <Input
-                      value={tc.output}
-                      onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
-                      className='text-xs sm:text-sm font-mono h-9 sm:h-10'
-                      placeholder='e.g. 15'
-                    />
-                  </div>
-                  <div className='flex items-center justify-between sm:block gap-2'>
-                    <div className='space-y-1 flex-1 sm:w-auto'>
-                      <Label className='text-[11px] sm:text-xs text-slate-400'>Score</Label>
-                      <Input
-                        type='number'
-                        value={tc.score}
-                        onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
-                        className='text-xs sm:text-sm h-9 sm:h-10'
-                      />
+                ) : (
+                  <div className='space-y-2.5'>
+                    {/* Desktop Column Headers */}
+                    <div className='hidden sm:grid sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+                      <span>Input (Arguments)</span>
+                      <span>Expected Output</span>
+                      <span className='text-center'>Score</span>
+                      <span></span>
                     </div>
-                    <div className='pt-5 sm:pt-5 shrink-0'>
-                      <button
-                        className='p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition'
-                        onClick={() => removeTestCase(tc.id)}
+
+                    {testCases.map((tc, idx) => (
+                      <div
+                        key={tc.id}
+                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
                       >
-                        <Trash2 className='w-4 h-4' />
-                      </button>
-                    </div>
+                        {/* Mobile Header */}
+                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
+                          <span className='text-xs font-semibold text-slate-700'>Test Case #{idx + 1}</span>
+                          <button
+                            type='button'
+                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                            onClick={() => removeTestCase(tc.id)}
+                            title='Delete test case'
+                          >
+                            <Trash2 className='w-4 h-4' />
+                          </button>
+                        </div>
+
+                        {/* Row Layout */}
+                        <div className='grid grid-cols-1 sm:grid-cols-[1fr_1fr_90px_36px] gap-2.5 items-center'>
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Input (Arguments)</span>
+                            <Input
+                              value={tc.input}
+                              onChange={(e) => updateTestCase(tc.id, 'input', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 5, 10'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Expected Output</span>
+                            <Input
+                              value={tc.output}
+                              onChange={(e) => updateTestCase(tc.id, 'output', e.target.value)}
+                              className='text-xs font-mono h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              placeholder='e.g. 15'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Score (pts)</span>
+                            <Input
+                              type='number'
+                              value={tc.score}
+                              onChange={(e) => updateTestCase(tc.id, 'score', Number(e.target.value))}
+                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-indigo-500'
+                              min={0}
+                            />
+                          </div>
+
+                          <div className='hidden sm:flex items-center justify-center'>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                              onClick={() => removeTestCase(tc.id)}
+                              title='Delete test case'
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ─── Evaluation Rubrics Card ─── */}
+        <Card className='border-none shadow-sm overflow-hidden bg-white'>
+          <CardHeader className='pb-3 px-4 sm:px-6 pt-4 sm:pt-6 border-b border-slate-100/80'>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
+              <div>
+                <div className='flex items-center gap-2'>
+                  <div className='w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold'>
+                    <ClipboardList className='w-4 h-4' />
+                  </div>
+                  <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className='border-none shadow-sm'>
-            <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
-              <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
-                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Evaluation Rubrics</CardTitle>
-                <div className='flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto'>
-                  <span className='text-xs sm:text-sm text-slate-500'>
-                    Total: <span className='font-semibold text-blue-600'>{totalScore}</span> Points
-                  </span>
+                <p className='text-xs text-slate-500 mt-0.5'>Weighted grading criteria for AI or manual grading</p>
+              </div>
+
+              <div className='flex items-center gap-2 flex-wrap sm:flex-nowrap'>
+                <div className='flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5 bg-slate-50'>
+                  <button
+                    type='button'
+                    onClick={() => setRubricViewMode('json')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rubricViewMode === 'json' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    JSON
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setRubricViewMode('builder')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rubricViewMode === 'builder' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Builder
+                  </button>
+                </div>
+
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={handleGenerateRubric}
+                  disabled={generatingRubric}
+                  className='h-8 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 font-semibold gap-1.5 shadow-2xs'
+                >
+                  {generatingRubric ? (
+                    <Loader2 className='w-3.5 h-3.5 animate-spin' />
+                  ) : (
+                    <Sparkles className='w-3.5 h-3.5 text-emerald-600' />
+                  )}
+                  Auto-Generate Rubric
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className='p-4 sm:p-6 space-y-3'>
+            {rubricViewMode === 'json' ? (
+              <div className='space-y-2'>
+                <div className='relative rounded-xl overflow-hidden border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-100 transition-all'>
+                  <textarea
+                    value={rubricJson}
+                    onChange={(e) => setRubricJson(e.target.value)}
+                    rows={8}
+                    placeholder={`[\n  {\n    "name": "Code Correctness",\n    "description": "Fulfills primary requirements and handles edge cases.",\n    "weight": 50\n  }\n]`}
+                    className='w-full p-4 font-mono text-xs sm:text-sm text-slate-800 bg-slate-50/60 focus:bg-white outline-none transition-colors resize-y leading-relaxed'
+                  />
+                </div>
+                <p className='text-[11px] text-slate-400'>
+                  The sum of criteria weights should equal 100 for percentage-based grading.
+                </p>
+              </div>
+            ) : (
+              <div className='space-y-3'>
+                <div className='flex items-center justify-between pb-1'>
+                  <div className='inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold'>
+                    <span>Total:</span>
+                    <span className='text-emerald-600'>{totalScore} Points</span>
+                  </div>
                   <Button
                     variant='outline'
                     size='sm'
-                    className='gap-1 text-xs sm:text-sm text-blue-600 border-blue-200 hover:bg-blue-50'
+                    className='gap-1.5 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 h-8 font-semibold'
                     onClick={addRubric}
                   >
                     <Plus className='w-3.5 h-3.5' /> Add Criteria
                   </Button>
                 </div>
-              </div>
-            </CardHeader>
 
-            <CardContent className='space-y-3 px-4 sm:px-6 pb-4 sm:pb-6'>
-              {rubrics.map((rubric) => (
-                <div
-                  key={rubric.id}
-                  className='flex flex-col sm:grid sm:grid-cols-[1fr_2fr_80px_40px] gap-2.5 sm:gap-3 items-stretch sm:items-center p-3 sm:p-0 bg-slate-50 sm:bg-transparent rounded-xl sm:rounded-none border border-slate-100 sm:border-0'
-                >
-                  <div className='space-y-1'>
-                    <Label className='text-[11px] sm:text-xs text-slate-400'>Criteria</Label>
-                    <Input
-                      value={rubric.criteria}
-                      onChange={(e) => updateRubric(rubric.id, 'criteria', e.target.value)}
-                      className='text-xs sm:text-sm h-9 sm:h-10'
-                    />
+                {rubrics.length === 0 ? (
+                  <div className='py-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2'>
+                    <p className='text-xs text-slate-500'>No rubric criteria added yet.</p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleGenerateRubric}
+                      className='text-xs bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 font-medium'
+                    >
+                      <Sparkles className='w-3.5 h-3.5 mr-1 text-emerald-600' /> Auto-Generate Rubric with AI
+                    </Button>
                   </div>
-                  <div className='space-y-1'>
-                    <Label className='text-[11px] sm:text-xs text-slate-400'>Description</Label>
-                    <Input
-                      value={rubric.description}
-                      onChange={(e) => updateRubric(rubric.id, 'description', e.target.value)}
-                      className='text-xs sm:text-sm h-9 sm:h-10'
-                    />
-                  </div>
-                  <div className='flex items-center justify-between sm:block gap-2'>
-                    <div className='space-y-1 flex-1 sm:w-auto'>
-                      <Label className='text-[11px] sm:text-xs text-slate-400'>Max Score</Label>
-                      <Input
-                        type='number'
-                        value={rubric.maxScore}
-                        onChange={(e) => updateRubric(rubric.id, 'maxScore', Number(e.target.value))}
-                        className='text-xs sm:text-sm h-9 sm:h-10'
-                      />
+                ) : (
+                  <div className='space-y-2.5'>
+                    {/* Desktop Column Headers */}
+                    <div className='hidden sm:grid sm:grid-cols-[1.2fr_2fr_90px_36px] gap-2.5 px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider'>
+                      <span>Criterion Name</span>
+                      <span>Description</span>
+                      <span className='text-center'>Max Score</span>
+                      <span></span>
                     </div>
-                    <div className='pt-5 sm:pt-5 shrink-0'>
-                      <button
-                        className='p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition'
-                        onClick={() => removeRubric(rubric.id)}
+
+                    {rubrics.map((rubric, idx) => (
+                      <div
+                        key={rubric.id}
+                        className='p-3 sm:p-2 bg-slate-50/60 hover:bg-slate-50 rounded-xl border border-slate-200/80 transition-all shadow-2xs'
                       >
-                        <Trash2 className='w-4 h-4' />
-                      </button>
-                    </div>
+                        {/* Mobile Header */}
+                        <div className='flex sm:hidden items-center justify-between pb-2 mb-2 border-b border-slate-200/60'>
+                          <span className='text-xs font-semibold text-slate-700'>Criterion #{idx + 1}</span>
+                          <button
+                            type='button'
+                            className='p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                            onClick={() => removeRubric(rubric.id)}
+                            title='Delete criterion'
+                          >
+                            <Trash2 className='w-4 h-4' />
+                          </button>
+                        </div>
+
+                        {/* Row Layout */}
+                        <div className='grid grid-cols-1 sm:grid-cols-[1.2fr_2fr_90px_36px] gap-2.5 items-center'>
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Criterion</span>
+                            <Input
+                              value={rubric.criteria}
+                              onChange={(e) => updateRubric(rubric.id, 'criteria', e.target.value)}
+                              className='text-xs font-semibold h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              placeholder='e.g. Code Structure'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Description</span>
+                            <Input
+                              value={rubric.description}
+                              onChange={(e) => updateRubric(rubric.id, 'description', e.target.value)}
+                              className='text-xs h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              placeholder='e.g. Fulfills primary requirements...'
+                            />
+                          </div>
+
+                          <div className='space-y-1 sm:space-y-0'>
+                            <span className='sm:hidden text-[10px] font-semibold text-slate-400 uppercase'>Max Score</span>
+                            <Input
+                              type='number'
+                              value={rubric.maxScore}
+                              onChange={(e) => updateRubric(rubric.id, 'maxScore', Number(e.target.value))}
+                              className='text-xs font-semibold text-center h-9 bg-white border-slate-200 focus-visible:ring-emerald-500'
+                              min={0}
+                            />
+                          </div>
+
+                          <div className='hidden sm:flex items-center justify-center'>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
+                              onClick={() => removeRubric(rubric.id)}
+                              title='Delete criterion'
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* ================================================================
             SECTION 4 — Submission Settings
         ================================================================ */}
         <Card className='border-none shadow-sm'>
           <CardHeader className='pb-2 px-4 sm:px-6 pt-4 sm:pt-6'>
-            <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Submission Settings</CardTitle>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
+              <div>
+                <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>Allowed Submission Methods</CardTitle>
+                <p className='text-xs text-slate-500 mt-0.5'>Choose which formats learners can submit for this assignment</p>
+              </div>
+              <div className='flex items-center gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={selectAllSubmissionTypes}
+                  className='text-xs h-8 text-blue-600 border-blue-200 hover:bg-blue-50'
+                >
+                  Select All
+                </Button>
+              </div>
+            </div>
           </CardHeader>
 
-          <CardContent className='space-y-1 px-4 sm:px-6 pb-4 sm:pb-6'>
-            {/* Allow GitHub Link */}
-            <div className='flex items-center justify-between py-2.5 sm:py-3 gap-3'>
-              <div className='min-w-0 flex-1'>
-                <p className='text-xs sm:text-sm font-medium text-slate-900'>Allow GitHub Link</p>
-                <p className='text-[10px] sm:text-xs text-slate-500'>Students can submit a GitHub repository URL</p>
-              </div>
-              <Switch checked={allowGithubLink} onCheckedChange={setAllowGithubLink} />
+          <CardContent className='px-4 sm:px-6 pb-4 sm:pb-6'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2'>
+              {[
+                {
+                  id: 'file',
+                  title: 'Document / File Upload',
+                  desc: 'Direct file upload: PDF, DOCX, XLSX, TXT, ZIP',
+                  iconBg: 'bg-blue-50 text-blue-600 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <path d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z' />
+                      <polyline points='14 2 14 8 20 8' />
+                      <path d='M12 18v-6' />
+                      <path d='M9 15l3-3 3 3' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'github',
+                  title: 'GitHub / Git Repository',
+                  desc: 'Public code repository: GitHub, GitLab, Bitbucket',
+                  iconBg: 'bg-slate-900 text-white border-slate-800',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='currentColor'>
+                      <path fillRule='evenodd' clipRule='evenodd' d='M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'docs',
+                  title: 'Google Docs / Office 365',
+                  desc: 'Cloud document links with sharing permissions',
+                  iconBg: 'bg-blue-50 border-blue-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#4285F4' />
+                      <path d='M14 2V8H20L14 2Z' fill='#A1C2FA' />
+                      <path d='M8 12.5H16M8 16.5H13' stroke='white' strokeWidth='1.5' strokeLinecap='round' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'figma',
+                  title: 'Figma Design / Prototype',
+                  desc: 'Figma files, interactive prototypes, or FigJam boards',
+                  iconBg: 'bg-purple-50 border-purple-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 38 57' fill='none'>
+                      <path d='M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z' fill='#1ABCFE' />
+                      <path d='M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z' fill='#0ACF83' />
+                      <path d='M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z' fill='#FF7262' />
+                      <path d='M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z' fill='#F24E1E' />
+                      <path d='M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z' fill='#A259FF' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'excel',
+                  title: 'Google Sheets / Excel Online',
+                  desc: 'Cloud spreadsheets for data and financial models',
+                  iconBg: 'bg-emerald-50 border-emerald-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none'>
+                      <path d='M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z' fill='#0F9D58' />
+                      <path d='M14 2V8H20L14 2Z' fill='#87CEAC' />
+                      <rect x='7.5' y='11.5' width='9' height='7' rx='0.5' stroke='white' strokeWidth='1.2' fill='none' />
+                      <path d='M7.5 14H16.5M12 11.5V18.5' stroke='white' strokeWidth='1.2' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'url',
+                  title: 'General URL / Live App',
+                  desc: 'Deployed web applications, portfolios, or external links',
+                  iconBg: 'bg-amber-50 text-amber-600 border-amber-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+                      <circle cx='12' cy='12' r='10' />
+                      <line x1='2' y1='12' x2='22' y2='12' />
+                      <path d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' />
+                    </svg>
+                  ),
+                },
+              ].map((item) => {
+                const isSelected = allowedSubmissionTypes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => toggleSubmissionType(item.id)}
+                    className={`relative flex items-start gap-3 p-3.5 rounded-xl border-2 transition-all cursor-pointer select-none ${
+                      isSelected
+                        ? 'border-blue-600 bg-blue-50/40 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-slate-300 opacity-60 hover:opacity-80'
+                    }`}
+                  >
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-xs ${item.iconBg}`}>
+                      {item.renderIcon()}
+                    </div>
+                    <div className='flex-1 min-w-0'>
+                      <div className='flex items-center justify-between gap-1'>
+                        <h4 className='text-xs sm:text-sm font-semibold text-slate-900 truncate'>{item.title}</h4>
+                        <div
+                          className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                            isSelected ? 'bg-blue-600 text-white' : 'border border-slate-300'
+                          }`}
+                        >
+                          {isSelected && <Check className='w-2.5 h-2.5 stroke-[3]' />}
+                        </div>
+                      </div>
+                      <p className='text-[11px] text-slate-500 leading-tight mt-0.5'>{item.desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
 
         {/* ── Footer Actions ── */}
-        <div className='flex flex-col-reverse sm:flex-row justify-end gap-2.5 sm:gap-3 pb-8'>
+        <div className='flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-8 pt-2'>
           <Button
+            type='button'
             variant='outline'
-            className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
-            onClick={() => navigate(`${basePath}/assignment-management`)}
+            onClick={() => setPreviewOpen(true)}
+            className='h-10 px-4 text-xs sm:text-sm font-semibold border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center gap-1.5'
           >
-            Cancel
+            <Eye className='w-4 h-4 text-indigo-600' />
+            <span>Preview Student View</span>
           </Button>
-          <Button
-            className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm'
-            onClick={handleCreate}
-            disabled={submitting}
-          >
-            {submitting && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}
-            {submitting ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update Assignment' : 'Create Assignment')}
-          </Button>
+
+          <div className='flex items-center gap-2.5'>
+            <Button
+              variant='outline'
+              className='w-full sm:w-auto px-6 min-h-[40px] text-xs sm:text-sm'
+              onClick={() => navigate(`${basePath}/assignment-management`)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className='w-full sm:w-auto px-6 bg-blue-600 hover:bg-blue-700 min-h-[40px] text-xs sm:text-sm font-semibold'
+              onClick={handleCreate}
+              disabled={submitting}
+            >
+              {submitting && <Loader2 className='w-4 h-4 mr-2 animate-spin' />}
+              {submitting ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update Assignment' : 'Create Assignment')}
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* ── Student View Preview Modal ── */}
+      <AdminAssignmentPreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        assignmentData={{
+          title: title.trim() || 'Untitled Assignment',
+          instructions: assignmentDescription.trim() || description.trim(),
+          max_score: Number(weightage) || 100,
+          evaluator_type:
+            !aiEvaluationType || aiEvaluationType === 'none' ? null : aiEvaluationType,
+          test_cases:
+            testCaseViewMode === 'json' && testCasesJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(testCasesJson);
+                  } catch {
+                    return testCasesJson;
+                  }
+                })()
+              : testCases,
+          rubric:
+            rubricViewMode === 'json' && rubricJson.trim()
+              ? (() => {
+                  try {
+                    return JSON.parse(rubricJson);
+                  } catch {
+                    return rubricJson;
+                  }
+                })()
+              : rubrics,
+          subject_title: availableCourses.find((c) => c.value === course)?.label || course,
+        }}
+      />
     </div>
   );
 }

@@ -20,7 +20,7 @@ exports.getAdminStats = async (req, res) => {
         `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
         ['STUDENT'],
       ),
-      pool.query('SELECT COUNT(*) FROM colleges'),
+      pool.query('SELECT COUNT(*) FROM colleges WHERE is_deleted = false AND deleted_at IS NULL'),
       pool.query('SELECT COUNT(*) FROM subjects'),
       pool.query(
         `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = $1 AND u.deleted_at IS NULL`,
@@ -91,6 +91,7 @@ exports.getAdminAnalytics = async (req, res) => {
         FROM colleges c
         LEFT JOIN student_profiles sp ON sp.college_id = c.id
         LEFT JOIN users u ON sp.user_id = u.id AND u.deleted_at IS NULL
+        WHERE c.is_deleted = false AND c.deleted_at IS NULL
         GROUP BY c.id, c.name
         ORDER BY student_count DESC
         LIMIT 10
@@ -459,7 +460,11 @@ exports.getAdminSubjectStructure = async (req, res) => {
         p.id AS capstone_id,
         p.title AS capstone_title,
         p.instructions AS capstone_instructions,
-        p.max_score AS capstone_max_score
+        p.max_score AS capstone_max_score,
+        p.evaluator_type AS capstone_evaluator_type,
+        p.test_cases AS capstone_test_cases,
+        p.rubric AS capstone_rubric,
+        p.allowed_submission_types AS capstone_allowed_submission_types
 
       FROM topics t
       LEFT JOIN projects p ON t.id = p.topic_id AND p.is_deleted = false
@@ -483,6 +488,18 @@ exports.getAdminSubjectStructure = async (req, res) => {
 
     const topicsMap = new Map();
 
+    const parseSubmissionTypes = (val) => {
+      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string') {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+      }
+      return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    };
+
     rows.forEach((row) => {
       if (!topicsMap.has(row.topic_id)) {
         topicsMap.set(row.topic_id, {
@@ -496,6 +513,10 @@ exports.getAdminSubjectStructure = async (req, res) => {
                 title: row.capstone_title,
                 instructions: row.capstone_instructions,
                 max_score: row.capstone_max_score,
+                evaluator_type: row.capstone_evaluator_type,
+                test_cases: row.capstone_test_cases,
+                rubric: row.capstone_rubric,
+                allowed_submission_types: parseSubmissionTypes(row.capstone_allowed_submission_types),
               }
             : null,
           units: new Map(),
@@ -1997,12 +2018,19 @@ exports.getAssignment = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, title, instructions, max_score, unit_id FROM assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, title, instructions, max_score, unit_id, evaluator_type, test_cases, rubric, allowed_submission_types FROM assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!result.rowCount)
       return res.status(404).json({ message: 'Assignment not found' });
-    res.json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    if (typeof row.allowed_submission_types === 'string') {
+      try {
+        row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
+      } catch (e) {}
+    }
+    res.json({ success: true, data: row });
   } catch (err) {
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -2021,6 +2049,7 @@ exports.createAssignment = async (req, res) => {
       evaluator_type,
       test_cases,
       rubric,
+      allowed_submission_types,
     } = req.body;
 
     if (!unit_id || !title) {
@@ -2031,8 +2060,8 @@ exports.createAssignment = async (req, res) => {
     }
 
     const query = `
-      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric, allowed_submission_types)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
 
@@ -2052,6 +2081,15 @@ exports.createAssignment = async (req, res) => {
       } catch (e) {}
     }
 
+    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+      typesArray = allowed_submission_types;
+    } else if (typeof allowed_submission_types === 'string') {
+      try {
+        typesArray = JSON.parse(allowed_submission_types);
+      } catch (e) {}
+    }
+
     const result = await pool.query(query, [
       unit_id,
       title,
@@ -2060,6 +2098,7 @@ exports.createAssignment = async (req, res) => {
       evaluator_type || null,
       testCasesObj ? JSON.stringify(testCasesObj) : null,
       rubricObj ? JSON.stringify(rubricObj) : null,
+      JSON.stringify(typesArray),
     ]);
 
     logAction({
@@ -2094,6 +2133,7 @@ exports.updateAssignment = async (req, res) => {
       test_cases,
       evaluator_type,
       rubric,
+      allowed_submission_types,
     } = req.body;
 
     const updates = [];
@@ -2115,6 +2155,18 @@ exports.updateAssignment = async (req, res) => {
     if (evaluator_type !== undefined) {
       updates.push(`evaluator_type = $${paramCount++}`);
       values.push(evaluator_type);
+    }
+    if (allowed_submission_types !== undefined) {
+      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+        typesArray = allowed_submission_types;
+      } else if (typeof allowed_submission_types === 'string') {
+        try {
+          typesArray = JSON.parse(allowed_submission_types);
+        } catch (e) {}
+      }
+      updates.push(`allowed_submission_types = $${paramCount++}`);
+      values.push(JSON.stringify(typesArray));
     }
     if (test_cases !== undefined) {
       let testCasesObj = test_cases;
@@ -2220,9 +2272,44 @@ exports.deleteAssignment = async (req, res) => {
 // PROJECT MANAGEMENT
 // ============================================
 
+exports.getProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT id, title, instructions, max_score, topic_id, evaluator_type, test_cases, rubric, allowed_submission_types FROM projects WHERE id = $1 AND is_deleted = false',
+      [id],
+    );
+    if (!result.rowCount)
+      return res.status(404).json({ message: 'Project not found' });
+
+    const row = result.rows[0];
+    if (typeof row.allowed_submission_types === 'string') {
+      try {
+        row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
+      } catch (e) {}
+    }
+    if (!Array.isArray(row.allowed_submission_types) || row.allowed_submission_types.length === 0) {
+      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    }
+    res.json({ success: true, data: row });
+  } catch (err) {
+    console.error('Error fetching project:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 exports.createProject = async (req, res) => {
   try {
-    const { topic_id, title, instructions } = req.body;
+    const {
+      topic_id,
+      title,
+      instructions,
+      max_score,
+      evaluator_type,
+      test_cases,
+      rubric,
+      allowed_submission_types,
+    } = req.body;
 
     if (!topic_id || !title) {
       return res.status(400).json({
@@ -2231,9 +2318,38 @@ exports.createProject = async (req, res) => {
       });
     }
 
+    let testCasesObj = test_cases;
+    if (typeof test_cases === 'string') {
+      try {
+        testCasesObj = JSON.parse(test_cases);
+      } catch (e) {
+        // keep as string or handle error
+      }
+    }
+
+    let rubricObj = rubric;
+    if (typeof rubric === 'string') {
+      try {
+        rubricObj = JSON.parse(rubric);
+      } catch (e) {}
+    }
+
+    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+      typesArray = allowed_submission_types;
+    } else if (typeof allowed_submission_types === 'string') {
+      try {
+        const parsed = JSON.parse(allowed_submission_types);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          typesArray = parsed;
+        }
+      } catch (e) {}
+    }
+    const submissionTypesJson = JSON.stringify(typesArray);
+
     const query = `
-      INSERT INTO projects (topic_id, title, instructions, max_score)
-      VALUES ($1, $2, $3, 20)
+      INSERT INTO projects (topic_id, title, instructions, max_score, evaluator_type, test_cases, rubric, allowed_submission_types)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
 
@@ -2241,6 +2357,11 @@ exports.createProject = async (req, res) => {
       topic_id,
       title,
       instructions || null,
+      max_score !== undefined && max_score !== null ? max_score : 100,
+      evaluator_type || null,
+      testCasesObj ? JSON.stringify(testCasesObj) : null,
+      rubricObj ? JSON.stringify(rubricObj) : null,
+      submissionTypesJson,
     ]);
 
     logAction({
@@ -2251,10 +2372,17 @@ exports.createProject = async (req, res) => {
       details: { title: result.rows[0].title },
     });
 
+    const row = result.rows[0];
+    if (typeof row.allowed_submission_types === 'string') {
+      try {
+        row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
+      } catch (e) {}
+    }
+
     res.status(201).json({
       success: true,
       message: 'Project created successfully',
-      data: result.rows[0],
+      data: row,
     });
   } catch (error) {
     console.error('Error creating project:', error);
@@ -2268,7 +2396,15 @@ exports.createProject = async (req, res) => {
 exports.updateProject = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, instructions } = req.body;
+    const {
+      title,
+      instructions,
+      max_score,
+      evaluator_type,
+      test_cases,
+      rubric,
+      allowed_submission_types,
+    } = req.body;
 
     const updates = [];
     const values = [];
@@ -2281,6 +2417,49 @@ exports.updateProject = async (req, res) => {
     if (instructions !== undefined) {
       updates.push(`instructions = $${paramCount++}`);
       values.push(instructions);
+    }
+    if (max_score !== undefined) {
+      updates.push(`max_score = $${paramCount++}`);
+      values.push(max_score);
+    }
+    if (evaluator_type !== undefined) {
+      updates.push(`evaluator_type = $${paramCount++}`);
+      values.push(evaluator_type || null);
+    }
+    if (test_cases !== undefined) {
+      let testCasesObj = test_cases;
+      if (typeof test_cases === 'string') {
+        try {
+          testCasesObj = JSON.parse(test_cases);
+        } catch (e) {}
+      }
+      updates.push(`test_cases = $${paramCount++}`);
+      values.push(testCasesObj ? JSON.stringify(testCasesObj) : null);
+    }
+    if (rubric !== undefined) {
+      let rubricObj = rubric;
+      if (typeof rubric === 'string') {
+        try {
+          rubricObj = JSON.parse(rubric);
+        } catch (e) {}
+      }
+      updates.push(`rubric = $${paramCount++}`);
+      values.push(rubricObj ? JSON.stringify(rubricObj) : null);
+    }
+    if (allowed_submission_types !== undefined) {
+      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
+        typesArray = allowed_submission_types;
+      } else if (typeof allowed_submission_types === 'string') {
+        try {
+          const parsed = JSON.parse(allowed_submission_types);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            typesArray = parsed;
+          }
+        } catch (e) {}
+      }
+      updates.push(`allowed_submission_types = $${paramCount++}`);
+      values.push(JSON.stringify(typesArray));
     }
 
     if (updates.length === 0) {
@@ -2312,10 +2491,17 @@ exports.updateProject = async (req, res) => {
       });
     }
 
+    const updatedRow = result.rows[0] || null;
+    if (updatedRow && typeof updatedRow.allowed_submission_types === 'string') {
+      try {
+        updatedRow.allowed_submission_types = JSON.parse(updatedRow.allowed_submission_types);
+      } catch (e) {}
+    }
+
     res.json({
       success: true,
       message: 'Project updated successfully',
-      data: result.rows[0],
+      data: updatedRow,
     });
   } catch (error) {
     console.error('Error updating project:', error);
@@ -3067,7 +3253,7 @@ exports.getAllStudentsProgressSummary = async (req, res) => {
         COUNT(DISTINCT usp.subtopic_id) FILTER (WHERE usp.is_completed = true) as completed_subtopics,
         COUNT(DISTINCT usp.subtopic_id) as total_assigned_subtopics,
         COALESCE(SUM(pl.points), 0) as total_points,
-        MAX(us.current_streak) as current_streak,
+        MAX(CASE WHEN us.last_activity::date >= CURRENT_DATE - 1 THEN us.current_streak ELSE 0 END) as current_streak,
         COUNT(*) OVER ()::integer as total_count
       FROM users u
       LEFT JOIN student_profiles sp ON u.id = sp.user_id
@@ -3799,7 +3985,7 @@ exports.getStudentProfile = async (req, res) => {
              WHERE ulp.user_id = $1 AND ulp.is_completed = true AND lc.is_deleted = false
            ), 0) AS completed_subtopics,
            COALESCE((SELECT SUM(points)::int FROM points_log WHERE user_id = $1), 0) AS total_points,
-           COALESCE(MAX(str.current_streak), 0)::int AS current_streak,
+           COALESCE(MAX(CASE WHEN str.last_activity::date >= CURRENT_DATE - 1 THEN str.current_streak ELSE 0 END), 0)::int AS current_streak,
            COALESCE(MAX(str.longest_streak), 0)::int AS longest_streak
          FROM users u
          LEFT JOIN user_subjects us ON u.id = us.user_id

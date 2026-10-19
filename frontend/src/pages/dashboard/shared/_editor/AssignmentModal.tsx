@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AiAssignment } from '@/features/aiCurriculum/types';
 import { aiCurriculumApi } from '@/features/aiCurriculum/aiCurriculumApi';
+import type { SubmissionType } from '@/utils/types';
+import { SUBMISSION_TYPE_CONFIGS } from '@/utils/types';
 
 export function AssignmentModal({
   topicId,
@@ -28,6 +30,14 @@ export function AssignmentModal({
     instructions: initialAssignment?.instructions || '',
     max_score: initialAssignment?.max_score || 100,
     resources: initialAssignment?.resources || [],
+    allowed_submission_types: initialAssignment?.allowed_submission_types || [
+      'file',
+      'github',
+      'docs',
+      'figma',
+      'excel',
+      'url',
+    ],
   });
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -37,6 +47,19 @@ export function AssignmentModal({
   const set = (patch: Partial<AiAssignment>) => {
     setDraft((d) => ({ ...d, ...patch }));
     setDirty(true);
+  };
+
+  const toggleAllowedType = (typeId: string) => {
+    const current = draft.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    if (current.includes(typeId)) {
+      if (current.length <= 1) {
+        toast.error('At least one submission method must remain enabled');
+        return;
+      }
+      set({ allowed_submission_types: current.filter((t) => t !== typeId) });
+    } else {
+      set({ allowed_submission_types: [...current, typeId] });
+    }
   };
 
   const handleSave = async () => {
@@ -198,6 +221,26 @@ export function AssignmentModal({
                   </ul>
                 </div>
               )}
+
+              <div className='pt-3 sm:pt-4 border-t border-slate-100'>
+                <p className='text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2'>
+                  Allowed Submission Methods
+                </p>
+                <div className='flex flex-wrap gap-1.5'>
+                  {(draft.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url']).map((type) => {
+                    const cfg = SUBMISSION_TYPE_CONFIGS[type as SubmissionType];
+                    return cfg ? (
+                      <span
+                        key={type}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText} border ${cfg.badgeBorder}`}
+                      >
+                        <span>{cfg.emoji}</span>
+                        <span>{cfg.label}</span>
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              </div>
             </div>
           ) : (
             <div className='space-y-4'>
@@ -223,6 +266,49 @@ export function AssignmentModal({
                   onChange={(e) => set({ max_score: Number(e.target.value) })}
                   className='w-32 border border-slate-200 rounded-xl px-3 py-2 text-xs sm:text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50 disabled:text-slate-400 min-h-[38px]'
                 />
+              </div>
+
+              <div>
+                <label className='block text-xs font-semibold text-slate-600 mb-1.5'>
+                  Allowed Submission Methods
+                </label>
+                <div className='grid grid-cols-2 sm:grid-cols-3 gap-2'>
+                  {[
+                    { id: 'file', label: 'Document File', emoji: '📁' },
+                    { id: 'github', label: 'GitHub Repo', emoji: '🐙' },
+                    { id: 'docs', label: 'Google Docs', emoji: '📄' },
+                    { id: 'figma', label: 'Figma Link', emoji: '🎨' },
+                    { id: 'excel', label: 'Spreadsheet', emoji: '📊' },
+                    { id: 'url', label: 'Live URL', emoji: '🌐' },
+                  ].map((item) => {
+                    const isSelected = (
+                      draft.allowed_submission_types || [
+                        'file',
+                        'github',
+                        'docs',
+                        'figma',
+                        'excel',
+                        'url',
+                      ]
+                    ).includes(item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        type='button'
+                        disabled={!canEdit}
+                        onClick={() => toggleAllowedType(item.id)}
+                        className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold transition-all text-left ${
+                          isSelected
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-2xs'
+                            : 'border-slate-200 bg-white text-slate-500 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <span className='text-base'>{item.emoji}</span>
+                        <span className='truncate'>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div>

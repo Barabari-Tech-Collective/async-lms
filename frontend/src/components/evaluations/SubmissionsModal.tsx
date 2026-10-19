@@ -4,12 +4,15 @@ import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { cn, getErrorMessage } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import type { SubmissionType } from '@/utils/types';
+import { SUBMISSION_TYPE_CONFIGS } from '@/utils/types';
 
 type Submission = {
   id: string;
   student_name: string;
   student_email: string;
   college_name?: string;
+  submission_type?: SubmissionType;
   submission_link?: string;
   submission_file_url?: string;
   submission_file_name?: string;
@@ -63,6 +66,48 @@ export default function SubmissionsModal({ open, onClose, assignmentId, assignme
     const start = (currentPage - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
   }, [filtered, currentPage, pageSize]);
+
+  const renderSubmissionBadge = (s: Submission) => {
+    const type = s.submission_type || (s.submission_file_url ? 'file' : 'url');
+    const cfg = SUBMISSION_TYPE_CONFIGS[type] || SUBMISSION_TYPE_CONFIGS.file;
+
+    if (s.submission_link) {
+      return (
+        <a
+          href={s.submission_link}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(
+            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition hover:opacity-80',
+            cfg.badgeBg,
+            cfg.badgeText,
+            cfg.badgeBorder
+          )}
+        >
+          <span>{cfg.emoji}</span>
+          <span>{cfg.shortLabel}</span>
+          <ExternalLink size={11} className="ml-0.5 opacity-70" />
+        </a>
+      );
+    }
+
+    if (s.submission_file_url) {
+      return (
+        <a
+          href={s.submission_file_url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/20 hover:opacity-80 transition"
+        >
+          <span>📁</span>
+          <span className="truncate max-w-[140px]">{s.submission_file_name || 'Download File'}</span>
+          <FileText size={11} className="ml-0.5 opacity-70" />
+        </a>
+      );
+    }
+
+    return <span className="text-slate-300 text-xs">—</span>;
+  };
 
   if (!open) return null;
 
@@ -134,27 +179,7 @@ export default function SubmissionsModal({ open, onClose, assignmentId, assignme
                         <span className="truncate">{s.college_name || 'No College'}</span>
                       </div>
                       <div className="shrink-0">
-                        {s.submission_link ? (
-                          <a
-                            href={s.submission_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold text-xs bg-blue-50 px-2 py-1 rounded-md"
-                          >
-                            <ExternalLink size={11} /> View Link
-                          </a>
-                        ) : s.submission_file_url ? (
-                          <a
-                            href={s.submission_file_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-bold text-xs bg-indigo-50 px-2 py-1 rounded-md"
-                          >
-                            <FileText size={11} /> File
-                          </a>
-                        ) : (
-                          <span className="text-slate-300 text-xs">—</span>
-                        )}
+                        {renderSubmissionBadge(s)}
                       </div>
                     </div>
                   </div>
@@ -184,27 +209,7 @@ export default function SubmissionsModal({ open, onClose, assignmentId, assignme
                           {s.submitted_at ? new Date(s.submitted_at).toLocaleDateString('en-GB') : '—'}
                         </td>
                         <td className="py-3 px-4 text-right">
-                          {s.submission_link ? (
-                            <a
-                              href={s.submission_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 text-xs font-semibold hover:underline"
-                            >
-                              <ExternalLink size={12} /> View Link
-                            </a>
-                          ) : s.submission_file_url ? (
-                            <a
-                              href={s.submission_file_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-semibold hover:underline"
-                            >
-                              <FileText size={12} /> {s.submission_file_name || 'Download'}
-                            </a>
-                          ) : (
-                            <span className="text-slate-300 text-xs">—</span>
-                          )}
+                          {renderSubmissionBadge(s)}
                         </td>
                       </tr>
                     ))}

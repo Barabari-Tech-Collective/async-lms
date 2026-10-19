@@ -231,7 +231,8 @@ Instructions:
 
     let resumeData;
     try {
-      resumeData = JSON.parse(raw);
+      const cleaned = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+      resumeData = JSON.parse(cleaned);
     } catch {
       console.error('RESUME JSON PARSE ERROR: invalid JSON from model:', raw.slice(0, 200));
       return res.status(500).json({ message: 'Resume generation returned invalid data. Please try again.' });
@@ -305,7 +306,8 @@ ${truncatedJD}`,
 
     let parsed;
     try {
-      parsed = JSON.parse(raw);
+      const cleaned = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+      parsed = JSON.parse(cleaned);
     } catch {
       console.error('JD OPTIMIZE JSON PARSE ERROR:', raw.slice(0, 200));
       return res.status(500).json({ message: 'Optimization returned invalid data. Please try again.' });

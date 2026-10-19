@@ -715,6 +715,15 @@ exports.publishCourse = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Only approved courses can be published' });
     }
 
+    // Short-circuit: If course is already published with NO pending draft changes, return immediately
+    if (course.status === 'published' && course.subject_id && !course.has_unpublished_changes) {
+      return res.json({
+        success: true,
+        message: 'Course is already published and up to date.',
+        data: { subject_id: course.subject_id, up_to_date: true },
+      });
+    }
+
     await client.query('BEGIN');
 
     // 1. Create or Update Subject
@@ -771,6 +780,40 @@ exports.publishCourse = async (req, res) => {
       }
       activeTopicIds.add(topicId);
 
+      // Synchronize module capstone project if defined
+      if (mod.capstone_project) {
+        let cp = mod.capstone_project;
+        if (typeof cp === 'string') {
+          try {
+            cp = JSON.parse(cp);
+          } catch {
+            cp = { title: `${mod.title} Capstone Project`, instructions: cp };
+          }
+        }
+
+        const projectTitle = cp?.title || `${mod.title} Capstone Project`;
+        const instructions = typeof cp?.instructions === 'object'
+          ? JSON.stringify(cp.instructions)
+          : (cp?.instructions || cp?.description || null);
+
+        const existingProject = await client.query(
+          `SELECT id FROM projects WHERE topic_id = $1 AND is_deleted = false LIMIT 1`,
+          [topicId],
+        );
+
+        if (existingProject.rows.length > 0) {
+          await client.query(
+            `UPDATE projects SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
+            [projectTitle, instructions, 100, existingProject.rows[0].id],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO projects (topic_id, title, instructions, max_score) VALUES ($1, $2, $3, $4)`,
+            [topicId, projectTitle, instructions, 100],
+          );
+        }
+      }
+
       const existingUnitsRes = await client.query(
         `SELECT id, title, order_index FROM units WHERE topic_id = $1 AND is_deleted = false ORDER BY order_index`,
         [topicId],
@@ -805,16 +848,19 @@ exports.publishCourse = async (req, res) => {
         // Assignment per unit
         if (aiTopic.assignment) {
           const asgn = typeof aiTopic.assignment === 'string' ? JSON.parse(aiTopic.assignment) : aiTopic.assignment;
+          const allowedTypes = Array.isArray(asgn.allowed_submission_types) && asgn.allowed_submission_types.length > 0
+            ? asgn.allowed_submission_types
+            : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
           const existAsgn = await client.query(`SELECT id FROM assignments WHERE unit_id = $1`, [unitId]);
           if (existAsgn.rows.length) {
             await client.query(
-              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, updated_at = NOW() WHERE id = $4`,
-              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, existAsgn.rows[0].id],
+              `UPDATE assignments SET title = $1, instructions = $2, max_score = $3, allowed_submission_types = $4, updated_at = NOW() WHERE id = $5`,
+              [asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes), existAsgn.rows[0].id],
             );
           } else {
             await client.query(
-              `INSERT INTO assignments (unit_id, title, instructions, max_score) VALUES ($1,$2,$3,$4)`,
-              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100],
+              `INSERT INTO assignments (unit_id, title, instructions, max_score, allowed_submission_types) VALUES ($1,$2,$3,$4,$5)`,
+              [unitId, asgn.title || `${aiTopic.title} Assignment`, asgn.instructions || null, asgn.max_score || 100, JSON.stringify(allowedTypes)],
             );
           }
         }
@@ -854,11 +900,18 @@ exports.publishCourse = async (req, res) => {
             );
             const questionId = qqRes.rows[0].id;
             const options = Array.isArray(q.options) ? q.options : [];
-            for (let oi = 0; oi < options.length; oi++) {
+            if (options.length > 0) {
+              const optValues = [];
+              const optParams = [];
+              options.forEach((optText, oi) => {
+                const base = oi * 4;
+                optValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+                optParams.push(questionId, optText, oi === (q.correct_index ?? 0), oi);
+              });
               await client.query(
                 `INSERT INTO quiz_question_options (question_id, option_text, is_correct, order_index)
-                 VALUES ($1, $2, $3, $4)`,
-                [questionId, options[oi], oi === (q.correct_index ?? 0), oi],
+                 VALUES ${optValues.join(', ')}`,
+                optParams,
               );
             }
           }

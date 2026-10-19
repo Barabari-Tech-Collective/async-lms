@@ -13,37 +13,114 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+function getLocalDateString(ts, timeZone = 'Asia/Kolkata') {
+  if (!ts) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ts));
+}
+
 function isSameDay(t1, t2) {
-  const d1 = new Date(t1);
-  const d2 = new Date(t2);
-  return d1.getUTCFullYear() === d2.getUTCFullYear() &&
-         d1.getUTCMonth() === d2.getUTCMonth() &&
-         d1.getUTCDate() === d2.getUTCDate();
+  if (!t1 || !t2) return false;
+  return getLocalDateString(t1) === getLocalDateString(t2);
+}
+
+/**
+ * Reconciles and updates a student's streak state based on actual completed activity records.
+ * Dynamically computes:
+ * - current_streak: Consecutive calendar days with learning activity ending today or yesterday.
+ *                   If a day was missed (gap > 1 day from today/yesterday), current_streak is 0.
+ * - longest_streak: The maximum consecutive streak in the user's history, retaining previous records.
+ * - practiced_today: Whether an action was recorded on the local date (Asia/Kolkata).
+ * Synchronizes the result directly into public.user_streaks.
+ */
+async function reconcileUserStreak(userId) {
+  if (!userId) return null;
+  try {
+    const query = `
+      WITH user_activity_dates AS (
+        SELECT DISTINCT act_date
+        FROM (
+          SELECT (completed_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.user_subtopic_progress WHERE user_id = $1::uuid AND completed_at IS NOT NULL
+          UNION
+          SELECT (COALESCE(attempted_at, created_at) AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.quiz_attempts WHERE user_id = $1::uuid AND (attempted_at IS NOT NULL OR created_at IS NOT NULL)
+          UNION
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.exercise_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          UNION
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.assignment_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          UNION
+          SELECT (submitted_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.project_submissions WHERE user_id = $1::uuid AND submitted_at IS NOT NULL
+          UNION
+          SELECT (COALESCE(submitted_at, updated_at) AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.college_assignment_submissions WHERE student_id = $1::uuid AND (submitted_at IS NOT NULL OR updated_at IS NOT NULL)
+          UNION
+          SELECT (created_at AT TIME ZONE 'Asia/Kolkata')::date AS act_date FROM public.points_log WHERE user_id = $1::uuid AND created_at IS NOT NULL
+        ) a
+        WHERE act_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+      ),
+      streak_groups AS (
+        SELECT 
+          act_date,
+          act_date - (ROW_NUMBER() OVER (ORDER BY act_date))::int AS grp
+        FROM user_activity_dates
+      ),
+      streak_lengths AS (
+        SELECT 
+          grp,
+          COUNT(*)::int AS length,
+          MAX(act_date) AS end_date,
+          MIN(act_date) AS start_date
+        FROM streak_groups
+        GROUP BY grp
+      ),
+      computed AS (
+        SELECT 
+          COALESCE(
+            (SELECT length FROM streak_lengths WHERE end_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - 1) ORDER BY end_date DESC LIMIT 1),
+            0
+          )::int AS calc_current_streak,
+          COALESCE(
+            (SELECT MAX(length) FROM streak_lengths),
+            0
+          )::int AS calc_longest_streak,
+          EXISTS(SELECT 1 FROM user_activity_dates WHERE act_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date) AS calc_practiced_today,
+          (SELECT MAX(act_date) FROM user_activity_dates) AS calc_last_activity
+      )
+      INSERT INTO public.user_streaks (user_id, current_streak, longest_streak, last_activity, updated_at)
+      SELECT 
+        $1::uuid,
+        c.calc_current_streak,
+        c.calc_longest_streak,
+        COALESCE(c.calc_last_activity, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date),
+        CURRENT_TIMESTAMP
+      FROM computed c
+      ON CONFLICT (user_id) DO UPDATE SET
+        current_streak = EXCLUDED.current_streak,
+        longest_streak = GREATEST(COALESCE(user_streaks.longest_streak, 0), EXCLUDED.longest_streak),
+        last_activity = COALESCE(EXCLUDED.last_activity, user_streaks.last_activity),
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING 
+        user_id,
+        current_streak,
+        longest_streak,
+        last_activity,
+        (last_activity = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date) AS practiced_today,
+        (last_activity = ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - 1) AND COALESCE(current_streak, 0) > 0) AS streak_in_jeopardy;
+    `;
+
+    const res = await pool.query(query, [userId]);
+    return res.rows[0] || null;
+  } catch (err) {
+    console.error('[presenceService] Error reconciling streak for user:', userId, err);
+    return null;
+  }
 }
 
 async function triggerStreakUpdate(userId) {
   try {
-    await pool.query(
-      `INSERT INTO user_streaks (user_id, current_streak, longest_streak, last_activity)
-       VALUES ($1, 1, 1, CURRENT_DATE)
-       ON CONFLICT (user_id) DO UPDATE SET
-         current_streak = CASE
-           WHEN user_streaks.last_activity = CURRENT_DATE THEN user_streaks.current_streak
-           WHEN user_streaks.last_activity = CURRENT_DATE - INTERVAL '1 day' THEN user_streaks.current_streak + 1
-           ELSE 1
-         END,
-         longest_streak = GREATEST(
-           user_streaks.longest_streak,
-           CASE
-             WHEN user_streaks.last_activity = CURRENT_DATE THEN user_streaks.current_streak
-             WHEN user_streaks.last_activity = CURRENT_DATE - INTERVAL '1 day' THEN user_streaks.current_streak + 1
-             ELSE 1
-           END
-         ),
-         last_activity = CURRENT_DATE,
-         updated_at = CURRENT_TIMESTAMP`,
-      [userId],
-    );
+    await reconcileUserStreak(userId);
   } catch (err) {
     console.error('Failed to trigger streak update:', err);
   }
@@ -99,5 +176,7 @@ function isUserOnline(userId) {
 module.exports = {
   markUserActive,
   markActionToday,
-  isUserOnline
+  isUserOnline,
+  reconcileUserStreak,
+  triggerStreakUpdate,
 };

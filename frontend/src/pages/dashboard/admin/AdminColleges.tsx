@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, MapPin, MoreHorizontal, Loader2, Search, X } from 'lucide-react';
+import { Plus, MapPin, MoreHorizontal, Loader2, Search, X, Archive } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 
@@ -25,6 +25,7 @@ import apiClient from '@/services/api';
 import DeleteCollegeDialog from '@/components/common/admin/DeleteCollegeDialog';
 import CollegeFormDialog from '@/components/common/admin/CollegeFormDialog';
 import CollegeDetailSheet from '@/components/common/admin/CollegeDetailSheet';
+import CollegeRecycleBinModal from '@/components/common/CollegeRecycleBinModal';
 
 /* ======================
    Types (API aligned)
@@ -121,6 +122,7 @@ export default function AdminColleges() {
   const [editingCollege, setEditingCollege] = useState<College | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [isBinOpen, setIsBinOpen] = useState(false);
 
   /* ======================
      Fetch Colleges
@@ -201,16 +203,26 @@ export default function AdminColleges() {
           <h2 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Colleges</h2>
           <p className='text-xs sm:text-sm text-slate-500'>Manage registered educational institutions</p>
         </div>
-        <Button
-          className='gap-2 bg-blue-600 hover:bg-blue-700 min-h-[40px] rounded-xl font-semibold shadow-xs shrink-0'
-          disabled={loading}
-          onClick={() => {
-            setEditingCollege(null);
-            setFormOpen(true);
-          }}
-        >
-          <Plus className='w-4 h-4' /> Add College
-        </Button>
+        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            onClick={() => setIsBinOpen(true)}
+            className="flex-1 sm:flex-none gap-2 min-h-[40px] rounded-xl font-semibold border-slate-200 bg-white shadow-xs hover:bg-slate-50 text-slate-700 text-xs sm:text-sm px-3"
+          >
+            <Archive className="h-4 w-4 text-slate-500 shrink-0" />
+            Recycle Bin
+          </Button>
+          <Button
+            className="flex-1 sm:flex-none gap-2 bg-blue-600 hover:bg-blue-700 min-h-[40px] rounded-xl font-semibold shadow-xs text-xs sm:text-sm px-3"
+            disabled={loading}
+            onClick={() => {
+              setEditingCollege(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus className="w-4 h-4 shrink-0" /> Add College
+          </Button>
+        </div>
       </div>
 
       {/* Main Card */}
@@ -452,6 +464,7 @@ export default function AdminColleges() {
         <DeleteCollegeDialog
           open={!!deleteId}
           collegeId={deleteId}
+          collegeName={colleges.find((c) => c.id === deleteId)?.name}
           onClose={() => setDeleteId(null)}
           onSuccess={fetchColleges}
         />
@@ -461,6 +474,13 @@ export default function AdminColleges() {
       <CollegeDetailSheet
         collegeId={detailId}
         onClose={() => setDetailId(null)}
+      />
+
+      {/* College Recycle Bin Modal */}
+      <CollegeRecycleBinModal
+        open={isBinOpen}
+        onClose={() => setIsBinOpen(false)}
+        onRestored={fetchColleges}
       />
     </div>
   );

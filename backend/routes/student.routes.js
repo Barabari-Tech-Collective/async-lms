@@ -1,6 +1,29 @@
 const router = require('express').Router();
+const multer = require('multer');
+const path = require('path');
 const verifyToken = require('../middlewares/verfiyToken');
 const isStudent = require('../middlewares/isStudent');
+
+const ALLOWED_SUBMISSION_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+  '.zip', '.rar', '.7z',
+  '.txt', '.md',
+  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
+]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_SUBMISSION_EXTENSIONS.has(ext)) {
+      const err = new Error(`File type "${ext}" is not allowed`);
+      err.code = 'UNSUPPORTED_FILE_TYPE';
+      return cb(err);
+    }
+    cb(null, true);
+  },
+});
 
 const {
   getMyProgress,
@@ -21,6 +44,7 @@ const {
   runExerciseTests,
   getStudentAssignments,
   getStudentAssignmentsOverview,
+  getStudentProjectsOverview,
   getAssignmentById,
   submitAssignment,
   getCapstone,
@@ -29,7 +53,22 @@ const {
   enrollInSubject,
   getStudentAnalytics,
   getStudentModuleAnalytics,
+  getActiveMilestoneDeadlines,
+  getStudentStreakDetails,
+  getStudentActivityCalendar,
 } = require('../controllers/student.controller');
+
+// ===== HABIT STREAK & ACTIVITY CALENDAR =====
+router.get('/streak-details', verifyToken, isStudent, getStudentStreakDetails);
+router.get('/activity-calendar', verifyToken, isStudent, getStudentActivityCalendar);
+
+// ===== PROGRESS-DRIVEN MILESTONE DEADLINES =====
+router.get(
+  '/deadlines/active-milestones',
+  verifyToken,
+  isStudent,
+  getActiveMilestoneDeadlines,
+);
 
 // ===== PROGRESS TRACKING =====
 router.get('/progress', verifyToken, isStudent, getMyProgress);
@@ -97,10 +136,17 @@ router.post(
   '/assignments/:id/submit',
   verifyToken,
   isStudent,
+  upload.single('submission_file'),
   submitAssignment,
 );
 
-// ===== PERSONAL PROJECTS =====
+// ===== PERSONAL & CAPSTONE PROJECTS =====
+router.get(
+  '/projects/overview',
+  verifyToken,
+  isStudent,
+  getStudentProjectsOverview,
+);
 router.get('/projects', verifyToken, isStudent, getStudentProjects);
 router.post('/projects', verifyToken, isStudent, createStudentProject);
 router.delete('/projects/:id', verifyToken, isStudent, deleteStudentProject);
@@ -111,6 +157,7 @@ router.post(
   '/capstone/:projectId/submit',
   verifyToken,
   isStudent,
+  upload.single('submission_file'),
   submitCapstone,
 );
 

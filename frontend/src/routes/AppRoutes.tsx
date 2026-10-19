@@ -262,6 +262,7 @@ const router = createBrowserRouter([
               { index: true, element: <FacilitatorHome /> },
               { path: 'students', element: <FacilitatorStudents /> },
               { path: 'assignments', element: <AssignmentManagement /> },
+              { path: 'assignment-management', element: <AssignmentManagement /> },
               { path: 'create-assignment', element: <CreateAssignment /> },
               { path: 'assignment-success', element: <AssignmentSuccess /> },
               { path: 'evaluations', element: <FacilitatorEvaluations /> },
@@ -298,6 +299,10 @@ const router = createBrowserRouter([
               { path: 'settings', element: <AdminSettings /> },
               {
                 path: 'assignment-management',
+                element: <AssignmentManagement />,
+              },
+              {
+                path: 'assignments',
                 element: <AssignmentManagement />,
               },
               {

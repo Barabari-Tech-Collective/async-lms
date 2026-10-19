@@ -1,4 +1,8 @@
 {
+  "name": "async-lms",
+  "scripts": {
+    "build": "npm --prefix frontend run build"
+  },
   "dependencies": {
     "youtube-transcript": "^1.3.1"
   }

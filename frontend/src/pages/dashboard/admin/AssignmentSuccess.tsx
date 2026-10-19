@@ -15,7 +15,7 @@ interface AssignmentData {
   topicId: string;
   deadline: string;
   totalMarks: number;
-  rubrics: { name: string; score: number }[];
+  rubrics: { name: string; score?: number; weight?: number; points?: number }[];
 }
 
 /* ======================
@@ -153,7 +153,7 @@ export default function AssignmentSuccess() {
                     key={rubric.name}
                     className='bg-slate-100 text-slate-700 hover:bg-slate-100 font-normal text-xs px-2.5 sm:px-3 py-1'
                   >
-                    {rubric.name} ({rubric.score})
+                    {rubric.name} ({rubric.score ?? rubric.weight ?? rubric.points ?? 0} pts)
                   </Badge>
                 ))}
               </div>

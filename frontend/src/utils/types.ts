@@ -99,7 +99,110 @@ export interface Exercise {
   test_cases?: TestCase[];
   tasks?: ExerciseTask[];
   rubric?: any;
+  is_completed?: boolean;
 }
+
+export type SubmissionType = 'file' | 'github' | 'docs' | 'figma' | 'excel' | 'url';
+
+export interface SubmissionTypeConfig {
+  id: SubmissionType;
+  label: string;
+  shortLabel: string;
+  iconName: string;
+  emoji: string;
+  placeholder: string;
+  helperText: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  patternHelp?: string;
+  requiresPermissionsWarning?: boolean;
+}
+
+export const ALL_SUBMISSION_TYPES: SubmissionType[] = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+
+export const SUBMISSION_TYPE_CONFIGS: Record<SubmissionType, SubmissionTypeConfig> = {
+  file: {
+    id: 'file',
+    label: 'Document / File Upload',
+    shortLabel: 'File Upload',
+    iconName: 'FileUp',
+    emoji: '📁',
+    placeholder: 'Select a file to upload (PDF, DOCX, XLSX, ZIP, etc.)',
+    helperText: 'Upload PDF, DOCX, XLSX, PPTX, TXT, or ZIP archives (max 25MB)',
+    badgeBg: 'bg-blue-500/10 dark:bg-blue-500/20',
+    badgeText: 'text-blue-600 dark:text-blue-400',
+    badgeBorder: 'border-blue-500/20',
+  },
+  github: {
+    id: 'github',
+    label: 'GitHub / Git Repository',
+    shortLabel: 'GitHub Repo',
+    iconName: 'Github',
+    emoji: '🐙',
+    placeholder: 'https://github.com/username/repository',
+    helperText: 'Public or accessible repository on GitHub, GitLab, or Bitbucket',
+    badgeBg: 'bg-zinc-500/10 dark:bg-zinc-500/20',
+    badgeText: 'text-zinc-700 dark:text-zinc-300',
+    badgeBorder: 'border-zinc-500/20',
+    patternHelp: 'Must be a valid GitHub, GitLab, or Bitbucket repository URL',
+  },
+  docs: {
+    id: 'docs',
+    label: 'Google Docs / Office 365',
+    shortLabel: 'Google Docs',
+    iconName: 'FileText',
+    emoji: '📄',
+    placeholder: 'https://docs.google.com/document/d/...',
+    helperText: 'Google Docs or Microsoft Word online shareable link',
+    badgeBg: 'bg-sky-500/10 dark:bg-sky-500/20',
+    badgeText: 'text-sky-600 dark:text-sky-400',
+    badgeBorder: 'border-sky-500/20',
+    patternHelp: 'Must be a Google Docs or Microsoft 365 document URL',
+    requiresPermissionsWarning: true,
+  },
+  figma: {
+    id: 'figma',
+    label: 'Figma Design / Prototype',
+    shortLabel: 'Figma Link',
+    iconName: 'Figma',
+    emoji: '🎨',
+    placeholder: 'https://www.figma.com/design/... or https://www.figma.com/proto/...',
+    helperText: 'Figma design file, prototype, or FigJam board share link',
+    badgeBg: 'bg-purple-500/10 dark:bg-purple-500/20',
+    badgeText: 'text-purple-600 dark:text-purple-400',
+    badgeBorder: 'border-purple-500/20',
+    patternHelp: 'Must be a valid Figma URL (design, file, proto, or board)',
+    requiresPermissionsWarning: true,
+  },
+  excel: {
+    id: 'excel',
+    label: 'Google Sheets / Excel Online',
+    shortLabel: 'Spreadsheet',
+    iconName: 'Sheet',
+    emoji: '📊',
+    placeholder: 'https://docs.google.com/spreadsheets/d/...',
+    helperText: 'Google Sheets or Excel Online workbook shareable link',
+    badgeBg: 'bg-emerald-500/10 dark:bg-emerald-500/20',
+    badgeText: 'text-emerald-600 dark:text-emerald-400',
+    badgeBorder: 'border-emerald-500/20',
+    patternHelp: 'Must be a Google Sheets or Excel Online URL',
+    requiresPermissionsWarning: true,
+  },
+  url: {
+    id: 'url',
+    label: 'General Web URL / Deployed App',
+    shortLabel: 'Live URL',
+    iconName: 'Globe',
+    emoji: '🌐',
+    placeholder: 'https://your-deployed-app.vercel.app',
+    helperText: 'Any publicly accessible web URL, demo site, or documentation link',
+    badgeBg: 'bg-amber-500/10 dark:bg-amber-500/20',
+    badgeText: 'text-amber-600 dark:text-amber-400',
+    badgeBorder: 'border-amber-500/20',
+    patternHelp: 'Must be a valid web URL starting with https:// or http://',
+  },
+};
 
 export interface CollegeAssignment {
   id: string;
@@ -111,14 +214,20 @@ export interface CollegeAssignment {
   course?: string | null;
   instruction_file_url?: string | null;
   instruction_file_name?: string | null;
+  allowed_submission_types?: SubmissionType[];
+  submission_type?: SubmissionType | null;
   submission_link?: string | null;
   submission_file_url?: string | null;
   submission_file_name?: string | null;
   submitted_at?: string | null;
+  updated_at?: string | null;
   test_cases?: AssignmentTestCase[];
-  rubric?: { name: string; score: number }[];
+  rubric?: any;
   evaluator_type?: string | null;
   assignment_description?: string | null;
+  status?: string;
+  score?: number | null;
+  feedback?: string | null;
 }
 
 export interface AssignmentTestCase {
@@ -132,6 +241,14 @@ export interface Assignment {
   title: string;
   instructions?: string;
   max_score: number;
+  allowed_submission_types?: SubmissionType[];
+  submission_type?: SubmissionType | null;
+  submission_link?: string | null;
+  submission_file_url?: string | null;
+  submission_file_name?: string | null;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
   // Enriched fields from student assignments API
   unit_id?: string;
   unit_title?: string;
@@ -167,6 +284,10 @@ export interface CapstoneProject {
   title: string;
   instructions?: string | null;
   max_score: number;
+  evaluator_type?: string | null;
+  test_cases?: any;
+  rubric?: any;
+  allowed_submission_types?: SubmissionType[];
 }
 
 export interface Topic {
@@ -331,7 +452,7 @@ export type AssignmentLifecycleStatus = 'pending' | 'pending_evaluation' | 'eval
 export interface StudentAssignmentOverviewItem {
   id: string;
   title: string;
-  type: 'CURRICULUM' | 'COLLEGE';
+  type: 'CURRICULUM' | 'COLLEGE' | 'CAPSTONE' | 'PROJECT';
   course_name: string;
   subject_slug?: string | null;
   topic_title?: string | null;
@@ -349,6 +470,17 @@ export interface StudentAssignmentOverviewItem {
 }
 
 export interface StudentAssignmentsOverviewResponse {
+  success: boolean;
+  data: StudentAssignmentOverviewItem[];
+  counts: {
+    total: number;
+    pending: number;
+    pending_evaluation: number;
+    evaluated: number;
+  };
+}
+
+export interface StudentProjectsOverviewResponse {
   success: boolean;
   data: StudentAssignmentOverviewItem[];
   counts: {

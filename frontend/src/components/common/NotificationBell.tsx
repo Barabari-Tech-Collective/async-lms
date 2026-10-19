@@ -47,9 +47,22 @@ export default function NotificationBell() {
   // Socket.io real-time subscription
   useEffect(() => {
     if (!user?.id) return;
-    const socket = io(import.meta.env.VITE_API_URL || undefined, { transports: ['websocket'] });
+    const token = localStorage.getItem('token');
+    const socket = io(import.meta.env.VITE_API_URL || undefined, {
+      transports: ['websocket'],
+      auth: { token },
+    });
     socket.on('connect', () => socket.emit('notification:subscribe', { userId: user.id }));
-    socket.on('notification:new', (n: Notification) => dispatch(pushNotification(n)));
+    socket.on('notification:new', (n: Notification) => {
+      dispatch(pushNotification(n));
+      // Bridge event to StudentDashboardLayout without needing a second socket
+      if (n.type === 'new_assignment') {
+        window.dispatchEvent(new CustomEvent('assignment:created', { detail: n }));
+      }
+    });
+    socket.on('assignment:created', (data: any) => {
+      window.dispatchEvent(new CustomEvent('assignment:created', { detail: data }));
+    });
     return () => { socket.disconnect(); };
   }, [user?.id, dispatch]);
 

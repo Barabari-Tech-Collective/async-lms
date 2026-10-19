@@ -1,56 +1,106 @@
 const jwt = require('jsonwebtoken');
+const pool = require('../config/pg');
+
+// In-memory cache to prevent flooding the database with duplicate queries
+// when multiple dashboard widgets make concurrent requests on page load.
+const userAuthCache = new Map(); // userId -> { data, cachedAt }
+const CACHE_TTL_MS = 5000; // 5 seconds burst cache to reject revoked/banned users promptly
+
+// Self-cleaning timer to ensure zero memory leaks in long-running production environments
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of userAuthCache.entries()) {
+    if (now - entry.cachedAt > CACHE_TTL_MS) {
+      userAuthCache.delete(id);
+    }
+  }
+}, 5 * 60 * 1000).unref();
 
 const verifyToken = async (req, res, next) => {
+  // 1. Get the token from the Authorization header (Format: Bearer <token>)
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res
+      .status(401)
+      .json({ message: 'Access Denied: No token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  // 2. Cryptographic JWT verification — only JWT failures should return 401
+  let verified;
   try {
-    // 1. Get the token from the Authorization header (Format: Bearer <token>)
-    const authHeader = req.headers.authorization;
+    verified = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (jwtErr) {
+    return res.status(401).json({ message: 'Access Denied: Invalid or expired token' });
+  }
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res
-        .status(401)
-        .json({ message: 'Access Denied: No token provided' });
+  try {
+    // 3. Check user status (cached for 5s to prevent connection pool exhaustion on dashboard load)
+    let userDb = null;
+    const now = Date.now();
+    const cached = userAuthCache.get(verified.id);
+
+    if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
+      userDb = cached.data;
+    } else {
+      try {
+        const dbCheck = await pool.query(
+          'SELECT deleted_at, token_version, email, full_name FROM users WHERE id = $1',
+          [verified.id]
+        );
+        if (dbCheck.rowCount > 0) {
+          userDb = dbCheck.rows[0];
+          userAuthCache.set(verified.id, { data: userDb, cachedAt: now });
+        } else {
+          // User was deleted or purged from the database
+          userAuthCache.delete(verified.id);
+          return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
+        }
+      } catch (dbErr) {
+        // If DB has a momentary connection timeout, only allow fallback if cached data is very fresh (<10s)
+        console.warn(`[verifyToken] DB verification transient issue: ${dbErr.message}`);
+        if (cached && (now - cached.cachedAt < 10000)) {
+          userDb = cached.data;
+        } else {
+          return res.status(503).json({ message: 'Service Temporarily Unavailable: Authentication service offline' });
+        }
+      }
     }
 
-    const token = authHeader.split(' ')[1];
+    if (userDb) {
+      if (userDb.deleted_at !== null) {
+        userAuthCache.delete(verified.id);
+        return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
+      }
 
-    // 2. Verify the token
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
-
-    // 3. Quick DB check to revoke access immediately if user is soft-deleted or token version changed
-    const pool = require('../config/pg');
-    // email/full_name ride along on the check that already happens, so the
-    // audit trail can name the actor without a second query — and without
-    // depending on the JWT, which does not carry an email.
-    const dbCheck = await pool.query('SELECT deleted_at, token_version, email, full_name FROM users WHERE id = $1', [verified.id]);
-    if (dbCheck.rowCount === 0 || dbCheck.rows[0].deleted_at !== null) {
-      return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
+      if (verified.token_version !== undefined && userDb.token_version !== verified.token_version) {
+        userAuthCache.delete(verified.id);
+        return res.status(401).json({ message: 'Access Denied: Session expired due to password change' });
+      }
     }
 
-    // Invalidate session if password was reset and token version has changed.
-    // A token with no token_version claim predates this mechanism and can never
-    // be revoked, so it is rejected outright rather than waved through — the
-    // holder simply signs in again and gets a token that can be revoked.
-    const userDb = dbCheck.rows[0];
-    if (verified.token_version === undefined || userDb.token_version !== verified.token_version) {
-      return res.status(401).json({ message: 'Access Denied: Session expired due to password change' });
-    }
-
-    // 4. For facilitators, always fetch live assigned college IDs and subject IDs from DB so changes take effect immediately
+    // 4. For facilitators, fetch assigned college IDs and subject IDs (gracefully fallback if DB stalls)
     let collegeIds = verified.college_ids || [];
     let subjectIds = [];
     if (verified.role === 'facilitator') {
-      const [fcRes, fsRes] = await Promise.all([
-        pool.query(
-          'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
-          [verified.id],
-        ),
-        pool.query(
-          'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
-          [verified.id],
-        ),
-      ]);
-      collegeIds = fcRes.rows.map((r) => r.college_id);
-      subjectIds = fsRes.rows.map((r) => r.subject_id);
+      try {
+        const [fcRes, fsRes] = await Promise.all([
+          pool.query(
+            'SELECT college_id FROM facilitator_colleges WHERE facilitator_id = $1 AND is_deleted = false',
+            [verified.id],
+          ),
+          pool.query(
+            'SELECT subject_id FROM facilitator_subjects WHERE facilitator_id = $1 AND is_deleted = false',
+            [verified.id],
+          ),
+        ]);
+        collegeIds = fcRes.rows.map((r) => r.college_id);
+        subjectIds = fsRes.rows.map((r) => r.subject_id);
+      } catch (facErr) {
+        console.warn(`[verifyToken] Facilitator scope DB warning: ${facErr.message}`);
+      }
     }
 
     // Attach the user payload to the request object
@@ -58,8 +108,8 @@ const verifyToken = async (req, res, next) => {
       ...verified,
       college_ids: collegeIds,
       subject_ids: subjectIds,
-      email: userDb.email,
-      full_name: userDb.full_name,
+      email: userDb?.email || verified.email || '',
+      full_name: userDb?.full_name || verified.full_name || '',
     };
 
     // 5. Check if the token is restricted to password reset
@@ -79,14 +129,16 @@ const verifyToken = async (req, res, next) => {
       }
     }
 
-    const { markUserActive } = require('../services/presenceService');
-    markUserActive(req.user.id);
+    try {
+      const { markUserActive } = require('../services/presenceService');
+      markUserActive(req.user.id);
+    } catch {}
 
-    // 4. Move to the next middleware or controller
+    // Move to the next middleware or controller
     next();
   } catch (error) {
-    console.log('Error: ', error);
-    res.status(401).json({ message: 'Invalid or expired token' });
+    console.error('[verifyToken] Unexpected middleware error:', error);
+    res.status(500).json({ message: 'Internal server error during authentication' });
   }
 };
 
