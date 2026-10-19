@@ -12,6 +12,7 @@ const EVALUATOR_APIS = {
   VISUAL: 'Visual / DOM Evaluator',
   PYTHON: 'Python Evaluator',
   FULLSTACK: 'Fullstack Evaluator',
+  EXCEL: 'Excel Spreadsheet Evaluator',
 };
 
 // Render free-tier services can accept the TCP connection right after waking
@@ -44,6 +45,37 @@ function isAllowedGitUrl(urlStr) {
     return false;
   }
 }
+
+function isAllowedSpreadsheetUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const trimmed = urlStr.trim();
+    if (!trimmed) return false;
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    const allowed = ['docs.google.com', 'sheets.google.com', 'onedrive.live.com', '1drv.ms', 'sharepoint.com'];
+    if (allowed.some(h => host === h || host.endsWith('.' + h))) return true;
+    const pathLower = parsed.pathname.toLowerCase();
+    return pathLower.endsWith('.xlsx') || pathLower.endsWith('.xlsm') || parsed.search.toLowerCase().includes('format=xlsx');
+  } catch {
+    return false;
+  }
+}
+
+function getSpreadsheetDownloadUrl(sub) {
+  if (sub?.submission_file_url) return sub.submission_file_url;
+  const link = (sub?.submission_link || '').trim();
+  if (!link) return null;
+  if (link.includes('docs.google.com/spreadsheets')) {
+    const match = link.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (match && match[1]) {
+      return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
+    }
+  }
+  return link;
+}
+
 exports.runEvaluation = async (req, res) => {
   const { assignmentId, projectId, evaluatorType: reqEvaluatorType, scope = 'pending' } = req.body;
   const targetId = projectId || assignmentId;
@@ -264,7 +296,13 @@ exports.runEvaluation = async (req, res) => {
           WHERE ${targetCol}::text = $2::text
             AND r.status IN ('completed', 'failed')
             AND r.submission_id != ALL($3::uuid[])
-            AND r.student_id != ALL($4::uuid[])
+            AND (r.student_id IS NULL OR r.student_id != ALL($4::uuid[]))
+            AND (
+              r.submission_id IS NULL OR r.submission_id IN (
+                SELECT id FROM ${isCollegeAssignment ? 'college_assignment_submissions' : isProject ? 'project_submissions' : 'assignment_submissions'}
+                WHERE ${isCollegeAssignment ? 'assignment_id' : isProject ? 'project_id' : 'assignment_id'} = $2
+              )
+            )
           ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
         ) prev
         ON CONFLICT (evaluation_id, submission_id) DO NOTHING
@@ -290,7 +328,7 @@ exports.runEvaluation = async (req, res) => {
       throw new Error('Rubric missing for REACT evaluator');
     }
 
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     console.log('Evaluator service api & key: ', evaluatorUrl, evaluatorApiKey);
@@ -299,23 +337,38 @@ exports.runEvaluation = async (req, res) => {
     let jobIdsAndLinks = []; // { jobId, statusUrl, submissionId, studentName, studentId }
 
     try {
-      // Filter git vs non-git submissions
-      const validSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type === 'github' || (!s.submission_type && s.submission_link)) &&
-          !!s.submission_link &&
-          isAllowedGitUrl(s.submission_link),
-      );
-      const nonGitSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type && s.submission_type !== 'github') ||
-          (!s.submission_link && !!s.submission_file_url),
-      );
-      const invalidSubmissions = submissions.filter(
-        (s) =>
-          (s.submission_type === 'github' || (!s.submission_type && !s.submission_file_url)) &&
-          (!s.submission_link || !isAllowedGitUrl(s.submission_link)),
-      );
+      const isExcelEvaluation = (evaluatorType === 'EXCEL' || evaluatorType === 'excel');
+
+      // Filter submissions based on evaluator requirements
+      let validSubmissions = [];
+      let nonGitSubmissions = [];
+      let invalidSubmissions = [];
+
+      if (isExcelEvaluation) {
+        validSubmissions = submissions.filter(
+          (s) => !!(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        );
+        invalidSubmissions = submissions.filter(
+          (s) => !(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        );
+      } else {
+        validSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type === 'github' || (!s.submission_type && s.submission_link)) &&
+            !!s.submission_link &&
+            isAllowedGitUrl(s.submission_link),
+        );
+        nonGitSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type && s.submission_type !== 'github') ||
+            (!s.submission_link && !!s.submission_file_url),
+        );
+        invalidSubmissions = submissions.filter(
+          (s) =>
+            (s.submission_type === 'github' || (!s.submission_type && !s.submission_file_url)) &&
+            (!s.submission_link || !isAllowedGitUrl(s.submission_link)),
+        );
+      }
 
       if (nonGitSubmissions.length > 0) {
         // Queue non-git submissions for manual facilitator review
@@ -350,13 +403,19 @@ exports.runEvaluation = async (req, res) => {
         );
         // Instantly mark them as failed in the DB
         for (const invalid of invalidSubmissions) {
-          let reason = 'No repository URL provided by student.';
+          let reason = isExcelEvaluation
+            ? 'No spreadsheet URL or file provided by student.'
+            : 'No repository URL provided by student.';
           if (invalid.submission_link) {
             try {
               const h = new URL(invalid.submission_link).hostname;
-              reason = `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
+              reason = isExcelEvaluation
+                ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
+                : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
             } catch {
-              reason = 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
+              reason = isExcelEvaluation
+                ? 'Invalid spreadsheet URL format.'
+                : 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
             }
           }
           const failFeedback = JSON.stringify({
@@ -403,20 +462,89 @@ exports.runEvaluation = async (req, res) => {
       }
 
       // Create payloads based on evaluator type capabilities
-      // visual and javascript accept arrays. backend and react accept singles.
-      if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
+      // visual, javascript, and excel accept batch arrays. backend and react accept singles.
+      if (evaluatorType === 'EXCEL' || evaluatorType === 'excel') {
+        let formattedRubric;
+        if (assignment.rubric && Array.isArray(assignment.rubric)) {
+          formattedRubric = { criteria: assignment.rubric };
+        } else if (
+          assignment.rubric &&
+          assignment.rubric.criteria &&
+          Array.isArray(assignment.rubric.criteria)
+        ) {
+          formattedRubric = assignment.rubric;
+        } else {
+          formattedRubric = {
+            criteria: [{ name: 'Standard Grading', weight: 100 }],
+          };
+        }
+
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        const payload = {
+          type: 'excel',
+          submissions: validSubmissions.map((s) => ({
+            submissionId: s.submission_id || s.id,
+            fileUrl: getSpreadsheetDownloadUrl(s),
+            studentName: s.student_name,
+            studentId: s.user_id || s.student_id,
+          })),
+          rubric: formattedRubric,
+          testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
+          assignmentId: targetId,
+          skipCache: true,
+          reEvaluate: true,
+        };
+
+        const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
+          headers: { 'x-api-key': evaluatorApiKey },
+          timeout: 45000,
+        });
+
+        const jobs = response.data.jobs || [response.data];
+        jobs.forEach((job, index) => {
+          jobIdsAndLinks.push({
+            jobId: job.jobId || job.id,
+            statusUrl: job.statusUrl,
+            submissionId:
+              validSubmissions[index].submission_id ||
+              validSubmissions[index].id,
+            studentName: validSubmissions[index].student_name,
+            studentId:
+              validSubmissions[index].user_id ||
+              validSubmissions[index].student_id,
+          });
+        });
+      } else if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
         const payloadType = (evaluatorType === 'JS') ? 'javascript' : (evaluatorType === 'VISUAL' ? 'visual' : (evaluatorType === 'PYTHON' ? 'python' : evaluatorType));
         
-        let jsConfig = { testCases: assignment.test_cases };
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        let jsConfig = { testCases: rawTestCases };
         
         // If test_cases is a JSON object containing advanced JS configs, extract them
-        if ((payloadType === 'javascript' || payloadType === 'python') && assignment.test_cases && typeof assignment.test_cases === 'object' && !Array.isArray(assignment.test_cases)) {
+        if ((payloadType === 'javascript' || payloadType === 'python') && rawTestCases && typeof rawTestCases === 'object' && !Array.isArray(rawTestCases)) {
            jsConfig = {
-             testCases: assignment.test_cases.testCases || [],
-             evaluationMode: assignment.test_cases.evaluationMode || 'function',
-             entryFunction: assignment.test_cases.entryFunction,
-             functions: assignment.test_cases.functions,
-             expectedLogs: assignment.test_cases.expectedLogs
+             testCases: rawTestCases.testCases || [],
+             evaluationMode: rawTestCases.evaluationMode || 'function',
+             entryFunction: rawTestCases.entryFunction,
+             entryFile: rawTestCases.entryFile,
+             functions: rawTestCases.functions,
+             expectedLogs: rawTestCases.expectedLogs
            };
         }
 
@@ -433,6 +561,9 @@ exports.runEvaluation = async (req, res) => {
             ? JSON.stringify(assignment.rubric)
             : 'Standard evaluation',
           expectedUrl: assignment.expected_url || 'https://example.com',
+          assignmentId: targetId,
+          skipCache: true,
+          reEvaluate: true,
         };
 
         const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
@@ -643,7 +774,8 @@ exports.syncEvaluationStatus = async (req, res) => {
           continue;
         }
 
-        const url = `${process.env.CENTRAL_EVALUATOR_URL}${job.status_url}`;
+        const baseUrl = process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000';
+        const url = `${baseUrl}${job.status_url}`;
         const response = await axios.get(url, {
           headers: { 'x-api-key': process.env.CENTRAL_EVALUATOR_API_KEY },
         });
@@ -695,6 +827,12 @@ exports.syncEvaluationStatus = async (req, res) => {
                 } catch {
                   const s = String(feedback || '').trim();
                   feedback = { summary: s && s !== '""' && s !== "''" ? s : 'Evaluation completed.', strengths: [], issues: [], breakdown: [] };
+                }
+              }
+
+              if (feedback && typeof feedback === 'object') {
+                if (!feedback.cell_evidence && (finalData?.cell_evidence || finalData?.assertion_results)) {
+                  feedback.cell_evidence = finalData.cell_evidence || finalData.assertion_results;
                 }
               }
             }
@@ -857,7 +995,8 @@ exports.getResultsByAssignment = async (req, res) => {
 
     // Check if evaluation exists
     const evalRes = await pool.query(
-      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name
+      `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name,
+              COALESCE(a.rubric, c.rubric, p.rubric) as rubric
        FROM evaluations e
        LEFT JOIN assignments a ON e.assignment_id = a.id
        LEFT JOIN college_assignments c ON e.college_assignment_id = c.id
@@ -892,12 +1031,18 @@ exports.getResultsByAssignment = async (req, res) => {
                 col.id as college_id
          FROM evaluation_results r
          JOIN evaluations e ON r.evaluation_id = e.id
-         LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
-         LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
-         LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
+         LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL AND s.assignment_id = e.assignment_id
+         LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL AND cs.assignment_id = e.college_assignment_id
+         LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL AND ps.project_id = e.project_id
          LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
          LEFT JOIN colleges col ON sp.college_id = col.id
          WHERE (e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1 OR e.id::text = $1)
+           AND (
+             (e.assignment_id IS NOT NULL AND s.id IS NOT NULL) OR
+             (e.college_assignment_id IS NOT NULL AND cs.id IS NOT NULL) OR
+             (e.project_id IS NOT NULL AND ps.id IS NOT NULL) OR
+             r.submission_id IS NULL
+           )
            ${collegeFilter}
          ORDER BY COALESCE(r.student_id, r.submission_id),
                   e.created_at DESC,
@@ -1127,6 +1272,7 @@ exports.getEvaluationResults = async (req, res) => {
 
     const evalRes = await pool.query(
       `SELECT e.*, COALESCE(a.title, c.title, p.title) as assignment_name,
+              COALESCE(a.rubric, c.rubric, p.rubric) as rubric,
               COALESCE(t.subject_id, pt.subject_id) as curriculum_subject_id,
               c.college_id as college_assignment_college_id,
               c.course as college_assignment_course,
@@ -1197,12 +1343,18 @@ exports.getEvaluationResults = async (req, res) => {
               col.id as college_id
        FROM evaluation_results r
        JOIN evaluations e ON r.evaluation_id = e.id
-       LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL
-       LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL
-       LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL
+       LEFT JOIN assignment_submissions s ON r.submission_id = s.id AND e.assignment_id IS NOT NULL AND s.assignment_id = e.assignment_id
+       LEFT JOIN college_assignment_submissions cs ON r.submission_id = cs.id AND e.college_assignment_id IS NOT NULL AND cs.assignment_id = e.college_assignment_id
+       LEFT JOIN project_submissions ps ON r.submission_id = ps.id AND e.project_id IS NOT NULL AND ps.project_id = e.project_id
        LEFT JOIN student_profiles sp ON r.student_id = sp.user_id
        LEFT JOIN colleges col ON sp.college_id = col.id
-       WHERE r.evaluation_id = $1${collegeFilter}`,
+       WHERE r.evaluation_id = $1${collegeFilter}
+         AND (
+           (e.assignment_id IS NOT NULL AND s.id IS NOT NULL) OR
+           (e.college_assignment_id IS NOT NULL AND cs.id IS NOT NULL) OR
+           (e.project_id IS NOT NULL AND ps.id IS NOT NULL) OR
+           r.submission_id IS NULL
+         )`,
       values,
     );
 
@@ -1249,7 +1401,219 @@ exports.generateTestCases = async (req, res) => {
       return res.status(400).json({ success: false, message: "Instructions are required to generate test cases." });
     }
 
-    const systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
+    let normalizedRubric = rubric;
+    if (typeof rubric === 'string') {
+      try {
+        normalizedRubric = JSON.parse(rubric);
+      } catch (e) {
+        // keep as string or raw
+      }
+    }
+
+    let systemPrompt;
+    if (evaluatorType?.toLowerCase() === 'excel') {
+      systemPrompt = `You are the world's foremost expert technical curriculum designer and spreadsheet engineer. Your task is to generate flawless, production-grade JSON test case configurations for an automated Excel spreadsheet grading system across ANY assignment domain (finance, business analysis, sales, HR, operations, science, engineering, basic marksheets, lookups, pivots, dashboards, text processing, or capstones).
+    
+Based on the Assignment Title, Instructions, and Evaluation Rubric provided, output ONLY a raw JSON array of test case objects. DO NOT output any markdown code blocks or explanations, just the raw JSON starting with [ and ending with ].
+
+=============================================================
+CRITICAL ARCHITECTURAL RULES (ZERO TOLERANCE FOR DEVIATION)
+=============================================================
+
+1. STRICT 1-TO-1 RUBRIC CRITERIA BINDING:
+   - When an Evaluation Rubric is provided, EVERY generated test case MUST contain a "criterion" property whose value is an EXACT, VERBATIM, CHARACTER-FOR-CHARACTER copy of one of the "name" fields from the provided Evaluation Rubric.
+   - DO NOT rephrase, DO NOT shorten, DO NOT append parentheticals like "(Text Functions)", and DO NOT invent custom criteria names.
+   - EVERY criterion in the provided rubric MUST have at least one corresponding test case. If a criterion evaluates multiple aspects (e.g. "Table Formatting & Professional Structure" evaluating bold headers, currency, and percentages), create multiple distinct test cases all sharing that exact criterion name.
+   - If no rubric is provided, analyze the instructions to generate 3-5 clean, professional criterion names and bind all test cases to them.
+
+2. SPREADSHEET GRID GEOMETRY & COLUMN ALIGNMENT:
+   - CAREFULLY check the column specifications in the instructions:
+     * If the instructions define columns starting at Column A (e.g. "Col A", "Column A", "Cell A1", "Cell A3", "| Col A |"), you MUST use Column A! (e.g. Date in Col A, Sales Rep in Col A, Amount in Col B).
+     * ONLY if the instructions explicitly mention a blank margin or state that data begins in Column B, should you shift to Column B.
+     * NEVER shift tables to Columns B and C when the instructions state they reside in Columns A and B!
+   - Identify which specific columns hold formulas, text, currency, and percentages based on the exact column letters or order described in the instructions.
+
+3. DYNAMIC TEST CASE SCHEMAS WITH HEADER ANCHORS:
+   - VERTICAL COLUMN ANCHORS: Include an "anchor" property containing the target column header name (e.g. "Profit Margin", "Contact", "Revenue", "Department") for vertical data and formula columns. This empowers the evaluation engine to dynamically find the student's column even if they insert helper columns or shift margins.
+   - HORIZONTAL HEADER EXCLUSION RULE: DO NOT add an "anchor" property on "format_check" when checking a horizontal table header row (e.g. range "A1:F1" or "B2:I2")! Anchors are column finders and will collapse horizontal multi-column ranges into a single column.
+   - SUMMARY FORMULA EXCLUSION RULE: DO NOT add an "anchor" on "function_check" when evaluating a summary total cell (e.g. range "F5:F5" with acceptedFunctions: ["SUM"])! The anchor label (e.g. "Grand Total") resides in an adjacent text cell (E5); adding the anchor redirects the function check to the text cell and causes a false failure. Use "range" directly without an anchor.
+   - SUMMARY VALUE CHECKS: For "value_check", DO use the summary label as an anchor with direction "right" and offset 1 (e.g. anchor: "Grand Total", direction: "right", offset: 1, expectedValue: 8000).
+   - NEVER specify a multi-column rectangle (like "D4:E35") when evaluating a single formula or function! Target ONLY the single formula column (e.g. "E4:E35") and provide the "anchor".
+
+A. "formula_range_check" (Dynamic Calculations & Anti-Cheat):
+   Verifies that a column contains dynamic calculated formulas without static hardcoded numbers or static math cheats (e.g. =1000).
+   CRITICAL ARITHMETIC RULE: In Excel, basic math operations (multiplication *, division /, addition +, subtraction -) use operators like =F2*G2, NOT named functions! For all basic arithmetic operations, ALWAYS and ONLY use "formula_range_check". NEVER use "function_check" with "PRODUCT"!
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "formula_range_check",
+     "sheet": "<Sheet Name>",
+     "range": "J4:J35",
+     "anchor": "Profit Margin",
+     "mustBeFormula": true,
+     "forbiddenConstants": true
+   }
+
+B. "function_check" (Specific Required Named Excel Functions):
+   Verifies that specific built-in named Excel functions are actively used in formulas.
+   DO NOT use function_check for simple arithmetic (*, +, -, /) or "PRODUCT".
+   - Text cleaning (PROPER, TRIM, UPPER, LOWER):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "E4:E35",
+       "anchor": "Contact",
+       "acceptedFunctions": ["PROPER", "TRIM"]
+     }
+   - Text extraction & separation (LEFT, MID, RIGHT, FIND, SEARCH, TEXTBEFORE, TEXTAFTER, TRIM):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "D4:D35",
+       "anchor": "First Name",
+       "acceptedFunctions": ["LEFT", "MID", "RIGHT", "FIND", "SEARCH", "TEXTBEFORE", "TEXTAFTER", "TRIM"]
+     }
+   - Lookup functions (VLOOKUP, XLOOKUP, INDEX, MATCH):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "E4:E35",
+       "anchor": "Department",
+       "acceptedFunctions": ["VLOOKUP", "XLOOKUP", "INDEX"],
+       "requireAbsoluteReferences": true
+     }
+   - Conditional aggregations & math (SUMIF, SUMIFS, COUNTIF, COUNTIFS, AVERAGEIF):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "B4:B13",
+       "anchor": "Sum of Amount",
+       "acceptedFunctions": ["SUMIF", "SUMIFS"]
+     }
+   - Summary total function check (DO NOT provide anchor; target exact formula cell):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "F5:F5",
+       "acceptedFunctions": ["SUM"],
+       "mustBeFormula": true
+     }
+   - Logical conditions (IF, IFS, AND, OR, IFERROR):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "function_check",
+       "sheet": "<Sheet Name>",
+       "range": "G4:G35",
+       "anchor": "Status",
+       "acceptedFunctions": ["IF", "AND", "OR", "IFERROR"]
+     }
+
+C. "format_check" (Styling, Headers, Currency, Percentages):
+   Tests styling and number formatting. ONLY test attributes explicitly requested in instructions!
+   - Bold Table Header (HORIZONTAL ROW: DO NOT include anchor):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "A1:F1",
+       "bold": true
+     }
+   - Bold Summary / Total Row:
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "A14:B14",
+       "bold": true
+     }
+   - Currency Formatting (VERTICAL COLUMN: include anchor):
+     NOTE: In multi-sheet assignments, ONLY check currency on the presentation/Dashboard sheet where explicit currency styling was requested! Do NOT demand currency on raw database sheets unless explicitly asked.
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "G4:H35",
+       "anchor": "Sum of Amount",
+       "numberFormat": "currency"
+     }
+   - Percentage Formatting (for Profit Margin, Growth Rates, Tax Rates):
+     {
+       "criterion": "<Exact Rubric Criterion Name>",
+       "type": "format_check",
+       "sheet": "<Sheet Name>",
+       "range": "J4:J35",
+       "anchor": "Profit Margin",
+       "numberFormat": "percent"
+     }
+
+D. "data_check" (Data Entry Completeness & Non-Empty Records):
+   Verifies that data rows are fully entered and no required fields are blank.
+   Always target the actual populated columns (e.g. B4:I35), never blank spacer margins!
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "data_check",
+     "sheet": "<Sheet Name>",
+     "range": "B4:I35",
+     "disallowBlanks": true
+   }
+
+E. "value_check" (Specific Fixed Numerical or Text Answers):
+   CRITICAL ANTI-HALLUCINATION RULE:
+   ONLY use "value_check" with "expectedValue" if the assignment instructions EXPLICITLY specify the exact starting numbers so the mathematical answer is uniquely determined.
+   If students entered their own data or numbers were not given, NEVER use "value_check" with invented numbers or 0. Use "formula_range_check" or "function_check" instead!
+   When checking totals, prefer dynamic anchors:
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "value_check",
+     "sheet": "<Sheet Name>",
+     "anchor": "Grand Total",
+     "direction": "right",
+     "offset": 1,
+     "expectedValue": 25000,
+     "tolerance": 1.0
+   }
+
+F. "chart_check" (Charts & Graphs):
+   The engine scans all sheets across the workbook. Always keep chartType simple (e.g. "column", "bar", "line", "pie") and set minCharts to 1:
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "chart_check",
+     "sheet": "<Sheet Name>",
+     "minCharts": 1,
+     "chartType": "column",
+     "title": "Sales Performance"
+   }
+
+G. "pivot_check" (Pivot Tables):
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "pivot_check",
+     "minPivotTables": 1,
+     "requiredField": "Department"
+   }
+
+H. "macro_check" (VBA Macros):
+   {
+     "criterion": "<Exact Rubric Criterion Name>",
+     "type": "macro_check",
+     "requireVba": true,
+     "requiredSub": "CalculateTotal"
+   }
+
+4. RESILIENT SHEET TARGETING & ANCHORS:
+   - If the instructions mention a worksheet name (e.g. "Sales Database", "Dashboard", "Summary"), include "sheet": "<Sheet Name>".
+   - CRITICAL: Always include "anchor" on every test case. The engine uses a 6-tier fuzzy resolver with synonyms (e.g. "Dashboard" matches "Summary", "Overview", "Sheet2") and scans cell anchors to find the correct sheet even if students keep default names like "Sheet1" or "Sheet2".
+
+5. INTRODUCTORY / DATA ENTRY ONLY:
+   If the instructions only ask students to enter data and format it with NO calculations requested, DO NOT generate "formula_range_check". Use "data_check" and "format_check".
+
+Output ONLY the raw JSON array starting with [ and ending with ].`;
+    } else {
+      systemPrompt = `You are an expert technical curriculum designer. Your task is to generate strict JSON test case configurations for an automated code grading system.
     
 Based on the Assignment Title, Instructions, and Evaluation Rubric provided by the user, you must output ONLY a raw JSON object that will be used by our JavaScript automated evaluator. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with { and ending with }.
 
@@ -1279,17 +1643,33 @@ Example output for function mode:
 
 If you are unsure or it doesn't fit neatly into function mode, fallback to script mode.
 Do not include any explanation.`;
+    }
 
-    const userPrompt = `Assignment Title: ${title || 'Untitled'}
+    let rubricList = [];
+    if (Array.isArray(normalizedRubric)) {
+      rubricList = normalizedRubric;
+    } else if (normalizedRubric && Array.isArray(normalizedRubric.criteria)) {
+      rubricList = normalizedRubric.criteria;
+    }
+    const rubricNames = rubricList.map((r) => (typeof r === 'string' ? r : r.name || '')).filter(Boolean);
+
+    let userPrompt = `Assignment Title: ${title || 'Untitled'}
 
 Instructions:
 ${instructions}
 
 Evaluation Rubric:
-${rubric ? JSON.stringify(rubric, null, 2) : 'No rubric provided'}`;
+${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric provided'}`;
+
+    if (evaluatorType?.toLowerCase() === 'excel' && rubricNames.length > 0) {
+      userPrompt += `\n\nCRITICAL BINDING CONTRACT:
+The following are the EXACT allowed criteria names. Every test case's "criterion" property MUST be one of these exact strings (copy verbatim):
+${rubricNames.map((n) => `- "${n}"`).join('\n')}
+Do NOT alter spelling, casing, punctuation, or add parentheticals. Every criterion above must have at least one test case.`;
+    }
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "deepseek-v4-flash",
+      model: process.env.OPENAI_MODEL || "deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -1306,6 +1686,201 @@ ${rubric ? JSON.stringify(rubric, null, 2) : 'No rubric provided'}`;
 
     // Verify it parses correctly
     const parsedJson = JSON.parse(rawJson);
+
+    // Deterministic Post-processing Sanitizer Guard for Excel test cases
+    if (evaluatorType?.toLowerCase() === 'excel' && Array.isArray(parsedJson)) {
+      const lowerInstructions = (instructions || '').toLowerCase();
+      const mentionsZero = lowerInstructions.includes('zero') || lowerInstructions.includes(' 0');
+      const mentionsFill = lowerInstructions.includes('fill') || lowerInstructions.includes('background') || lowerInstructions.includes('shading') || lowerInstructions.includes('color');
+      const sheetMatch = instructions.match(/(?:sheet|worksheet)\s+(?:named|called|titled)?\s*["']?([A-Za-z0-9_ \(\)-]+?)["']?(?:[.,;\n\r]|$)/i);
+      const targetSheet = sheetMatch && sheetMatch[1] ? sheetMatch[1].trim() : null;
+
+      // Fuzzy matching helper to snap any slight paraphrasing to exact rubric name
+      const snapToExactRubricName = (criterionName) => {
+        if (!criterionName || rubricNames.length === 0) return criterionName;
+        if (rubricNames.includes(criterionName)) return criterionName;
+
+        const cleanCrit = criterionName.toLowerCase().trim();
+        // 1. Direct case-insensitive match
+        for (const rName of rubricNames) {
+          if (rName.toLowerCase().trim() === cleanCrit) return rName;
+        }
+
+        // 2. Substring match
+        for (const rName of rubricNames) {
+          const cleanR = rName.toLowerCase().trim();
+          if (cleanR.includes(cleanCrit) || cleanCrit.includes(cleanR)) return rName;
+        }
+
+        // 3. Token overlap match
+        const critTokens = new Set(cleanCrit.replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean));
+        let bestMatch = null;
+        let maxOverlap = 0;
+
+        for (const rName of rubricNames) {
+          const rTokens = new Set(rName.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean));
+          const intersection = [...critTokens].filter((t) => rTokens.has(t));
+          const union = new Set([...critTokens, ...rTokens]);
+          const score = union.size > 0 ? intersection.length / union.size : 0;
+          if (score > maxOverlap) {
+            maxOverlap = score;
+            bestMatch = rName;
+          }
+        }
+
+        return maxOverlap >= 0.25 ? bestMatch : criterionName;
+      };
+
+      for (let i = parsedJson.length - 1; i >= 0; i--) {
+        const tc = parsedJson[i];
+        if (!tc) continue;
+
+        // Auto-snap criterion name to exact rubric name
+        if (tc.criterion && rubricNames.length > 0) {
+          tc.criterion = snapToExactRubricName(tc.criterion);
+        }
+
+        // Auto-inject sheet name if specified in instructions and not set
+        if (targetSheet && !tc.sheet) {
+          tc.sheet = targetSheet;
+        }
+
+        // Sanitize Column A in data_check: only rewrite to B if instructions didn't specify Column A
+        if (tc.type === 'data_check' && tc.range && typeof tc.range === 'string') {
+          const rangeMatch = tc.range.match(/^A([0-9]+):([A-Z]+[0-9]+)$/i);
+          const hasColAData = /col\s*a|column\s*a|cell\s*a|[|]\s*[*]*col\s*a/i.test(lowerInstructions);
+          if (rangeMatch && !hasColAData) {
+            tc.range = `B${rangeMatch[1]}:${rangeMatch[2]}`;
+          }
+        }
+
+        // Align column letter with anchor if AI shifted column to B/C unnecessarily
+        if (tc.range && typeof tc.range === 'string') {
+          if (tc.anchor === 'Sales Rep' && /^[BC]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[BC]/i, 'A');
+          } else if (tc.anchor === 'Sum of Amount' && /^[C]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[C]/i, 'B').replace(/:[C]/i, ':B');
+          } else if (tc.anchor === 'Grand Total' && /^[BC]/i.test(tc.range)) {
+            tc.range = tc.range.replace(/^[BC]/i, 'A');
+          }
+        }
+
+        // Sanitize value_check: Eliminate 0-trap when exact numbers were not provided
+        if (tc.type === 'value_check' && (tc.expectedValue === 0 || tc.expectedValue === '0') && !mentionsZero) {
+          // Convert to function_check on the cell so student is verified for using correct formula without failing
+          tc.type = 'function_check';
+          tc.range = tc.cell || tc.range || 'A1';
+          tc.acceptedFunctions = tc.acceptedFunctions || ['SUM'];
+          delete tc.cell;
+          delete tc.expectedValue;
+          delete tc.tolerance;
+        }
+
+        // Sanitize function_check: eliminate arithmetic PRODUCT trap (students write =A*B, not =PRODUCT(A,B))
+        if (tc.type === 'function_check' && Array.isArray(tc.acceptedFunctions)) {
+          const isOnlyProduct = tc.acceptedFunctions.every(f => f.toUpperCase() === 'PRODUCT');
+          if (isOnlyProduct) {
+            tc.type = 'formula_range_check';
+            tc.mustBeFormula = true;
+            tc.forbiddenConstants = true;
+            delete tc.acceptedFunctions;
+          }
+        }
+
+        // Auto-inject anchor if missing based on criterion keywords
+        if (!tc.anchor && tc.criterion) {
+          const lowerC = tc.criterion.toLowerCase();
+          if (lowerC.includes('margin') || lowerC.includes('profit margin')) {
+            tc.anchor = 'Profit Margin';
+          } else if (lowerC.includes('contact') || lowerC.includes('name')) {
+            tc.anchor = 'Contact';
+          } else if (lowerC.includes('department') || lowerC.includes('dept')) {
+            tc.anchor = 'Department';
+          } else if (lowerC.includes('revenue') || lowerC.includes('sales')) {
+            tc.anchor = 'Revenue';
+          }
+        }
+
+        // Sanitize format_check: Strip anchor if range is a multi-column horizontal row (e.g. A1:F1 or B2:I2)
+        if (tc.type === 'format_check' && tc.range) {
+          const headerRowMatch = tc.range.match(/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/i);
+          if (headerRowMatch && headerRowMatch[2] === headerRowMatch[4] && headerRowMatch[1].toUpperCase() !== headerRowMatch[3].toUpperCase()) {
+            delete tc.anchor; // Horizontal row range: DO NOT anchor to a single column!
+          }
+        }
+
+        // Sanitize function_check: Strip anchor if checking summary formulas (e.g. F5 or F5:F5 with SUM)
+        if (tc.type === 'function_check' && tc.anchor && /total|sum|grand/i.test(tc.anchor)) {
+          delete tc.anchor;
+        }
+
+        // Sanitize data_check: Strip anchor if checking a multi-column data range (e.g. A2:C3, B1:F4)
+        if (tc.type === 'data_check' && tc.range && tc.anchor) {
+          const multiColDataMatch = tc.range.match(/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/i);
+          if (multiColDataMatch && multiColDataMatch[1].toUpperCase() !== multiColDataMatch[3].toUpperCase()) {
+            delete tc.anchor;
+          }
+        }
+
+        // Multi-column formula narrowing: if range spans multiple columns for a single formula (e.g. D4:E35), target the rightmost formula column
+        if ((tc.type === 'function_check' || tc.type === 'formula_range_check') && tc.range && typeof tc.range === 'string') {
+          const multiColMatch = tc.range.match(/^([A-Z])([0-9]+):([A-Z])([0-9]+)$/i);
+          if (multiColMatch && multiColMatch[1].toUpperCase() !== multiColMatch[3].toUpperCase()) {
+            tc.range = `${multiColMatch[3].toUpperCase()}${multiColMatch[2]}:${multiColMatch[3].toUpperCase()}${multiColMatch[4]}`;
+          }
+        }
+
+        // Sanitize format_check: Strip hasFill if instructions never asked for background fill
+        if (tc.type === 'format_check' && tc.hasFill && !mentionsFill) {
+          delete tc.hasFill;
+        }
+
+        // De-duplicate redundant formula_range_checks for the same sheet and anchor
+        if (tc.type === 'formula_range_check') {
+          const dupIndex = parsedJson.findIndex((other, idx) => 
+            idx !== i && other && other.type === 'formula_range_check' && 
+            other.sheet === tc.sheet && other.anchor === tc.anchor && other.criterion === tc.criterion
+          );
+          if (dupIndex !== -1 && dupIndex < i) {
+            parsedJson.splice(i, 1);
+            continue;
+          }
+        }
+      }
+
+      // Guarantee every single rubric criterion has at least one test case
+      if (rubricNames.length > 0) {
+        const coveredCriteria = new Set(parsedJson.map((t) => t.criterion));
+        for (const rName of rubricNames) {
+          if (!coveredCriteria.has(rName)) {
+            const lowerR = rName.toLowerCase();
+            let fallbackType = 'data_check';
+            let fallbackProps = { range: 'B4:I35', disallowBlanks: true };
+
+            if (lowerR.includes('formula') || lowerR.includes('calc') || lowerR.includes('profit') || lowerR.includes('margin') || lowerR.includes('sum')) {
+              fallbackType = 'formula_range_check';
+              fallbackProps = { range: 'I4:I35', mustBeFormula: true, forbiddenConstants: true };
+            } else if (lowerR.includes('format') || lowerR.includes('style') || lowerR.includes('bold')) {
+              fallbackType = 'format_check';
+              fallbackProps = { range: 'B2:I3', bold: true };
+            } else if (lowerR.includes('text') || lowerR.includes('clean') || lowerR.includes('proper') || lowerR.includes('trim')) {
+              fallbackType = 'function_check';
+              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['PROPER', 'TRIM'] };
+            } else if (lowerR.includes('lookup') || lowerR.includes('xlookup') || lowerR.includes('vlookup')) {
+              fallbackType = 'function_check';
+              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['VLOOKUP', 'XLOOKUP', 'INDEX'] };
+            }
+
+            parsedJson.push({
+              criterion: rName,
+              type: fallbackType,
+              ...(targetSheet ? { sheet: targetSheet } : {}),
+              ...fallbackProps
+            });
+          }
+        }
+      }
+    }
 
     return res.json({
       success: true,
@@ -1325,31 +1900,25 @@ exports.generateRubric = async (req, res) => {
       return res.status(400).json({ success: false, message: "Instructions are required to generate a rubric." });
     }
 
-    let systemPrompt = `You are an expert technical curriculum designer. Your task is to generate a strict JSON evaluation rubric for an automated code grading system.
+    let systemPrompt = `You are the world's foremost expert technical curriculum designer and spreadsheet engineer. Your task is to generate a strict JSON evaluation rubric for an automated code and spreadsheet grading system.
     
-Based on the Assignment Title and Instructions provided by the user, you must output ONLY a raw JSON array of objects. DO NOT output any markdown blocks like \`\`\`json, just output the raw JSON string starting with [ and ending with ].
+Based on the Assignment Title and Instructions provided by the user, you must output ONLY a raw JSON array of objects. DO NOT output any markdown code blocks or explanations, just output the raw JSON string starting with [ and ending with ].
 
 CRITICAL RULES:
 1. The output MUST be a JSON array of objects.
 2. Each object must have exactly three keys: "name" (string), "description" (string), and "weight" (number).
 3. The sum of all "weight" values MUST equal exactly 100.
-4. Each "name" must be UNIQUE. Do not use the same name twice.
-5. Do not include any explanation.
-6. ASSIGNMENT COMPLEXITY ADAPTATION:
+4. If the user instructions include an existing rubric with a different total (e.g. 20 marks or 50 marks), you MUST proportionally scale each criterion's weight so the total equals exactly 100.
+5. Each "name" must be UNIQUE. Do not use the same name twice.
+6. Do not include any explanation.
+7. ASSIGNMENT COMPLEXITY ADAPTATION:
 Identify the complexity of the assignment based on the title and instructions:
-- **Simple / Introductory Class Exercise** (e.g., introductory topics, basic tags, simple scripts, small practice tasks):
-  - Generate 2-3 simple, highly focused criteria.
-  - ONLY assess features explicitly mentioned in the instructions.
-  - DO NOT include advanced/generic engineering constraints like ARIA/accessibility, responsive design, complex optimization, database index scaling, security/encryption, or robust error handling unless explicitly requested in the instructions. Keep criteria simple and direct.
-- **Standard Project / Mid-level Assignment** (e.g., building a complete component, a landing page, a standard CRUD feature):
-  - Generate 3-4 criteria.
-  - May include standard development practices (e.g., basic code structure, clean formatting, simple responsive layout if HTML/CSS).
-- **Advanced / Complex Assignment** (e.g., production-grade features, complex workflows, full applications):
-  - Generate 4-6 strict criteria.
-  - Include rigorous requirements like edge-case handling, security/auth, ARIA/accessibility, performance, and advanced architecture patterns.`;
+- Simple / Introductory Class Exercise: Generate 2-3 focused criteria.
+- Standard Project / Mid-level Assignment: Generate 3-5 distinct, balanced criteria.
+- Advanced / Capstone Assignment: Generate 5-7 comprehensive criteria.`;
 
     if (evaluatorType === 'react') {
-      systemPrompt += `\n7. For React assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For React assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "Components Render Correctly" (Use for UI rendering / layout)
 - "State Updates" (Use for React state management, hooks)
 - "Props Handling" (Use for props passing, data flow)
@@ -1358,7 +1927,7 @@ Identify the complexity of the assignment based on the title and instructions:
 - "Code Structure" (Use for clean code, standard practices)
 You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType === 'backend' || evaluatorType === 'AI') {
-      systemPrompt += `\n7. For Backend assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For Backend assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "API Endpoints" (Use for routing, endpoints, HTTP methods)
 - "Database Operations" (Use for Models, Schemas, Queries, CRUD)
 - "Middleware & Auth" (Use for error handling, JWT, authentication)
@@ -1366,7 +1935,7 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Code Structure" (Use for clean code, separation of concerns, MVC)
 You may choose 2-5 from this list based on the instructions and the complexity rules above, but YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
     } else if (evaluatorType?.toLowerCase() === 'fullstack') {
-      systemPrompt += `\n7. For Fullstack assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
+      systemPrompt += `\n8. For Fullstack assignments, the "name" field MUST be chosen strictly from the following exact predefined list:
 - "Frontend UI & Components" (Use for React rendering, responsive design, structure)
 - "Frontend State & Data Fetching" (Use for React state, hooks, fetch/axios)
 - "Backend API & Routing" (Use for Express routes, HTTP methods, CORS)
@@ -1374,15 +1943,33 @@ You may choose 2-5 from this list based on the instructions and the complexity r
 - "Fullstack Integration" (Use for end-to-end data flow between client and server)
 - "Code Quality & Structure" (Use for clean code, file structure, package.json across both environments)
 You must select 3-6 criteria from this list that cover both Frontend and Backend, based on the instructions and complexity rules above. YOU MUST NOT INVENT CUSTOM NAMES outside of this exact list.`;
+    } else if (evaluatorType?.toLowerCase() === 'excel') {
+      systemPrompt += `\n8. For Excel Spreadsheet assignments, generate clean, professional, and distinct rubric criteria reflecting the core skills and milestones in the instructions:
+- Generate 3 to 5 clear, descriptive criteria names tailored dynamically to the assignment.
+- Standard skill categories to draw from or adapt based on instructions:
+  - "Table Formatting & Professional Structure" (Bold headers, proper borders, currency $, percentages %, alignment)
+  - "Contact Name Cleaning with Text Functions" or "Data Cleaning & Text Manipulation" (PROPER, TRIM, CONCAT, TEXTSPLIT, casing)
+  - "Client & Ticker Separation" or "Data Splitting & Extraction" (Separating columns, delimiters, LEFT/MID/RIGHT)
+  - "Dynamic Profit Margin Calculation" or "Formulas & Dynamic Calculations" (SUM, AVERAGE, ratios, arithmetic, cell referencing)
+  - "Department Categorization & Completeness" or "Data Entry & Completeness" (No missing records, complete rows, categories)
+  - "Lookup & Reference Functions" (VLOOKUP, XLOOKUP, INDEX/MATCH, absolute $)
+  - "Logical & Conditional Calculations" (IF, IFS, AND, OR, IFERROR)
+  - "Pivot Tables & Data Summaries" (Native Pivot tables, data fields, aggregations)
+  - "Data Visualizations & Charts" (Column/Bar charts, line graphs, KPIs)
+- CRITICAL RULES FOR EXCEL RUBRICS:
+  - Use concise, elegant, professional criteria names (2-5 words).
+  - DO NOT include generic programming terms like "Code Quality" or "MVC Architecture" for spreadsheet assignments.
+  - Weights MUST sum to exactly 100 with clean, rounded numbers (e.g., 25, 25, 20, 15, 15 or 30, 30, 20, 20).
+  - Every criterion name must be clear so that automated test cases can bind to it with 100% precision.`;
     }
 
     systemPrompt += `
 
 Example output:
 [
-  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : 'Feature A'))}", "description": "Implements endpoints correctly.", "weight": 40 },
-  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : 'Feature B'))}", "description": "Implements logic correctly.", "weight": 40 },
-  { "name": "Code Quality & Structure", "description": "Clean and readable code.", "weight": 20 }
+  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Table Formatting & Professional Structure' : 'Feature A')))}", "description": "Meets formatting and layout standards.", "weight": 25 },
+  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Dynamic Calculations & Formulas' : 'Feature B')))}", "description": "Formulas compute dynamic values accurately.", "weight": 35 },
+  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Entry & Completeness' : 'Code Quality & Structure'}", "description": "Clean, populated, complete records.", "weight": 40 }
 ]`;
 
     const userPrompt = `Assignment Title: ${title || 'Untitled'}
@@ -1391,7 +1978,7 @@ Instructions:
 ${instructions}`;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "deepseek-v4-flash",
+      model: process.env.OPENAI_MODEL || "deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -1407,20 +1994,45 @@ ${instructions}`;
 
     const parsedJson = JSON.parse(rawJson);
 
+    // Deterministic Normalization Guard: Guarantee sum of weights is ALWAYS exactly 100
+    if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+      const currentTotal = parsedJson.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+      if (currentTotal > 0 && currentTotal !== 100) {
+        let runningSum = 0;
+        parsedJson.forEach((item, index) => {
+          if (index === parsedJson.length - 1) {
+            item.weight = Math.max(1, 100 - runningSum);
+          } else {
+            const scaled = Math.round((Number(item.weight) / currentTotal) * 100);
+            item.weight = Math.max(1, scaled);
+            runningSum += item.weight;
+          }
+        });
+      }
+    }
+
     return res.json({
       success: true,
       rubric: JSON.stringify(parsedJson, null, 2)
     });
   } catch (error) {
     console.error("AI Generation Error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error during generation" });
+    return serverError(res, error);
   }
 };
 
 exports.reEvaluateSubmission = async (req, res) => {
-  let { evaluationId, assignmentId, submissionIds, evaluatorType } = req.body;
-  if (!submissionIds || !Array.isArray(submissionIds) || submissionIds.length === 0 || !evaluatorType) {
-    return res.status(400).json({ success: false, message: 'an array of submissionIds, and evaluatorType are required' });
+  let { evaluationId, assignmentId, submissionIds, submissionId, evaluatorType } = req.body;
+
+  // Normalize single submissionId to submissionIds array
+  if (!submissionIds && submissionId) {
+    submissionIds = [submissionId];
+  } else if (typeof submissionIds === 'string') {
+    submissionIds = [submissionIds];
+  }
+
+  if (!submissionIds || !Array.isArray(submissionIds) || submissionIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'an array of submissionIds is required' });
   }
 
   const client = await pool.connect();
@@ -1434,10 +2046,10 @@ exports.reEvaluateSubmission = async (req, res) => {
     if (!evaluationId) {
       if (!assignmentId) throw new Error("Either evaluationId or assignmentId must be provided");
 
-      const isCollegeAssignmentRes = await client.query(`SELECT id FROM college_assignments WHERE id = $1`, [assignmentId]);
+      const isCollegeAssignmentRes = await client.query(`SELECT id FROM college_assignments WHERE id::text = $1::text`, [assignmentId]);
       isCollegeAssignment = isCollegeAssignmentRes.rows.length > 0;
 
-      const isProjectRes = await client.query(`SELECT id FROM projects WHERE id = $1`, [assignmentId]);
+      const isProjectRes = await client.query(`SELECT id FROM projects WHERE id::text = $1::text`, [assignmentId]);
       isProject = isProjectRes.rows.length > 0;
       
       const newEval = await client.query(
@@ -1459,17 +2071,17 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? `SELECT s.id as submission_id, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           WHERE s.id = ANY($1::uuid[])`
+           WHERE s.assignment_id::text = $2::text AND s.id::text = ANY($1::text[])`
         : isProject
         ? `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id = ANY($1::uuid[])`
+           WHERE s.project_id::text = $2::text AND s.id::text = ANY($1::text[])`
         : `SELECT s.id as submission_id, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           WHERE s.id = ANY($1::uuid[])`,
-        [submissionIds]
+           WHERE s.assignment_id::text = $2::text AND s.id::text = ANY($1::text[])`,
+        [submissionIds, assignmentId]
       );
       
       for (const s of initialSubmissionsRes.rows) {
@@ -1506,14 +2118,18 @@ exports.reEvaluateSubmission = async (req, res) => {
           prev.status_url, 
           prev.created_at
         FROM (
-          SELECT DISTINCT ON (COALESCE(r.student_id, r.submission_id)) r.*
+          SELECT DISTINCT ON (COALESCE(r.student_id::text, r.submission_id::text)) r.*
           FROM evaluation_results r
           JOIN evaluations e ON r.evaluation_id = e.id
           WHERE ${targetCol}::text = $2::text
             AND r.status IN ('completed', 'failed')
-            AND r.submission_id != ALL($3::uuid[])
-            AND r.student_id != ALL($4::uuid[])
-          ORDER BY COALESCE(r.student_id, r.submission_id), e.created_at DESC, r.created_at DESC
+            AND (r.submission_id IS NULL OR r.submission_id::text != ALL($3::text[]))
+            AND (r.student_id IS NULL OR r.student_id::text != ALL($4::text[]))
+            AND r.submission_id::text IN (
+              SELECT id::text FROM ${isCollegeAssignment ? 'college_assignment_submissions' : isProject ? 'project_submissions' : 'assignment_submissions'}
+              WHERE ${isCollegeAssignment ? 'assignment_id' : isProject ? 'project_id' : 'assignment_id'}::text = $2::text
+            )
+          ORDER BY COALESCE(r.student_id::text, r.submission_id::text), e.created_at DESC, r.created_at DESC
         ) prev
         ON CONFLICT (evaluation_id, submission_id) DO NOTHING
         RETURNING id`,
@@ -1529,7 +2145,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     } else {
       // Fetch the evaluation to get assignmentId or collegeAssignmentId or project_id
       const evalRes = await client.query(
-        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id = $1`,
+        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id::text = $1::text`,
         [evaluationId]
       );
 
@@ -1550,60 +2166,69 @@ exports.reEvaluateSubmission = async (req, res) => {
     // Fetch assignment or project for rubric/test_cases
     let assignmentRes;
     if (isCollegeAssignment) {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type FROM college_assignments WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'college' as type FROM college_assignments WHERE id::text = $1::text`, [assignmentId]);
     } else if (isProject) {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'project' as type FROM projects WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'project' as type FROM projects WHERE id::text = $1::text`, [assignmentId]);
     } else {
-      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'unit' as type FROM assignments WHERE id = $1`, [assignmentId]);
+      assignmentRes = await client.query(`SELECT id, title, evaluator_type, test_cases, rubric, 'unit' as type FROM assignments WHERE id::text = $1::text`, [assignmentId]);
     }
     const assignment = assignmentRes.rows[0];
     if (!assignment) throw new Error("Assignment or Project not found");
 
     // Fetch the specific submissions (support either submission_id or evaluation_results.id)
     const queryStr = isCollegeAssignment
-      ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
+      ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
          FROM college_assignment_submissions s
          JOIN users u ON s.student_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.student_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
+         WHERE s.assignment_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.student_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`
       : isProject
-      ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+      ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
          FROM project_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.user_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`
-      : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+         WHERE s.project_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`
+      : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
          FROM assignment_submissions s
          JOIN users u ON s.user_id = u.id
-         WHERE s.id = ANY($1)
-            OR s.id IN (SELECT submission_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)
-            OR s.user_id IN (SELECT student_id FROM evaluation_results WHERE id = ANY($1) AND evaluation_id = $2)`;
+         WHERE s.assignment_id::text = $3::text
+           AND (
+             s.id::text = ANY($1::text[])
+             OR s.id::text IN (SELECT submission_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+             OR s.user_id::text IN (SELECT student_id::text FROM evaluation_results WHERE id::text = ANY($1::text[]) AND evaluation_id::text = $2::text)
+           )`;
          
-    const submissionsRes = await client.query(queryStr, [submissionIds, evaluationId]);
+    const submissionsRes = await client.query(queryStr, [submissionIds, evaluationId, assignmentId]);
     const submissions = submissionsRes.rows;
 
     if (!submissions.length) {
       // Fallback: fetch any active submissions for this evaluation if IDs were slightly mismatched
       const fallbackQuery = isCollegeAssignment
-        ? `SELECT s.id as submission_id, s.submission_link, s.student_id as user_id, u.full_name as student_name
+        ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.student_id as user_id, u.full_name as student_name
            FROM college_assignment_submissions s
            JOIN users u ON s.student_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.student_id
-           WHERE er.evaluation_id = $1`
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.student_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.assignment_id::text = $2::text`
         : isProject
-        ? `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+        ? `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.user_id, u.full_name as student_name
            FROM project_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.user_id
-           WHERE er.evaluation_id = $1`
-        : `SELECT s.id as submission_id, s.submission_link, s.user_id, u.full_name as student_name
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.project_id::text = $2::text`
+        : `SELECT s.id as submission_id, s.submission_link, s.submission_file_url, s.submission_type, s.user_id, u.full_name as student_name
            FROM assignment_submissions s
            JOIN users u ON s.user_id = u.id
-           JOIN evaluation_results er ON er.submission_id = s.id OR er.student_id = s.user_id
-           WHERE er.evaluation_id = $1`;
-      const fallbackRes = await client.query(fallbackQuery, [evaluationId]);
+           JOIN evaluation_results er ON (er.submission_id::text = s.id::text OR er.student_id::text = s.user_id::text)
+           WHERE er.evaluation_id::text = $1::text AND s.assignment_id::text = $2::text`;
+      const fallbackRes = await client.query(fallbackQuery, [evaluationId, assignmentId]);
       if (fallbackRes.rows.length > 0) {
         submissions.push(...fallbackRes.rows);
       } else {
@@ -1611,18 +2236,39 @@ exports.reEvaluateSubmission = async (req, res) => {
       }
     }
 
-    const validSubmissions = submissions.filter((s) => isAllowedGitUrl(s.submission_link));
-    const invalidSubmissions = submissions.filter((s) => !isAllowedGitUrl(s.submission_link));
+    // Resolve effective evaluator type (falling back to assignment's configured type if defaulted to REACT)
+    const effectiveType = (!evaluatorType || evaluatorType === 'REACT')
+      ? (assignment.evaluator_type || evaluatorType || 'AI')
+      : evaluatorType;
+
+    const isExcelEvaluation = (effectiveType === 'EXCEL' || effectiveType === 'excel');
+
+    const validSubmissions = submissions.filter((s) =>
+      isExcelEvaluation
+        ? !!(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        : isAllowedGitUrl(s.submission_link)
+    );
+    const invalidSubmissions = submissions.filter((s) =>
+      isExcelEvaluation
+        ? !(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
+        : !isAllowedGitUrl(s.submission_link)
+    );
 
     if (invalidSubmissions.length > 0) {
       for (const invalid of invalidSubmissions) {
-        let reason = 'No repository URL provided by student.';
+        let reason = isExcelEvaluation
+          ? 'No spreadsheet URL or file provided by student.'
+          : 'No repository URL provided by student.';
         if (invalid.submission_link) {
           try {
             const h = new URL(invalid.submission_link).hostname;
-            reason = `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
+            reason = isExcelEvaluation
+              ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
+              : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
           } catch {
-            reason = 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
+            reason = isExcelEvaluation
+              ? 'Invalid spreadsheet URL format.'
+              : 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
           }
         }
         const failFeedback = JSON.stringify({
@@ -1646,22 +2292,31 @@ exports.reEvaluateSubmission = async (req, res) => {
     }
 
     // Now send to central evaluator
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     let jobIdsAndLinks = [];
 
-    if (evaluatorType === 'JS' || evaluatorType === 'VISUAL' || evaluatorType === 'javascript' || evaluatorType === 'visual' || evaluatorType === 'PYTHON' || evaluatorType === 'python') {
-        const payloadType = (evaluatorType === 'JS') ? 'javascript' : (evaluatorType === 'VISUAL' ? 'visual' : (evaluatorType === 'PYTHON' ? 'python' : evaluatorType));
+    if (effectiveType === 'JS' || effectiveType === 'VISUAL' || effectiveType === 'javascript' || effectiveType === 'visual' || effectiveType === 'PYTHON' || effectiveType === 'python') {
+        const payloadType = (effectiveType === 'JS') ? 'javascript' : (effectiveType === 'VISUAL' ? 'visual' : (effectiveType === 'PYTHON' ? 'python' : effectiveType));
         
-        let jsConfig = { testCases: assignment.test_cases };
-        if ((payloadType === 'javascript' || payloadType === 'python') && assignment.test_cases && typeof assignment.test_cases === 'object' && !Array.isArray(assignment.test_cases)) {
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
+
+        let jsConfig = { testCases: rawTestCases };
+        if ((payloadType === 'javascript' || payloadType === 'python') && rawTestCases && typeof rawTestCases === 'object' && !Array.isArray(rawTestCases)) {
            jsConfig = {
-             testCases: assignment.test_cases.testCases || [],
-             evaluationMode: assignment.test_cases.evaluationMode || 'function',
-             entryFunction: assignment.test_cases.entryFunction,
-             functions: assignment.test_cases.functions,
-             expectedLogs: assignment.test_cases.expectedLogs
+             testCases: rawTestCases.testCases || [],
+             evaluationMode: rawTestCases.evaluationMode || 'function',
+             entryFunction: rawTestCases.entryFunction,
+             functions: rawTestCases.functions,
+             expectedLogs: rawTestCases.expectedLogs
            };
         }
 
@@ -1676,6 +2331,9 @@ exports.reEvaluateSubmission = async (req, res) => {
           ...jsConfig,
           rubricText: assignment.rubric ? JSON.stringify(assignment.rubric) : 'Standard evaluation',
           expectedUrl: assignment.expected_url || 'https://example.com',
+          assignmentId: assignmentId,
+          skipCache: true,
+          reEvaluate: true,
         };
 
         const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
@@ -1691,9 +2349,15 @@ exports.reEvaluateSubmission = async (req, res) => {
             submissionId: validSubmissions[index].submission_id || validSubmissions[index].id,
           });
         });
-    } else {
-        const typeMap = { REACT: 'react', PYTHON: 'python', FULLSTACK: 'fullstack', AI: 'backend' };
-        const payloadType = typeMap[evaluatorType] || typeMap[evaluatorType.toUpperCase()] || 'backend';
+    } else if (effectiveType === 'EXCEL' || effectiveType === 'excel') {
+        let rawTestCases = assignment.test_cases;
+        while (typeof rawTestCases === 'string') {
+          try {
+            rawTestCases = JSON.parse(rawTestCases);
+          } catch (e) {
+            break;
+          }
+        }
 
         let rubricObj = assignment.rubric;
         if (typeof assignment.rubric === 'string') {
@@ -1711,6 +2375,66 @@ exports.reEvaluateSubmission = async (req, res) => {
           formattedRubric = rubricObj;
         } else {
           formattedRubric = { criteria: [{ name: 'Standard Grading', weight: 100 }] };
+        }
+
+        formattedRubric.criteria = (formattedRubric.criteria || []).map((c) => ({
+          name: typeof c === 'string' ? c : (c.name || c.title || c.criterion || 'Standard Grading'),
+          weight: typeof c === 'object' && Number(c.weight || c.marks || c.points || c.score) > 0 ? Number(c.weight || c.marks || c.points || c.score) : 10,
+          description: typeof c === 'object' ? (c.description || '') : ''
+        }));
+
+        for (const s of validSubmissions) {
+          const fileUrl = getSpreadsheetDownloadUrl(s);
+
+          const payload = {
+            type: 'excel',
+            submissionId: s.submission_id || s.id,
+            fileUrl: fileUrl,
+            rubric: formattedRubric,
+            testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || [])
+          };
+
+          const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
+            headers: { 'x-api-key': evaluatorApiKey },
+            timeout: 45000,
+          });
+
+          jobIdsAndLinks.push({
+            jobId: response.data.jobId || response.data.id,
+            statusUrl: response.data.statusUrl,
+            submissionId: s.submission_id || s.id,
+          });
+        }
+    } else {
+        const typeMap = { REACT: 'react', PYTHON: 'python', FULLSTACK: 'fullstack', AI: 'backend', BACKEND: 'backend' };
+        const payloadType = typeMap[effectiveType] || typeMap[effectiveType.toUpperCase()] || 'backend';
+
+        let rubricObj = assignment.rubric;
+        if (typeof assignment.rubric === 'string') {
+          try {
+            rubricObj = JSON.parse(assignment.rubric);
+          } catch (e) {
+            console.error('Failed to parse rubric:', e);
+          }
+        }
+
+        let formattedRubric;
+        if (rubricObj && Array.isArray(rubricObj)) {
+          formattedRubric = { criteria: rubricObj };
+        } else if (rubricObj && rubricObj.criteria && Array.isArray(rubricObj.criteria)) {
+          formattedRubric = rubricObj;
+        } else {
+          formattedRubric = { criteria: [{ name: 'Standard Grading', weight: 100 }] };
+        }
+
+        // Normalize criteria fields (central-evaluator requires string 'name' and positive numeric 'weight')
+        formattedRubric.criteria = (formattedRubric.criteria || []).map((c) => ({
+          name: typeof c === 'string' ? c : (c.name || c.title || c.criterion || 'Standard Grading'),
+          weight: typeof c === 'object' && Number(c.weight || c.marks || c.points || c.score) > 0 ? Number(c.weight || c.marks || c.points || c.score) : 10,
+          description: typeof c === 'object' ? (c.description || '') : ''
+        }));
+        if (!formattedRubric.criteria.length) {
+          formattedRubric.criteria = [{ name: 'Standard Grading', weight: 100 }];
         }
 
         let testCasesObj = assignment.test_cases;
@@ -1763,7 +2487,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     for (const j of jobIdsAndLinks) {
       await client.query(
         `UPDATE evaluation_results
-         SET job_id = $1, status = 'pending', status_url = $2, marks = 0, feedback = ''
+         SET job_id = $1, status = 'pending', status_url = $2
          WHERE evaluation_id = $3 AND submission_id = $4`,
         [j.jobId, j.statusUrl, evaluationId, j.submissionId],
       );
@@ -1784,12 +2508,25 @@ exports.reEvaluateSubmission = async (req, res) => {
     return res.json({ success: true, message: "Re-evaluation started" });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.log('Re-evaluate Error:', error.message);
-    if (error.response) {
-      console.log('Evaluator API Response Data:', error.response.data);
-      return res.status(500).json({ success: false, message: error.response.data.error || error.response.data.message || error.message });
-    }
-    return res.status(500).json({ success: false, message: error.message });
+    const evaluatorData = error.response?.data;
+    const evaluatorMsg = (evaluatorData && typeof evaluatorData === 'object')
+      ? (evaluatorData.error || evaluatorData.message)
+      : (typeof evaluatorData === 'string' && evaluatorData.trim() ? evaluatorData : null);
+    const errString = error?.toString && error.toString() !== '[object Object]' ? error.toString() : null;
+    const finalMsg = evaluatorMsg || error.message || error.code || error.detail || errString || 'Evaluator request failed';
+    console.error('Re-evaluate Full Error Dump:', {
+      finalMsg,
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack
+    });
+    return res.status(500).json({ 
+      success: false, 
+      message: finalMsg,
+      errorDetail: error.message || error.code || error.response?.status || 'Unknown'
+    });
   } finally {
     client.release();
   }

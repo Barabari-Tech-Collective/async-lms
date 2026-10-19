@@ -142,10 +142,10 @@ export const LessonItem = memo(function LessonItem({
           New
         </span>
       )}
-      {lesson.is_modified && (
+      {(lesson.is_modified || lesson.is_updated) && !lesson.is_new && (
         <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
           <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
-          Edited
+          Updated
         </span>
       )}
       {canEdit && (
@@ -306,6 +306,12 @@ export function TopicItem({
             <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
               <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
               New Unit
+            </span>
+          )}
+          {(topic.is_modified || topic.is_updated) && !topic.is_new && (
+            <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+              <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+              Updated Unit
             </span>
           )}
           {canEdit && (
@@ -676,6 +682,12 @@ export function ModuleItem({
           <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 shadow-2xs animate-pulse'>
             <span className='w-1.5 h-1.5 rounded-full bg-emerald-500' />
             New Topic
+          </span>
+        )}
+        {(mod.is_modified || mod.is_updated) && !mod.is_new && (
+          <span className='inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0 shadow-2xs'>
+            <span className='w-1.5 h-1.5 rounded-full bg-amber-500' />
+            Updated Topic
           </span>
         )}
         {canEdit && (

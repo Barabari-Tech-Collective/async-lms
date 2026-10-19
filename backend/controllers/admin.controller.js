@@ -2059,6 +2059,29 @@ exports.createAssignment = async (req, res) => {
       });
     }
 
+    if (!evaluator_type || !String(evaluator_type).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Evaluator type is required',
+      });
+    }
+
+    if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rubric is required and cannot be empty',
+      });
+    }
+
+    const upperEvalType = String(evaluator_type || '').toUpperCase();
+    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
+    if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Test cases are required for Excel, JavaScript, and Python assignments',
+      });
+    }
+
     const query = `
       INSERT INTO assignments (unit_id, title, instructions, max_score, evaluator_type, test_cases, rubric, allowed_submission_types)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -2315,6 +2338,29 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Topic ID and title are required',
+      });
+    }
+
+    if (!evaluator_type || !String(evaluator_type).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Evaluator type is required',
+      });
+    }
+
+    if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rubric is required and cannot be empty',
+      });
+    }
+
+    const upperEvalType = String(evaluator_type || '').toUpperCase();
+    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
+    if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Test cases are required for Excel, JavaScript, and Python assignments',
       });
     }
 

@@ -8,9 +8,8 @@ import {
   Award,
   Terminal,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
+import { FormattedContent } from '@/utils/contentFormat';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -220,19 +219,11 @@ export const AdminAssignmentPreviewModal: React.FC<AdminAssignmentPreviewModalPr
                   </p>
                 </div>
                 <div className='px-4 py-5 sm:px-8 sm:py-6'>
-                  {data.instructions && data.instructions.trim().length > 0 ? (
-                    <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base leading-relaxed'>
-                      {/<[a-z][\s\S]*>/i.test(data.instructions) ? (
-                        <div dangerouslySetInnerHTML={{ __html: data.instructions }} />
-                      ) : (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {data.instructions}
-                        </ReactMarkdown>
-                      )}
-                    </div>
-                  ) : (
-                    <p className='italic text-slate-400 text-sm'>No instructions provided yet.</p>
-                  )}
+                  <FormattedContent
+                    content={data.instructions}
+                    className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base leading-relaxed'
+                    fallback={<p className='italic text-slate-400 text-sm'>No instructions provided yet.</p>}
+                  />
                 </div>
               </Card>
 

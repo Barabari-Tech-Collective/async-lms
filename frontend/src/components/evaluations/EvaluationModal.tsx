@@ -138,6 +138,7 @@ const EvaluationModal = ({ open, onClose, assignmentName, assignmentId, onComple
                 <option value="AI">AI / Backend Evaluator</option>
                 <option value="FULLSTACK">Fullstack Evaluator</option>
                 <option value="PYTHON">Python Evaluator</option>
+                <option value="EXCEL">Excel Spreadsheet Evaluator</option>
               </select>
             </div>
 
