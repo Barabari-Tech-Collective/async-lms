@@ -582,22 +582,25 @@ export default function CreateAssignment() {
     if (!topicId) missing.push('Subject');
     if (!deadline) missing.push('Deadline');
     if (allowedSubmissionTypes.length === 0) missing.push('At least one Submission Method');
-    if (!aiEvaluationType || !aiEvaluationType.trim()) missing.push('Evaluator Type');
 
-    // Rubric validation
-    if (rubricViewMode === 'builder') {
-      if (rubrics.length === 0 || rubrics.some((r) => !r.criteria.trim())) {
-        missing.push('Rubrics (at least 1 criterion name required)');
-      }
-    } else {
-      if (!rubricJson.trim()) {
-        missing.push('Rubrics JSON');
+    const hasEvaluator = Boolean(aiEvaluationType && aiEvaluationType.trim() && aiEvaluationType !== 'none');
+
+    // Rubric validation (Only required when an evaluator is selected)
+    if (hasEvaluator) {
+      if (rubricViewMode === 'builder') {
+        if (rubrics.length === 0 || rubrics.some((r) => !r.criteria.trim())) {
+          missing.push('Rubrics (at least 1 criterion name required)');
+        }
+      } else {
+        if (!rubricJson.trim()) {
+          missing.push('Rubrics JSON');
+        }
       }
     }
 
-    // Test cases validation (Required for Excel, JavaScript and Python)
+    // Test cases validation (Required for Excel, JavaScript and Python when evaluator selected)
     const upperAiType = (aiEvaluationType || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON') || upperAiType.includes('EXCEL');
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON') || upperAiType.includes('EXCEL'));
     if (isTestCasesRequired) {
       if (testCaseViewMode === 'builder') {
         if (testCases.length === 0) {
@@ -671,7 +674,7 @@ export default function CreateAssignment() {
           instruction_file_name: instructionName || null,
           test_cases: finalTestCases,
           rubric: finalRubric,
-          evaluator_type: aiEvaluationType || null,
+          evaluator_type: (aiEvaluationType && aiEvaluationType !== 'none') ? aiEvaluationType : null,
           assignment_description: assignmentDescription.trim() || null,
           allowed_submission_types: allowedSubmissionTypes,
         });
@@ -688,7 +691,7 @@ export default function CreateAssignment() {
           instruction_file_name: instructionName || null,
           test_cases: finalTestCases,
           rubric: finalRubric,
-          evaluator_type: aiEvaluationType || null,
+          evaluator_type: (aiEvaluationType && aiEvaluationType !== 'none') ? aiEvaluationType : null,
           assignment_description: assignmentDescription.trim() || null,
           allowed_submission_types: allowedSubmissionTypes,
         });
@@ -1024,6 +1027,7 @@ export default function CreateAssignment() {
                     <SelectValue placeholder='Select' />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value='none'>None (Manual Grading)</SelectItem>
                     {evaluators?.map((ev) => (
                       <SelectItem key={ev.id} value={String(ev.id)}>
                         {ev.name}

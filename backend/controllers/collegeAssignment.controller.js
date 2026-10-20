@@ -439,22 +439,17 @@ exports.createAssignment = async (req, res) => {
       });
   }
 
-  if (!evaluator_type || !String(evaluator_type).trim()) {
-    return res.status(400).json({
-      success: false,
-      message: 'evaluator_type is required',
-    });
-  }
-
-  if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
-    return res.status(400).json({
-      success: false,
-      message: 'rubric is required and cannot be empty',
-    });
-  }
-
   const upperEvalType = String(evaluator_type || '').toUpperCase();
-  const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
+  const hasEvaluator = Boolean(evaluator_type && String(evaluator_type).trim());
+
+  if (hasEvaluator && (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim()))) {
+    return res.status(400).json({
+      success: false,
+      message: 'rubric is required when an evaluator is selected',
+    });
+  }
+
+  const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
   if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
     return res.status(400).json({
       success: false,
@@ -665,7 +660,7 @@ exports.updateAssignment = async (req, res) => {
            instruction_file_name = COALESCE($7, instruction_file_name),
            test_cases            = COALESCE($8, test_cases),
            rubric                = COALESCE($9, rubric),
-           evaluator_type        = COALESCE($10, evaluator_type),
+           evaluator_type        = CASE WHEN $14::boolean THEN $10 ELSE evaluator_type END,
            assignment_description= COALESCE($11, assignment_description),
            allowed_submission_types = COALESCE($12, allowed_submission_types),
            updated_at  = NOW()
@@ -681,10 +676,11 @@ exports.updateAssignment = async (req, res) => {
         req.body.instruction_file_name || null,
         test_cases !== undefined ? formatJsonField(test_cases, '[]') : null,
         rubric !== undefined ? formatJsonField(rubric, null) : null,
-        evaluator_type || null,
+        (evaluator_type && evaluator_type !== 'none') ? evaluator_type.trim() : null,
         assignment_description || null,
         allowed_submission_types ? JSON.stringify(allowed_submission_types) : null,
         id,
+        evaluator_type !== undefined,
       ],
     );
     logAction({
