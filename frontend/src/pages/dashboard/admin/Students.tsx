@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Search, Filter, Eye, MoreHorizontal } from 'lucide-react';
 import StudentProfileDialog from '@/components/common/StudentProfileDialog';
+import EnrollmentRequestsPanel from '@/components/common/EnrollmentRequestsPanel';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -33,12 +34,20 @@ const Students = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'students' | 'requests'>('students');
+  const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
   useEffect(() => {
     const fetchStudents = async () => {
       try {
-        const response = await apiClient.get<Student[]>('/admin/all-students');
+        const [response, requestsRes] = await Promise.all([
+          apiClient.get<Student[]>('/admin/all-students'),
+          apiClient
+            .get<{ success: boolean; total: number }>('/admin/enrollment-requests?status=pending&limit=1')
+            .catch(() => ({ data: { total: 0 } })),
+        ]);
         setStudents(response.data);
+        setPendingRequestsCount(requestsRes.data?.total ?? 0);
       } catch {
         // students remains empty — empty state is shown below
       } finally {
@@ -93,6 +102,40 @@ const Students = () => {
 
   return (
     <div className='space-y-4 sm:space-y-6 min-w-0 animate-in fade-in duration-300'>
+      {/* Top Header & Tab Switcher */}
+      <div className='flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3'>
+        <div className='flex overflow-x-auto no-scrollbar gap-1 rounded-xl bg-slate-100 p-1 w-full sm:w-fit'>
+          <button
+            onClick={() => setActiveTab('students')}
+            className={`px-3.5 sm:px-4 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap flex-1 sm:flex-initial text-center ${
+              activeTab === 'students' ? 'bg-white shadow-xs text-slate-900' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            All Students
+          </button>
+          <button
+            onClick={() => setActiveTab('requests')}
+            className={`px-3.5 sm:px-4 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 sm:flex-initial ${
+              activeTab === 'requests' ? 'bg-white shadow-xs text-slate-900' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <span>Course Requests</span>
+            {pendingRequestsCount > 0 && (
+              <span className='bg-[#333D7C] text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none'>
+                {pendingRequestsCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'requests' ? (
+        <EnrollmentRequestsPanel
+          apiPrefix='admin'
+          onRequestCountChange={setPendingRequestsCount}
+        />
+      ) : (
+        <>
       {/* Filters Header */}
       <div className='flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3'>
         <div className='relative w-full sm:w-96'>
@@ -213,6 +256,8 @@ const Students = () => {
           </div>
         )}
       </Card>
+      </>
+      )}
 
       <StudentProfileDialog
         studentId={profileId}

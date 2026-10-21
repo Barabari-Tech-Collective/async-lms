@@ -3272,81 +3272,95 @@ exports.submitCapstone = async (req, res) => {
 
 // ── Enroll in Subject ──────────────────────────────────────────────────────────
 
+const courseEnrollmentService = require('../services/courseEnrollmentService');
+
+/**
+ * Student requests enrollment in an additional subject
+ * POST /api/v1/students/enrollment-requests
+ */
+exports.requestEnrollment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { subject_id } = req.body;
+
+    if (!subject_id) {
+      return res.status(400).json({ success: false, message: 'subject_id is required' });
+    }
+
+    const request = await courseEnrollmentService.requestEnrollment({
+      userId,
+      subjectId: subject_id,
+    });
+
+    logAction({
+      req,
+      action: 'REQUEST_ENROLLMENT',
+      entityType: 'enrollment_requests',
+      entityId: request.id,
+      details: { subject_id },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Enrollment request submitted. Waiting for instructor approval.',
+      data: request,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message });
+    }
+    serverError(res, err, 'student:requestEnrollment');
+  }
+};
+
+/**
+ * Get current student's enrollment requests
+ * GET /api/v1/students/enrollment-requests
+ */
+exports.getStudentEnrollmentRequests = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      `SELECT er.id, er.subject_id, er.status, er.rejection_reason, er.created_at, er.reviewed_at,
+              s.name AS subject_name, s.slug AS subject_slug
+       FROM enrollment_requests er
+       JOIN subjects s ON er.subject_id = s.id
+       WHERE er.user_id = $1
+       ORDER BY er.created_at DESC`,
+      [userId],
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    serverError(res, err, 'student:getStudentEnrollmentRequests');
+  }
+};
+
+/**
+ * Legacy direct enrollment route: Now safely routes through governed request workflow
+ * POST /api/v1/students/subjects/:subjectId/enroll
+ */
 exports.enrollInSubject = async (req, res) => {
   const userId = req.user.id;
   const { subjectId } = req.params;
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    const request = await courseEnrollmentService.requestEnrollment({
+      userId,
+      subjectId,
+    });
 
-    // Verify subject exists and is published
-    const subjectCheck = await client.query(
-      'SELECT id FROM subjects WHERE id = $1 AND is_published = true AND is_deleted = false',
-      [subjectId],
-    );
-    if (subjectCheck.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({
-        success: false,
-        message: 'Subject not found or not available',
-      });
+    res.status(200).json({
+      success: true,
+      pendingApproval: true,
+      message: 'Enrollment request submitted for instructor approval.',
+      data: request,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message });
     }
-
-    // Insert enrollment (idempotent)
-    await client.query(
-      `INSERT INTO user_subjects (user_id, subject_id, started_at)
-       VALUES ($1, $2, CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id, subject_id) DO NOTHING`,
-      [userId, subjectId],
-    );
-
-    // Seed subtopic progress: unlocked by default (peer-progression locking
-    // not enforced yet); only locked if an admin explicitly locked it.
-    await client.query(
-      `WITH new_student_profile AS (
-        SELECT college_id, year FROM student_profiles WHERE user_id = $1
-      ),
-      subject_subtopics AS (
-        SELECT
-          st.id AS subtopic_id,
-          DENSE_RANK() OVER (
-            PARTITION BY t.subject_id
-            ORDER BY t.order_index, u.order_index
-          ) AS unit_rn
-        FROM topics t
-        INNER JOIN units u ON u.topic_id = t.id
-        INNER JOIN subtopics st ON st.unit_id = u.id
-        WHERE t.subject_id = $2
-      ),
-      admin_locks AS (
-        SELECT cal.subtopic_id, cal.is_locked
-        FROM cohort_admin_locks cal
-        CROSS JOIN new_student_profile nsp
-        WHERE cal.college_id = nsp.college_id
-          AND cal.year = nsp.year
-      )
-      INSERT INTO user_subtopic_progress (user_id, subtopic_id, is_unlocked)
-      SELECT $1, ss.subtopic_id,
-        CASE
-          WHEN al.is_locked = true THEN false   -- admin explicitly locked
-          ELSE true                             -- unlocked by default; locking mechanism TBD
-        END
-      FROM subject_subtopics ss
-      LEFT JOIN admin_locks al ON al.subtopic_id = ss.subtopic_id
-      ON CONFLICT (user_id, subtopic_id)
-        DO UPDATE SET is_unlocked = (user_subtopic_progress.is_unlocked OR EXCLUDED.is_unlocked)`,
-      [userId, subjectId],
-    );
-
-    await client.query('COMMIT');
-    res.json({ success: true, message: 'Enrolled successfully' });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error enrolling in subject:', error);
-    serverError(res, error);
-  } finally {
-    client.release();
+    serverError(res, err, 'student:enrollInSubject');
   }
 };
 

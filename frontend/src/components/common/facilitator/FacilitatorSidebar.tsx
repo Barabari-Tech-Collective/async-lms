@@ -6,6 +6,7 @@ import {
   CheckSquare,
   BarChart2,
   Sparkles,
+  Inbox,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,7 @@ import Logo from '../Logo';
 const menuItems = [
   { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard/facilitator' },
   { name: 'Students', icon: Users, path: '/dashboard/facilitator/students' },
+  { name: 'Course Requests', icon: Inbox, path: '/dashboard/facilitator/requests' },
   {
     name: 'Assignments',
     icon: ClipboardList,
@@ -89,7 +91,10 @@ export default function FacilitatorSidebar({
       </div>
 
       {/* Nav Items */}
-      <nav className='flex-1 py-4 px-3 space-y-1.5 overflow-y-auto custom-scrollbar'>
+      <nav
+        className='flex-1 py-4 px-3 space-y-1.5 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden'
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
         {menuItems.map((item) => (
           <NavLink
             key={item.name}

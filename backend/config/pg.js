@@ -773,6 +773,31 @@ pool.on('error', (err, client) => {
       ON CONFLICT DO NOTHING;
     `).catch((err) => console.warn('[Migration] Course update notification sync notice:', err.message));
 
+    // ── Student Course Enrollment Requests Table & Indexes ──────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enrollment_requests (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject_id       UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        status           VARCHAR(20) NOT NULL DEFAULT 'pending' 
+                         CHECK (status IN ('pending', 'approved', 'rejected')),
+        rejection_reason TEXT,
+        reviewed_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at      TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_enrollment_request 
+        ON enrollment_requests(user_id, subject_id) 
+        WHERE status = 'pending';
+
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_status ON enrollment_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_user ON enrollment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_subject ON enrollment_requests(subject_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_created_at ON enrollment_requests(created_at DESC);
+    `).catch((err) => console.warn('[Migration] enrollment_requests setup notice:', err.message));
+
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {

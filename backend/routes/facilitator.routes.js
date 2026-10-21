@@ -21,6 +21,13 @@ router.get('/students/:id/submissions', facilitatorController.getFacilitatorStud
 router.patch('/students/:id/verify', verifyStudent);
 router.patch('/students/:id', editStudent);
 
+// Student Course Enrollment Management
+router.get('/students/:studentId/available-courses', facilitatorController.getAvailableCoursesForStudent);
+router.post('/students/:studentId/courses', facilitatorController.addStudentCourse);
+router.delete('/students/:studentId/courses/:subjectId', facilitatorController.removeStudentCourse);
+router.get('/enrollment-requests', facilitatorController.getEnrollmentRequests);
+router.patch('/enrollment-requests/:requestId', facilitatorController.reviewEnrollmentRequest);
+
 // Analytics
 router.get('/analytics/subjects', facilitatorController.getAnalyticsSubjects);
 router.get('/analytics/topics', facilitatorController.getAnalyticsTopics);

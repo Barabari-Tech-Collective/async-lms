@@ -51,6 +51,8 @@ const {
   submitCapstone,
   getStudentScorecard,
   enrollInSubject,
+  requestEnrollment,
+  getStudentEnrollmentRequests,
   getStudentAnalytics,
   getStudentModuleAnalytics,
   getActiveMilestoneDeadlines,
@@ -162,6 +164,18 @@ router.post(
 );
 
 // ===== ENROLLMENT =====
+router.post(
+  '/enrollment-requests',
+  verifyToken,
+  isStudent,
+  requestEnrollment,
+);
+router.get(
+  '/enrollment-requests',
+  verifyToken,
+  isStudent,
+  getStudentEnrollmentRequests,
+);
 router.post(
   '/subjects/:subjectId/enroll',
   verifyToken,

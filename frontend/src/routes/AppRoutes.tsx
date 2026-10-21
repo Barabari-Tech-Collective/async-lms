@@ -114,6 +114,9 @@ const FacilitatorReports = lazyWithRetry(
 const FacilitatorSettings = lazyWithRetry(
   () => import('@/pages/dashboard/facilitator/FacilitatorSettings'),
 );
+const FacilitatorRequests = lazyWithRetry(
+  () => import('@/pages/dashboard/facilitator/FacilitatorRequests'),
+);
 
 // Admin Dashboard
 const AdminDashboardLayout = lazyWithRetry(
@@ -145,6 +148,9 @@ const Evaluations = lazyWithRetry(
 );
 const AdminProfile = lazyWithRetry(
   () => import('@/pages/dashboard/admin/AdminProfile'),
+);
+const AdminRequests = lazyWithRetry(
+  () => import('@/pages/dashboard/admin/AdminRequests'),
 );
 
 // Curriculum Developer Dashboard
@@ -275,6 +281,7 @@ const router = createBrowserRouter([
               { path: 'analytics', element: <FacilitatorAnalytics /> },
               { path: 'student-growth', element: <FacilitatorStudentGrowth /> },
               { path: 'reports', element: <FacilitatorReports /> },
+              { path: 'requests', element: <FacilitatorRequests /> },
               { path: 'settings', element: <FacilitatorSettings /> },
               { path: 'ai-curriculum', element: <AiCurriculumList /> },
               { path: 'ai-curriculum/new', element: <AiCurriculumBuilder /> },
@@ -299,6 +306,7 @@ const router = createBrowserRouter([
               { path: 'learning-flow', element: <LearningFlow /> },
               { path: 'lock-control', element: <LockControl /> },
               { path: 'users', element: <Students /> },
+              { path: 'requests', element: <AdminRequests /> },
               { path: 'analytics', element: <Analytics /> },
               { path: 'settings', element: <AdminSettings /> },
               {
