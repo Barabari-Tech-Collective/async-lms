@@ -476,13 +476,17 @@ async function reviewEnrollmentRequest({
         ? `Your request to enroll in ${reqItem.subject_name} was approved! You can now start learning.`
         : `Your request to enroll in ${reqItem.subject_name} was not approved.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`;
 
-    await notify({
-      userId: reqItem.user_id,
-      type: status === 'approved' ? 'achievement' : 'general',
-      title: notifTitle,
-      body: notifBody,
-      link: status === 'approved' ? `/dashboard/student/courses/${reqItem.subject_id}` : '/dashboard/student',
-    });
+    try {
+      await notify({
+        userId: reqItem.user_id,
+        type: status === 'approved' ? 'achievement' : 'general',
+        title: notifTitle,
+        body: notifBody,
+        link: status === 'approved' ? `/dashboard/student/courses/${reqItem.subject_id}` : '/dashboard/student',
+      });
+    } catch (notifErr) {
+      console.warn('[reviewEnrollmentRequest] Notification dispatch notice:', notifErr.message);
+    }
 
     return updateRes.rows[0];
   } catch (err) {
