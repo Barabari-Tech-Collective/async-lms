@@ -3999,7 +3999,7 @@ exports.getStudentProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [userRes, statsRes, subjectsRes] = await Promise.all([
+    const [userRes, statsRes, subjectsRes, pendingRequestsRes] = await Promise.all([
       pool.query(
         `SELECT u.id, u.full_name, u.email, u.is_verified, u.created_at,
                 sp.degree, sp.year AS batch,

@@ -2455,6 +2455,8 @@ exports.reEvaluateSubmission = async (req, res) => {
             submissionId: s.submission_id || s.id,
             repoUrl: s.submission_link,
             rubric: formattedRubric,
+            skipCache: true,
+            reEvaluate: true,
           };
           
           const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {

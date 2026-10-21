@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Search, Filter, Eye, MoreHorizontal } from 'lucide-react';
 import StudentProfileDialog from '@/components/common/StudentProfileDialog';
 import EnrollmentRequestsPanel from '@/components/common/EnrollmentRequestsPanel';
@@ -37,25 +37,26 @@ const Students = () => {
   const [activeTab, setActiveTab] = useState<'students' | 'requests'>('students');
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
-  useEffect(() => {
-    const fetchStudents = async () => {
-      try {
-        const [response, requestsRes] = await Promise.all([
-          apiClient.get<Student[]>('/admin/all-students'),
-          apiClient
-            .get<{ success: boolean; total: number }>('/admin/enrollment-requests?status=pending&limit=1')
-            .catch(() => ({ data: { total: 0 } })),
-        ]);
-        setStudents(response.data);
-        setPendingRequestsCount(requestsRes.data?.total ?? 0);
-      } catch {
-        // students remains empty — empty state is shown below
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchStudents();
+  const fetchStudents = useCallback(async () => {
+    try {
+      const [response, requestsRes] = await Promise.all([
+        apiClient.get<Student[]>('/admin/all-students'),
+        apiClient
+          .get<{ success: boolean; total: number }>('/admin/enrollment-requests?status=pending&limit=1')
+          .catch(() => ({ data: { total: 0 } })),
+      ]);
+      setStudents(response.data);
+      setPendingRequestsCount(requestsRes.data?.total ?? 0);
+    } catch {
+      // students remains empty — empty state is shown below
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
 
   // Explicitly type the filter callback
   const filteredStudents = students.filter(
@@ -262,7 +263,10 @@ const Students = () => {
       <StudentProfileDialog
         studentId={profileId}
         apiPrefix='admin'
-        onClose={() => setProfileId(null)}
+        onClose={() => {
+          setProfileId(null);
+          fetchStudents();
+        }}
       />
     </div>
   );
