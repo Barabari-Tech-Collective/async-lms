@@ -12,7 +12,7 @@ services:
       # These URLs assume the service names defined in this file. 
       # Render will automatically give them .onrender.com subdomains.
       - key: FRONTEND_URL
-        value: https://async-lms-frontend.onrender.com
+        value: https://async-lms-1.onrender.com
       - key: GOOGLE_CALLBACK_URL
         value: https://async-lms-backend.onrender.com/api/v1/auth/google/callback
       
@@ -35,6 +35,8 @@ services:
         sync: false
       - key: PGPORT
         sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: AWS_REGION
         sync: false
       - key: AWS_ACCESS_KEY_ID
@@ -42,6 +44,10 @@ services:
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_S3_PUBLIC_BUCKET
+        sync: false
+      - key: AWS_S3_KEY_PREFIX
         sync: false
       - key: S3_WORKSPACE_BUCKET
         sync: false
@@ -53,7 +59,27 @@ services:
         sync: false
       - key: CHATGPT_API_KEY
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
       - key: YOUTUBE_API_KEY
+        sync: false
+      - key: CENTRAL_EVALUATOR_URL
+        sync: false
+      - key: CENTRAL_EVALUATOR_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
         sync: false
 
   # ---------------------------------------------

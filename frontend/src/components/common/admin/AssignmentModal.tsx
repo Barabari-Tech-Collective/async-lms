@@ -222,29 +222,30 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       toast.error('Max score must be greater than 0');
       return;
     }
-    if (!evaluatorType || !evaluatorType.trim()) {
-      toast.error('Evaluator Type is required. Please select an evaluator.');
-      return;
-    }
-    if (!rubric.trim()) {
-      toast.error('Rubric is required. Please add or click "Generate Rubric".');
-      return;
-    }
-    try {
-      const parsedRubric = JSON.parse(rubric);
-      const list = Array.isArray(parsedRubric) ? parsedRubric : (parsedRubric.criteria || parsedRubric.rubric);
-      if (!Array.isArray(list) || list.length === 0) {
-        toast.error('Rubric must contain at least one criterion');
+    if (evaluatorType && evaluatorType.trim()) {
+      if (!rubric.trim()) {
+        toast.error('Rubric is required when an evaluator is selected. Please add or click "Generate Rubric".');
         return;
       }
-    } catch (e) {
-      toast.error('Rubric must be valid JSON');
-      return;
+    }
+
+    if (rubric.trim()) {
+      try {
+        const parsedRubric = JSON.parse(rubric);
+        const list = Array.isArray(parsedRubric) ? parsedRubric : (parsedRubric.criteria || parsedRubric.rubric);
+        if (!Array.isArray(list) || list.length === 0) {
+          toast.error('Rubric must contain at least one criterion');
+          return;
+        }
+      } catch (e) {
+        toast.error('Rubric must be valid JSON');
+        return;
+      }
     }
 
     let finalTestCases = testCases.trim();
     const upperType = (evaluatorType || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL');
+    const isTestCasesRequired = Boolean(evaluatorType && evaluatorType.trim()) && (['JS', 'PYTHON', 'EXCEL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL'));
 
     if (isTestCasesRequired && !finalTestCases) {
       toast.error('Test Cases / Spec are required for Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
@@ -541,14 +542,14 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
           <div>
             <div className='mb-2 flex items-center justify-between'>
               <label className='text-sm font-medium text-slate-700'>
-                Rubric (JSON) <span className='text-red-500'>*</span>
+                Rubric (JSON) {evaluatorType ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional without evaluator)</span>}
               </label>
               <Button
                 type='button'
                 variant='outline'
                 size='sm'
                 onClick={handleGenerateRubric}
-                disabled={generatingRubric || !evaluatorType}
+                disabled={generatingRubric || !instructions.trim()}
                 className='h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
               >
                 {generatingRubric ? (

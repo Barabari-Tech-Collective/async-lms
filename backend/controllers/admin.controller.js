@@ -2059,22 +2059,17 @@ exports.createAssignment = async (req, res) => {
       });
     }
 
-    if (!evaluator_type || !String(evaluator_type).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Evaluator type is required',
-      });
-    }
-
-    if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Rubric is required and cannot be empty',
-      });
-    }
-
     const upperEvalType = String(evaluator_type || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
+    const hasEvaluator = Boolean(evaluator_type && String(evaluator_type).trim());
+
+    if (hasEvaluator && (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rubric is required when an evaluator is selected',
+      });
+    }
+
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
     if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
       return res.status(400).json({
         success: false,
@@ -2177,7 +2172,7 @@ exports.updateAssignment = async (req, res) => {
     }
     if (evaluator_type !== undefined) {
       updates.push(`evaluator_type = $${paramCount++}`);
-      values.push(evaluator_type);
+      values.push(evaluator_type && evaluator_type !== 'none' ? String(evaluator_type).trim() : null);
     }
     if (allowed_submission_types !== undefined) {
       let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
@@ -2341,22 +2336,17 @@ exports.createProject = async (req, res) => {
       });
     }
 
-    if (!evaluator_type || !String(evaluator_type).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Evaluator type is required',
-      });
-    }
-
-    if (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Rubric is required and cannot be empty',
-      });
-    }
-
     const upperEvalType = String(evaluator_type || '').toUpperCase();
-    const isTestCasesRequired = ['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL');
+    const hasEvaluator = Boolean(evaluator_type && String(evaluator_type).trim());
+
+    if (hasEvaluator && (!rubric || (Array.isArray(rubric) && rubric.length === 0) || (typeof rubric === 'string' && !rubric.trim()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rubric is required when an evaluator is selected',
+      });
+    }
+
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
     if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
       return res.status(400).json({
         success: false,
@@ -2470,7 +2460,7 @@ exports.updateProject = async (req, res) => {
     }
     if (evaluator_type !== undefined) {
       updates.push(`evaluator_type = $${paramCount++}`);
-      values.push(evaluator_type || null);
+      values.push(evaluator_type && evaluator_type !== 'none' ? String(evaluator_type).trim() : null);
     }
     if (test_cases !== undefined) {
       let testCasesObj = test_cases;
