@@ -20,6 +20,13 @@ module.exports = {
         MAX_WORKSPACES: 30,
         ORCHESTRATOR_URL: 'http://localhost:3001'
       },
+    },
+    {
+      name: 'meet-worker',
+      script: 'meet-worker.js',
+      env: {
+        NODE_ENV: 'development',
+      },
     }
   ],
 };
