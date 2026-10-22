@@ -437,10 +437,10 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
                           Locked
                         </span>
                       )
-                    ) : item.output ? (
+                    ) : (item.output !== undefined || item.expected !== undefined) ? (
                       isStaff ? (
                         <code className='bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono text-xs font-semibold'>
-                          Expected: {typeof item.output === 'object' ? JSON.stringify(item.output) : String(item.output)}
+                          Expected: {typeof (item.expected ?? item.output) === 'object' ? JSON.stringify(item.expected ?? item.output) : String(item.expected ?? item.output)}
                         </code>
                       ) : (
                         <span className='inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200'>

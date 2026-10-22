@@ -1,10 +1,12 @@
 import { Button } from '@/components/ui/button';
-import { Save, X, Wand2, Loader2, Eye, Check } from 'lucide-react';
+import { Save, X, Eye, Check } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import toast from 'react-hot-toast';
 import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
+import { RubricVisualEditor } from '@/components/common/assignment/RubricVisualEditor';
+import { TestCasesVisualEditor } from '@/components/common/assignment/TestCasesVisualEditor';
 import type { SubmissionType } from '@/utils/types';
 import {
   detectEditorType,
@@ -298,7 +300,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs'>
-      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-2xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden'>
+      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-3xl lg:max-w-4xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden transition-all'>
         <div className='flex items-center justify-between p-4 sm:p-6 pb-3 sm:pb-4 border-b border-slate-100'>
           <div>
             <h3 className='text-lg font-bold text-slate-900'>
@@ -539,69 +541,26 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
           </div>
 
           {/* 1. Evaluation Rubric First */}
-          <div>
-            <div className='mb-2 flex items-center justify-between'>
-              <label className='text-sm font-medium text-slate-700'>
-                Rubric (JSON) {evaluatorType ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional without evaluator)</span>}
-              </label>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateRubric}
-                disabled={generatingRubric || !instructions.trim()}
-                className='h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
-              >
-                {generatingRubric ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5 text-emerald-600' />
-                )}
-                ✨ Auto-Generate Rubric
-              </Button>
-            </div>
-            <textarea
-              value={rubric}
-              onChange={(e) => setRubric(e.target.value)}
-              placeholder='[\n  { "name": "Criteria 1", "weight": 20, "description": "..." }\n]'
-              className='w-full min-h-[130px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-            />
-          </div>
+          <RubricVisualEditor
+            value={rubric}
+            onChange={setRubric}
+            onGenerate={handleGenerateRubric}
+            generating={generatingRubric}
+            canGenerate={Boolean(title.trim() && instructions.trim())}
+            evaluatorType={evaluatorType}
+            required={Boolean(evaluatorType && evaluatorType.trim())}
+          />
 
           {/* 2. Automated Test Cases Second */}
-          <div>
-            <div className='mb-2 flex items-center justify-between'>
-              <div>
-                <label className='text-sm font-medium text-slate-700'>
-                  Test Cases (JSON) {['JS', 'PYTHON', 'EXCEL'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
-                </label>
-                {(evaluatorType || '').toUpperCase() === 'EXCEL' && !rubric.trim() && (
-                  <p className='text-[11px] text-amber-600 font-medium mt-0.5'>Generate the Rubric above first to ensure test cases bind to criteria.</p>
-                )}
-              </div>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateTestCases}
-                disabled={generating || !evaluatorType}
-                className='h-7 text-xs bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-700'
-              >
-                {generating ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5' />
-                )}
-                ✨ Auto-Generate Test Cases
-              </Button>
-            </div>
-            <textarea
-              value={testCases}
-              onChange={(e) => setTestCases(e.target.value)}
-              placeholder='{\n  "evaluationMode": "script",\n  "expectedLogs": []\n}'
-              className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-            />
-          </div>
+          <TestCasesVisualEditor
+            value={testCases}
+            onChange={setTestCases}
+            onGenerate={handleGenerateTestCases}
+            generating={generating}
+            canGenerate={Boolean(evaluatorType)}
+            evaluatorType={evaluatorType}
+            rubricJson={rubric}
+          />
         </div>
         </div>
 
