@@ -19,6 +19,17 @@ export interface RubricCriterion {
   weight: number;
 }
 
+export interface RubricVisualEditorProps {
+  value: string;
+  onChange: (value: string) => void;
+  onGenerate?: () => void;
+  generating?: boolean;
+  canGenerate?: boolean;
+  evaluatorType?: string;
+  required?: boolean;
+  className?: string;
+}
+
 /**
  * Normalizes any rubric input (array of criteria, { criteria: [...] }, or legacy fields)
  * into a standard RubricCriterion[]
@@ -73,7 +84,7 @@ export const RubricVisualEditor: React.FC<RubricVisualEditorProps> = ({
   const lastSentJsonRef = useRef<string>('');
 
   // Parse items from raw string
-  const { items: parsedItems, error } = useMemo(() => parseRubricJson(jsonText), [jsonText]);
+  const { items: parsedItems } = useMemo(() => parseRubricJson(jsonText), [jsonText]);
 
   // Local state for visual editing to allow smooth keystrokes
   const [criteria, setCriteria] = useState<RubricCriterion[]>(parsedItems);
