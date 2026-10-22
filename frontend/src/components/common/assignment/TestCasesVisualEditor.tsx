@@ -51,7 +51,6 @@ export const TestCasesVisualEditor: React.FC<TestCasesVisualEditorProps> = ({
   generating = false,
   canGenerate = true,
   evaluatorType = '',
-  rubricJson = '',
   className = '',
 }) => {
   const [mode, setMode] = useState<'visual' | 'json'>('visual');
