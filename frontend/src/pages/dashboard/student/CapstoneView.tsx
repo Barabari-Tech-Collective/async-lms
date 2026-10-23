@@ -85,7 +85,8 @@ function flattenCourseStructure(topics: any[]): FlatItem[] {
 }
 
 function buildItemUrl(slug: string, item: FlatItem): string {
-  const base = `/dashboard/student/courses/${slug}`;
+  const isFacilitator = typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard/facilitator');
+  const base = isFacilitator ? `/dashboard/facilitator/courses/${slug}` : `/dashboard/student/courses/${slug}`;
   if (item.type === 'subtopic') return `${base}/lesson/${item.slug}`;
   if (item.type === 'quiz') return `${base}/quiz/${item.id}`;
   if (item.type === 'capstone') return `${base}/capstone/${item.id}`;
@@ -174,12 +175,15 @@ export default function CapstoneView() {
     return flat[currentIndex + 1] ?? null;
   }, [courseStructure, projectId]);
 
+  const isFacilitator = typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard/facilitator');
+  const baseCourseUrl = isFacilitator ? `/dashboard/facilitator/courses/${slug}` : `/dashboard/student/courses/${slug}`;
+
   const goToNext = () => {
     if (!slug) return;
     if (nextItem) {
       navigate(buildItemUrl(slug, nextItem));
     } else {
-      navigate(`/dashboard/student/courses/${slug}`);
+      navigate(baseCourseUrl);
     }
   };
 
@@ -653,19 +657,26 @@ export default function CapstoneView() {
             </div>
           )}
 
-          <div className='flex justify-end pt-2'>
-            <Button
-              onClick={handleSubmit}
-              loading={submitting}
-              className='bg-amber-500 hover:bg-amber-600 text-white h-11 px-8 font-semibold w-full sm:w-auto shadow-sm cursor-pointer'
-            >
-              {isSubmitted ? 'Update Submission' : 'Submit Capstone Project'}
-            </Button>
-          </div>
+          {isFacilitator ? (
+            <div className='flex items-center justify-between p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-800 dark:text-amber-300 text-sm'>
+              <span className='font-semibold'>Instructor Preview: Capstone project submissions are disabled in preview mode.</span>
+              <Badge variant='outline' className='bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-300'>Preview Mode</Badge>
+            </div>
+          ) : (
+            <div className='flex justify-end pt-2'>
+              <Button
+                onClick={handleSubmit}
+                loading={submitting}
+                className='bg-amber-500 hover:bg-amber-600 text-white h-11 px-8 font-semibold w-full sm:w-auto shadow-sm cursor-pointer'
+              >
+                {isSubmitted ? 'Update Submission' : 'Submit Capstone Project'}
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
 
-      {isSubmitted && nextItem !== undefined && (
+      {(isSubmitted || isFacilitator) && nextItem !== undefined && (
         <div className='flex justify-end'>
           <Button
             onClick={goToNext}
@@ -678,7 +689,7 @@ export default function CapstoneView() {
               </span>
             ) : (
               <>
-                Finish Course
+                {isFacilitator ? 'Back to Course' : 'Finish Course'}
                 <PartyPopper className='h-4 w-4 shrink-0' />
               </>
             )}

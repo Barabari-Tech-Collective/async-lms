@@ -7,6 +7,7 @@ import {
   BarChart2,
   Sparkles,
   Inbox,
+  BookOpen,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,7 @@ import Logo from '../Logo';
 
 const menuItems = [
   { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard/facilitator' },
+  { name: 'Courses', icon: BookOpen, path: '/dashboard/facilitator/courses' },
   { name: 'Students', icon: Users, path: '/dashboard/facilitator/students' },
   { name: 'Course Requests', icon: Inbox, path: '/dashboard/facilitator/requests' },
   {

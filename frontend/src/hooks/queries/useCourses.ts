@@ -81,3 +81,23 @@ export function useRequestEnrollmentMutation() {
 export function useEnrollMutation() {
   return useRequestEnrollmentMutation();
 }
+
+export interface FacilitatorCourse {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  level: string | null;
+  order_index: number;
+  topic_count: number;
+  lesson_count: number;
+}
+
+export function useFacilitatorCourses() {
+  return useQuery<FacilitatorCourse[]>({
+    queryKey: ['facilitator', 'courses'],
+    queryFn: () =>
+      apiClient.get('/facilitator/courses').then((r) => r.data.data ?? []),
+    staleTime: 60 * 1000,
+  });
+}

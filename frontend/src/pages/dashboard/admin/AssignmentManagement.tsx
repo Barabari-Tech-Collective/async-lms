@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { cn, getErrorMessage } from '@/lib/utils';
+import { formatDateTime, isPastDate } from '@/utils/dateUtils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -210,9 +211,7 @@ export default function AssignmentManagement() {
 
           let isOverdue = false;
           if (item.due_date) {
-            const due = new Date(item.due_date);
-            due.setHours(23, 59, 59, 999);
-            isOverdue = due < new Date();
+            isOverdue = isPastDate(item.due_date);
           }
 
           let status: Assignment['status'] = 'Active';
@@ -242,9 +241,9 @@ export default function AssignmentManagement() {
             pendingCount,
             evaluatedCount,
             dueDate: item.due_date
-              ? new Date(item.due_date).toLocaleDateString()
+              ? formatDateTime(item.due_date)
               : 'No Due Date',
-            rawDueDate: item.due_date ? item.due_date.split('T')[0] : '',
+            rawDueDate: item.due_date || '',
             status,
             description: item.description || '',
             topicId: item.topic_id || '',

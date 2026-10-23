@@ -3,6 +3,7 @@ import { CheckCircle2, Pencil, Trash2, ArrowRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { formatDateTime } from '@/utils/dateUtils';
 
 /* ======================
    Types
@@ -126,7 +127,7 @@ export default function AssignmentSuccess() {
                 Due Date
               </p>
               <p className='text-xs sm:text-sm font-medium text-slate-800'>
-                {assignment.deadline || '—'}
+                {assignment.deadline ? formatDateTime(assignment.deadline, assignment.deadline) : '—'}
               </p>
             </div>
 

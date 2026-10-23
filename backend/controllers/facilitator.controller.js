@@ -86,6 +86,44 @@ exports.getFacilitatorStats = async (req, res) => {
 };
 
 /**
+ * Get courses/subjects assigned to the logged-in facilitator
+ */
+exports.getFacilitatorCourses = async (req, res) => {
+  try {
+    const facilitatorId = req.user.id;
+    const subjectIds = req.user.subject_ids || [];
+
+    if (subjectIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const query = `
+      SELECT s.id, s.name, s.slug, s.description, s.level, s.order_index,
+             (SELECT COUNT(st.id)::int
+              FROM subtopics st
+              JOIN units u ON st.unit_id = u.id
+              JOIN topics t ON u.topic_id = t.id
+              WHERE t.subject_id = s.id AND st.is_deleted = false AND u.is_deleted = false AND t.is_deleted = false
+             ) AS total_lessons,
+             (SELECT COUNT(DISTINCT t.id)::int
+              FROM topics t
+              WHERE t.subject_id = s.id AND t.is_deleted = false
+             ) AS total_topics
+      FROM subjects s
+      JOIN facilitator_subjects fs ON fs.subject_id = s.id AND fs.facilitator_id = $1 AND fs.is_deleted = false
+      WHERE s.is_published = true AND s.is_deleted = false
+      ORDER BY s.order_index ASC;
+    `;
+
+    const { rows } = await pool.query(query, [facilitatorId]);
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('Error fetching facilitator courses:', err);
+    res.status(500).json({ success: false, message: 'Server error fetching courses' });
+  }
+};
+
+/**
  * Get Students for Facilitator's Colleges and Assigned Subjects
  */
 exports.getFacilitatorStudents = async (req, res) => {

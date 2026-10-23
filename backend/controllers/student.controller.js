@@ -972,7 +972,11 @@ const EXERCISE_COLUMNS = `
  *
  * @throws {ExerciseAccessError} 404 if missing or deleted, 403 if not enrolled
  */
-async function loadAccessibleExercise(userId, exerciseId) {
+async function loadAccessibleExercise(userOrId, exerciseId) {
+  const userId = typeof userOrId === 'object' && userOrId !== null ? userOrId.id : userOrId;
+  const userRole = typeof userOrId === 'object' && userOrId !== null ? userOrId.role : 'student';
+  const userSubjectIds = (typeof userOrId === 'object' && userOrId !== null ? userOrId.subject_ids : []) || [];
+
   const { rows } = await pool.query(
     `SELECT ${EXERCISE_COLUMNS},
             COALESCE(t_unit.subject_id, t_sub.subject_id) AS subject_id
@@ -1001,15 +1005,26 @@ async function loadAccessibleExercise(userId, exerciseId) {
     );
   }
 
-  const enrolled = await pool.query(
-    'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
-    [userId, exercise.subject_id],
-  );
-  if (enrolled.rowCount === 0) {
-    throw new ExerciseAccessError(
-      403,
-      'You are not enrolled in the course this exercise belongs to.',
+  if (userRole === 'facilitator') {
+    if (!userSubjectIds.includes(exercise.subject_id)) {
+      throw new ExerciseAccessError(
+        403,
+        'Access denied: You are not assigned to this subject.',
+      );
+    }
+  } else if (userRole === 'admin') {
+    // Admin has access to preview
+  } else {
+    const enrolled = await pool.query(
+      'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+      [userId, exercise.subject_id],
     );
+    if (enrolled.rowCount === 0) {
+      throw new ExerciseAccessError(
+        403,
+        'You are not enrolled in the course this exercise belongs to.',
+      );
+    }
   }
 
   const hasHtml =
@@ -1805,7 +1820,7 @@ exports.initExerciseWorkspace = async (req, res) => {
     const { taskId } = req.body;
 
     const { language, initial_files, tasks } = await loadAccessibleExercise(
-      userId,
+      req.user,
       exerciseId,
     );
 
@@ -1920,7 +1935,7 @@ exports.saveExerciseWorkspace = async (req, res) => {
     // Saving creates directories on disk keyed by exercise id — gate it on the
     // same entitlement as the rest, so an unenrolled student cannot seed
     // arbitrary workspaces.
-    await loadAccessibleExercise(userId, exerciseId);
+    await loadAccessibleExercise(req.user, exerciseId);
 
     const projectId = taskId
       ? `exercise-${exerciseId}-task-${taskId}`
@@ -1964,7 +1979,7 @@ exports.runExerciseTests = async (req, res) => {
     const { exerciseId } = req.params;
     const { taskId } = req.body;
 
-    const exercise = await loadAccessibleExercise(userId, exerciseId);
+    const exercise = await loadAccessibleExercise(req.user, exerciseId);
     const { language, tasks } = exercise;
 
     // Grade against the task the student is on, else the legacy exercise row.
@@ -2021,7 +2036,7 @@ exports.runExercise = async (req, res) => {
     const { exerciseId } = req.params;
     const { taskId, activeFile } = req.body;
 
-    const { language } = await loadAccessibleExercise(userId, exerciseId);
+    const { language } = await loadAccessibleExercise(req.user, exerciseId);
 
     const projectId = taskId
       ? `exercise-${exerciseId}-task-${taskId}`
@@ -2380,6 +2395,7 @@ exports.deleteStudentProject = async (req, res) => {
 exports.getAssignmentById = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
     const { id } = req.params;
 
     const result = await pool.query(
@@ -2392,6 +2408,7 @@ exports.getAssignmentById = async (req, res) => {
         a.test_cases,
         a.rubric,
         a.allowed_submission_types,
+        s.id AS subject_id,
         s.name AS subject_title,
         s.slug AS subject_slug,
         u.title AS unit_title,
@@ -2405,7 +2422,6 @@ exports.getAssignmentById = async (req, res) => {
        INNER JOIN units u ON a.unit_id = u.id
        INNER JOIN topics t ON u.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN assignment_submissions sub ON sub.assignment_id = a.id AND sub.user_id = $1
        WHERE a.id = $2 AND a.is_deleted = false`,
       [userId, id],
@@ -2418,6 +2434,25 @@ exports.getAssignmentById = async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      if (!subjectIds.includes(row.subject_id)) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'Access denied: You are not assigned to this subject' });
+      }
+    } else if (userRole === 'student') {
+      const enrolled = await pool.query(
+        'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+        [userId, row.subject_id],
+      );
+      if (enrolled.rowCount === 0) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'You are not enrolled in the course this assignment belongs to.' });
+      }
+    }
     if (typeof row.allowed_submission_types === 'string') {
       try {
         row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
@@ -3001,11 +3036,14 @@ exports.getStudentProjectsOverview = async (req, res) => {
 exports.getCapstone = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
+    const isStaff = userRole !== 'student';
     const { projectId } = req.params;
 
     const result = await pool.query(
       `SELECT
         p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric, p.test_cases, p.allowed_submission_types,
+        s.id AS subject_id,
         ps.submission_type, ps.submission_link, ps.submission_file_url, ps.submission_file_name, ps.is_approved, ps.submitted_at, ps.updated_at,
         COALESCE(er.marks, ps.score) AS score,
         er.feedback AS er_feedback,
@@ -3027,8 +3065,8 @@ exports.getCapstone = async (req, res) => {
        ) er ON true
        WHERE p.id = $2
          AND (p.is_deleted = false OR p.is_deleted IS NULL)
-         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
-      [userId, projectId],
+         AND ($3::boolean OR us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
+      [userId, projectId, isStaff],
     );
 
     if (result.rows.length === 0) {
@@ -3038,6 +3076,15 @@ exports.getCapstone = async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      if (!subjectIds.includes(row.subject_id)) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
 
     const parseFeedback = (feedback) => {
       if (!feedback) return null;

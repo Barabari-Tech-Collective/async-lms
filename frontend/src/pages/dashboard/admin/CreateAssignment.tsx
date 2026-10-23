@@ -14,6 +14,7 @@ import {
   markdownToHtml,
   htmlToMarkdown,
 } from '@/utils/contentFormat';
+import { toLocalDatetimeInputString, formatDateTime } from '@/utils/dateUtils';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -108,7 +109,9 @@ export default function CreateAssignment() {
     editData.collegeId ? [editData.collegeId] : []
   );
   const [topicId, setTopicId] = useState(editData.topicId || editData.domain || '');
-  const [deadline, setDeadline] = useState(editData.deadline || '');
+  const [deadline, setDeadline] = useState(
+    () => toLocalDatetimeInputString(editData.deadline) || editData.deadline || ''
+  );
 
   // Dynamic subjects (courses) and topics
   const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
@@ -265,21 +268,7 @@ export default function CreateAssignment() {
         }
         if (d.topic_id) setTopicId(String(d.topic_id));
         if (d.due_date) {
-          try {
-            const dt = new Date(d.due_date);
-            if (!isNaN(dt.getTime())) {
-              const year = dt.getFullYear();
-              const month = String(dt.getMonth() + 1).padStart(2, '0');
-              const day = String(dt.getDate()).padStart(2, '0');
-              const hours = String(dt.getHours()).padStart(2, '0');
-              const minutes = String(dt.getMinutes()).padStart(2, '0');
-              setDeadline(`${year}-${month}-${day}T${hours}:${minutes}`);
-            } else {
-              setDeadline(d.due_date.slice(0, 16));
-            }
-          } catch {
-            setDeadline(d.due_date.slice(0, 16));
-          }
+          setDeadline(toLocalDatetimeInputString(d.due_date));
         }
         if (d.evaluator_type) setAiEvaluationType(d.evaluator_type);
         if (d.instruction_file_url) setInstructionUrl(d.instruction_file_url);
@@ -626,6 +615,14 @@ export default function CreateAssignment() {
       return;
     }
 
+    if (deadline && !editId) {
+      const deadlineDate = new Date(deadline);
+      if (deadlineDate.getTime() < Date.now() - 60000) {
+        toast.error('Deadline cannot be in the past. Please choose a future date and time.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       let finalTestCases: any = null;
@@ -715,7 +712,7 @@ export default function CreateAssignment() {
                   .join(', ')),
           collegeId: editId ? college : selectedColleges[0],
           topicId: availableTopics.find(t => t.value === topicId)?.label || topicId,
-          deadline,
+          deadline: deadline ? formatDateTime(deadline) : '',
           assignmentDescription,
           aiEvaluationType,
           weightage,
@@ -925,6 +922,7 @@ export default function CreateAssignment() {
                 <Input
                   type='datetime-local'
                   value={deadline}
+                  min={!editId ? toLocalDatetimeInputString(new Date()) : undefined}
                   onChange={(e) => setDeadline(e.target.value)}
                   className='text-xs sm:text-sm h-10'
                 />

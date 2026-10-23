@@ -117,6 +117,9 @@ const FacilitatorSettings = lazyWithRetry(
 const FacilitatorRequests = lazyWithRetry(
   () => import('@/pages/dashboard/facilitator/FacilitatorRequests'),
 );
+const FacilitatorCourses = lazyWithRetry(
+  () => import('@/pages/dashboard/facilitator/FacilitatorCourses'),
+);
 
 // Admin Dashboard
 const AdminDashboardLayout = lazyWithRetry(
@@ -269,6 +272,7 @@ const router = createBrowserRouter([
             element: <FacilitatorDashboardLayout />,
             children: [
               { index: true, element: <FacilitatorHome /> },
+              { path: 'courses', element: <FacilitatorCourses /> },
               { path: 'students', element: <FacilitatorStudents /> },
               { path: 'assignments', element: <AssignmentManagement /> },
               { path: 'assignment-management', element: <AssignmentManagement /> },
@@ -288,6 +292,33 @@ const router = createBrowserRouter([
               { path: 'ai-curriculum/:id/edit', element: <AiCurriculumEditor /> },
               { path: 'ai-curriculum/:id/preview', element: <AiCurriculumPreview /> },
               { path: 'ai-curriculum/:id/review', element: <AiCurriculumReview /> },
+            ],
+          },
+          {
+            path: 'dashboard/facilitator/courses/:slug',
+            element: <CourseViewLayout />,
+            children: [
+              { index: true, element: <CourseIntro /> },
+              {
+                path: 'lesson/:subtopicSlug',
+                element: <LessonView />,
+              },
+              {
+                path: 'exercise/:exerciseId',
+                element: <LessonView />,
+              },
+              {
+                path: 'assignment/:assignmentId',
+                element: <AssignmentView />,
+              },
+              {
+                path: 'quiz/:quizId',
+                element: <LessonView />,
+              },
+              {
+                path: 'capstone/:projectId',
+                element: <CapstoneView />,
+              },
             ],
           },
         ],
