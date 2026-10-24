@@ -72,8 +72,8 @@ app.use('/worker/:ip', (req, res, next) => {
   return proxy(req, res, next);
 });
 
-app.use(express.json());
-// app.use(morgan('combined'));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request id + client IP, before anything that logs. Also sets X-Request-Id on
 // the response so a user reporting a problem can quote a traceable reference.
@@ -121,8 +121,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many requests, please try again later.' },
 });
-
-app.use(express.json());
 
 const server = http.createServer(app);
 
