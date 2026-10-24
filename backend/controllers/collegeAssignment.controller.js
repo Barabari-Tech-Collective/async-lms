@@ -439,6 +439,23 @@ exports.createAssignment = async (req, res) => {
       });
   }
 
+  if (due_date) {
+    const dueTime = new Date(due_date).getTime();
+    if (isNaN(dueTime)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid due date format',
+      });
+    }
+    // Allow 5 minutes buffer for network latency/client clock drift
+    if (dueTime < Date.now() - 5 * 60 * 1000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deadline cannot be in the past',
+      });
+    }
+  }
+
   const upperEvalType = String(evaluator_type || '').toUpperCase();
   const hasEvaluator = Boolean(evaluator_type && String(evaluator_type).trim());
 
@@ -887,7 +904,7 @@ exports.submitCollegeAssignment = async (req, res) => {
   try {
     // 1. Verify existence and allowed submission types
     const assignmentRes = await pool.query(
-      'SELECT id, college_id, allowed_submission_types FROM college_assignments WHERE id = $1 AND is_deleted = false',
+      'SELECT id, college_id, due_date, allowed_submission_types FROM college_assignments WHERE id = $1 AND is_deleted = false',
       [id],
     );
     if (!assignmentRes.rowCount) {
@@ -897,6 +914,7 @@ exports.submitCollegeAssignment = async (req, res) => {
     }
 
     const assignment = assignmentRes.rows[0];
+    const isLate = assignment.due_date ? new Date(assignment.due_date) < new Date() : false;
 
     // Authorization: Verify student belongs to this assignment's college
     if (req.user.role === 'student') {
@@ -977,14 +995,17 @@ exports.submitCollegeAssignment = async (req, res) => {
       action: 'CREATE',
       entityType: 'college_assignment_submission',
       entityId: id,
-      details: { submission_type, submission_link },
+      details: { submission_type, submission_link, is_late: isLate },
     });
 
     markActionToday(student_id);
     res.json({
       success: true,
-      data: rows[0],
-      message: 'Assignment submitted successfully',
+      data: {
+        ...rows[0],
+        is_late: isLate,
+      },
+      message: isLate ? 'Assignment submitted (Late)' : 'Assignment submitted successfully',
     });
   } catch (error) {
     console.error('submitCollegeAssignment ERROR:', error);

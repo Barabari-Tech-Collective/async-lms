@@ -48,12 +48,15 @@ type FlattenedItem = {
 ======================= */
 
 const Lesson = () => {
-  const { subtopicSlug, exerciseId, quizId, slug } = useParams<{
+  const params = useParams<{
     subtopicSlug?: string;
+    lessonSlug?: string;
     exerciseId?: string;
     quizId?: string;
     slug?: string;
   }>();
+  const subtopicSlug = params.subtopicSlug || params.lessonSlug;
+  const { exerciseId, quizId, slug } = params;
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
 
@@ -117,6 +120,11 @@ const Lesson = () => {
      Data Processing
   ======================= */
 
+  const isFacilitator = typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard/facilitator');
+  const baseCourseUrl = isFacilitator
+    ? `/dashboard/facilitator/courses/${slug ?? ''}`
+    : `/dashboard/student/courses/${slug ?? ''}`;
+
   const buildNextUrl = (
     item: {
       type: 'subtopic' | 'quiz' | 'assignment';
@@ -125,13 +133,16 @@ const Lesson = () => {
     } | null,
     courseSlug: string | undefined,
   ): string => {
+    const base = isFacilitator
+      ? `/dashboard/facilitator/courses/${courseSlug ?? ''}`
+      : `/dashboard/student/courses/${courseSlug ?? ''}`;
     if (!item || !courseSlug)
-      return `/dashboard/student/courses/${courseSlug ?? ''}`;
+      return base;
     if (item.type === 'subtopic')
-      return `/dashboard/student/courses/${courseSlug}/lesson/${item.slug}`;
+      return `${base}/lesson/${item.slug}`;
     if (item.type === 'assignment')
-      return `/dashboard/student/courses/${courseSlug}/assignment/${item.id}`;
-    return `/dashboard/student/courses/${courseSlug}/quiz/${item.id}`;
+      return `${base}/assignment/${item.id}`;
+    return `${base}/quiz/${item.id}`;
   };
 
   const nextLabel = (type: string) => {
@@ -212,7 +223,7 @@ const Lesson = () => {
     );
   }, [hasExercises, lessonExercises, passedExercises]);
 
-  const canMarkComplete = !hasExercises || allExercisesPassed;
+  const canMarkComplete = isFacilitator || !hasExercises || allExercisesPassed;
 
   /* =======================
      Lesson Completion
@@ -246,7 +257,7 @@ const Lesson = () => {
     if (!nextItem && !isCourseComplete) return;
 
     const nextUrl = isCourseComplete
-      ? `/dashboard/student/courses/${slug}`
+      ? baseCourseUrl
       : buildNextUrl(nextItem, slug);
 
     const timer = setTimeout(() => {
@@ -310,6 +321,10 @@ const Lesson = () => {
   ======================= */
 
   const handleSubmitExercise = async (exerciseId: string, files?: any[], taskId?: string) => {
+    if (isFacilitator) {
+      toast.success('Instructor Preview: Code and tests run successfully. Student submissions are disabled in preview mode.');
+      return;
+    }
     if (submittingExercise[exerciseId]) return; // prevent double-submit
     try {
       const result = await dispatch(submitExercise({ exerciseId, files, taskId })).unwrap();
@@ -601,18 +616,21 @@ const Lesson = () => {
                                   !isSelected &&
                                   !!qResult?.correct_option_id &&
                                   qResult.correct_option_id === option.id;
+                                const isInstructorCorrect = isFacilitator && Boolean(option.is_correct);
                                 return (
                                   <label
                                     key={option.id}
                                     className={`flex items-start sm:items-center gap-2.5 sm:gap-3 rounded-xl border p-3 text-xs sm:text-sm transition-colors min-h-[44px] ${
                                       !quizSubmitted
-                                        ? `cursor-pointer ${
-                                            isSelected
-                                              ? 'border-indigo-500 bg-indigo-50'
-                                              : 'border-slate-200 hover:bg-slate-50'
-                                          }`
+                                        ? isInstructorCorrect
+                                          ? 'border-emerald-500 bg-emerald-50/70 font-medium'
+                                          : `cursor-pointer ${
+                                              isSelected
+                                                ? 'border-indigo-500 bg-indigo-50'
+                                                : 'border-slate-200 hover:bg-slate-50'
+                                            }`
                                         : `cursor-default ${
-                                            isSelectedCorrect || isRevealedCorrect
+                                            isSelectedCorrect || isRevealedCorrect || isInstructorCorrect
                                               ? 'border-green-500 bg-green-50'
                                               : isSelectedWrong
                                                 ? 'border-red-500 bg-red-50'
@@ -637,6 +655,12 @@ const Lesson = () => {
                                     <span className='flex-1 break-words'>
                                       {option.option_text}
                                     </span>
+                                    {isInstructorCorrect && !quizSubmitted && (
+                                      <span className='inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0'>
+                                        <CheckCircle2 className='h-3.5 w-3.5 text-emerald-600' />
+                                        Correct Answer
+                                      </span>
+                                    )}
                                     {(isSelectedCorrect || isRevealedCorrect) && (
                                       <CheckCircle2 className='h-4 w-4 text-green-600 shrink-0' />
                                     )}
@@ -740,39 +764,44 @@ const Lesson = () => {
                             </div>
                           )}
 
-                          {/* Explanation — only revealed once the student has attempted
-                          this quiz 3+ times (server withholds it otherwise) */}
-                          {quizSubmitted &&
-                            quizResults?.question_results[question.id]
-                              ?.explanation && (
-                              <div className='rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm'>
-                                <p className='font-semibold text-blue-900 mb-1'>
-                                  Explanation:
-                                </p>
-                                <div className='text-blue-800 prose prose-sm max-w-none prose-p:my-0'>
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {
-                                      quizResults.question_results[question.id]!
-                                        .explanation as string
-                                    }
-                                  </ReactMarkdown>
-                                </div>
+                          {/* Explanation — revealed for instructors in preview or after 3+ student attempts */}
+                          {(isFacilitator
+                            ? Boolean(question.explanation)
+                            : (quizSubmitted && Boolean(quizResults?.question_results?.[question.id]?.explanation))) && (
+                            <div className='rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm'>
+                              <p className='font-semibold text-blue-900 mb-1'>
+                                {isFacilitator ? 'Answer Explanation (Instructor Key):' : 'Explanation:'}
+                              </p>
+                              <div className='text-blue-800 prose prose-sm max-w-none prose-p:my-0'>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {(isFacilitator
+                                    ? question.explanation
+                                    : quizResults?.question_results?.[question.id]?.explanation) as string}
+                                </ReactMarkdown>
                               </div>
-                            )}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
 
-                    {/* Submit Button */}
+                    {/* Submit Button or Facilitator Notice */}
                     {!quizSubmitted && (
                       <div className='mt-8 border-t border-slate-100 pt-6'>
-                        <Button
-                          onClick={() => handleSubmitQuiz(quiz)}
-                          loading={submittingQuiz}
-                          className='w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-base font-semibold'
-                        >
-                          Submit Quiz
-                        </Button>
+                        {isFacilitator ? (
+                          <div className='flex items-center justify-between p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-800 dark:text-amber-300 text-sm'>
+                            <span className='font-semibold'>Instructor Preview: Correct answers and explanations are shown above.</span>
+                            <Badge variant='outline' className='bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-300'>Preview Mode</Badge>
+                          </div>
+                        ) : (
+                          <Button
+                            onClick={() => handleSubmitQuiz(quiz)}
+                            loading={submittingQuiz}
+                            className='w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-base font-semibold'
+                          >
+                            Submit Quiz
+                          </Button>
+                        )}
                       </div>
                     )}
                   </>

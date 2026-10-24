@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   Sparkles,
+  Inbox,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ const menuItems = [
   },
   { name: 'Lock Control', icon: Lock, path: '/dashboard/admin/lock-control' },
   { name: 'Users', icon: Users, path: '/dashboard/admin/users' },
+  { name: 'Course Requests', icon: Inbox, path: '/dashboard/admin/requests' },
   {
     name: 'Assignments',
     icon: ClipboardCheck,
@@ -97,7 +99,10 @@ export default function AdminSidebar({
       </div>
 
       {/* Nav Items */}
-      <nav className='flex-1 py-4 px-3 space-y-1 overflow-y-auto custom-scrollbar'>
+      <nav
+        className='flex-1 py-4 px-3 space-y-1 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden'
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
         {menuItems.map((item) => (
           <NavLink
             key={item.name}

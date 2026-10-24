@@ -106,7 +106,10 @@ export default function StudentSidebar({
       </div>
 
       {/* Navigation Links */}
-      <nav className='flex-1 py-4 px-3 space-y-1.5 overflow-y-auto custom-scrollbar'>
+      <nav
+        className='flex-1 py-4 px-3 space-y-1.5 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden'
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
         {menuItems.map((item) => {
           const isActive = pathname === item.path;
           return (

@@ -175,7 +175,7 @@ export const AdminAssignmentPreviewModal: React.FC<AdminAssignmentPreviewModalPr
               {/* Header */}
               <header className='space-y-3 bg-white p-5 sm:p-7 rounded-2xl border border-slate-100 shadow-2xs'>
                 <div className='flex items-start gap-3'>
-                  <div className='w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#333D7C]/10 text-[#333D7C] flex items-center justify-center shrink-0 mt-0.5'>
+                  <div className='w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5 border border-indigo-100'>
                     <ClipboardList className='h-5 w-5' />
                   </div>
                   <div className='space-y-1 flex-1 min-w-0'>
@@ -191,7 +191,7 @@ export const AdminAssignmentPreviewModal: React.FC<AdminAssignmentPreviewModalPr
                 </div>
 
                 <div className='flex flex-wrap gap-1.5 sm:gap-2 pt-1'>
-                  <Badge className='bg-[#333D7C]/10 text-[#333D7C] border-none text-xs font-semibold'>
+                  <Badge className='bg-indigo-50 text-indigo-700 border-indigo-200 text-xs font-semibold'>
                     Assignment
                   </Badge>
                   <Badge className='bg-slate-100 text-slate-700 border-none text-xs font-semibold'>

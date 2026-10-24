@@ -1,9 +1,12 @@
 import { Button } from '@/components/ui/button';
-import { Save, X, Wand2, Loader2, Trophy, Check } from 'lucide-react';
+import { Save, X, Trophy, Check, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
+import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
 import toast from 'react-hot-toast';
+import { RubricVisualEditor } from '@/components/common/assignment/RubricVisualEditor';
+import { TestCasesVisualEditor } from '@/components/common/assignment/TestCasesVisualEditor';
 import type { SubmissionType } from '@/utils/types';
 import { ALL_SUBMISSION_TYPES } from '@/utils/types';
 import {
@@ -104,6 +107,7 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
   const [editorType, setEditorType] = useState<'rich' | 'markdown'>('rich');
   const [generating, setGenerating] = useState(false);
   const [generatingRubric, setGeneratingRubric] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -301,7 +305,7 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs'>
-      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-2xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden'>
+      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-3xl lg:max-w-4xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden transition-all'>
         <div className='flex items-center justify-between p-4 sm:p-6 pb-3 sm:pb-4 border-b border-slate-100'>
           <div className='flex items-center gap-2.5'>
             <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600 border border-amber-200'>
@@ -548,89 +552,74 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
             </div>
 
             {/* 1. Evaluation Rubric First */}
-            <div>
-              <div className='mb-2 flex flex-wrap items-center justify-between gap-1.5'>
-                <label className='text-sm font-medium text-slate-700'>
-                  Rubric (JSON) {evaluatorType ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional without evaluator)</span>}
-                </label>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={handleGenerateRubric}
-                  disabled={generatingRubric || !instructions.trim()}
-                  className='h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
-                >
-                  {generatingRubric ? (
-                    <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                  ) : (
-                    <Wand2 className='mr-1.5 h-3.5 w-3.5 text-emerald-600' />
-                  )}
-                  ✨ Auto-Generate Rubric
-                </Button>
-              </div>
-              <textarea
-                value={rubric}
-                onChange={(e) => setRubric(e.target.value)}
-                placeholder='[\n  { "name": "Functionality", "weight": 50, "description": "Core features work properly" },\n  { "name": "Code Quality", "weight": 50, "description": "Clean, modular code structure" }\n]'
-                className='w-full min-h-[130px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200'
-              />
-            </div>
+            <RubricVisualEditor
+              value={rubric}
+              onChange={setRubric}
+              onGenerate={handleGenerateRubric}
+              generating={generatingRubric}
+              canGenerate={Boolean(title.trim() && instructions.trim())}
+              evaluatorType={evaluatorType}
+              required={Boolean(evaluatorType && evaluatorType.trim())}
+            />
 
             {/* 2. Automated Test Cases Second */}
-            <div>
-              <div className='mb-2 flex flex-wrap items-center justify-between gap-1.5'>
-                <div>
-                  <label className='text-sm font-medium text-slate-700'>
-                    Test Cases (JSON / Spec) {['JS', 'PYTHON', 'EXCEL'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
-                  </label>
-                  {(evaluatorType || '').toUpperCase() === 'EXCEL' && !rubric.trim() && (
-                    <p className='text-[11px] text-amber-600 font-medium mt-0.5'>Generate the Rubric above first so Excel test cases automatically bind to criteria.</p>
-                  )}
-                </div>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={handleGenerateTestCases}
-                  disabled={generating || !evaluatorType}
-                  className='h-7 text-xs bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 hover:text-amber-800'
-                >
-                  {generating ? (
-                    <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                  ) : (
-                    <Wand2 className='mr-1.5 h-3.5 w-3.5' />
-                  )}
-                  ✨ Auto-Generate Test Cases
-                </Button>
-              </div>
-              <textarea
-                value={testCases}
-                onChange={(e) => setTestCases(e.target.value)}
-                placeholder='{\n  "evaluationMode": "script",\n  "expectedLogs": []\n}'
-                className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200'
-              />
-            </div>
+            <TestCasesVisualEditor
+              value={testCases}
+              onChange={setTestCases}
+              onGenerate={handleGenerateTestCases}
+              generating={generating}
+              canGenerate={Boolean(evaluatorType)}
+              evaluatorType={evaluatorType}
+              rubricJson={rubric}
+            />
           </div>
         </div>
 
-        <div className='flex gap-3 border-t border-slate-100 p-4 sm:p-6 pt-3 sm:pt-4'>
+        <div className='flex items-center gap-3 border-t border-slate-100 p-4 sm:p-6 pt-3 sm:pt-4'>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => setPreviewOpen(true)}
+            className='border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center gap-1.5'
+          >
+            <Eye className='h-4 w-4 text-amber-600' />
+            <span>Preview Student View</span>
+          </Button>
+          <div className='flex-1' />
           <Button
             onClick={onClose}
-            className='flex-1 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            className='border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
           >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             loading={loading}
-            className='flex-1 bg-amber-600 text-white hover:bg-amber-700'
+            className='bg-amber-600 text-white hover:bg-amber-700'
           >
             {!loading && <Save className='mr-2 h-4 w-4' />}
             {editData ? 'Update' : 'Create'} Capstone
           </Button>
         </div>
       </div>
+
+      {previewOpen && (
+        <AdminAssignmentPreviewModal
+          isOpen={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          assignmentData={{
+            title: title.trim() || 'Untitled Capstone Project',
+            instructions,
+            max_score: maxScore,
+            evaluator_type: evaluatorType || null,
+            test_cases: testCases,
+            rubric: rubric,
+            allowed_submission_types: allowedSubmissionTypes,
+            unit_title: `Capstone: ${topicTitle}`,
+          }}
+          unitTitle={`Capstone: ${topicTitle}`}
+        />
+      )}
     </div>
   );
 };

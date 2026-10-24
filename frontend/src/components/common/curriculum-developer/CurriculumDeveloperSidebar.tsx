@@ -61,7 +61,10 @@ export default function CurriculumDeveloperSidebar({
       </div>
 
       {/* Nav Items */}
-      <nav className='flex-1 py-4 px-3 space-y-1 overflow-y-auto custom-scrollbar'>
+      <nav
+        className='flex-1 py-4 px-3 space-y-1 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden'
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
         {menuItems.map((item) => (
           <NavLink
             key={item.name}

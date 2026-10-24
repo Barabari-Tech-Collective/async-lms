@@ -3999,7 +3999,7 @@ exports.getStudentProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [userRes, statsRes, subjectsRes] = await Promise.all([
+    const [userRes, statsRes, subjectsRes, pendingRequestsRes] = await Promise.all([
       pool.query(
         `SELECT u.id, u.full_name, u.email, u.is_verified, u.created_at,
                 sp.degree, sp.year AS batch,
@@ -4114,11 +4114,22 @@ exports.getStudentProfile = async (req, res) => {
                  WHERE t.subject_id = s.id AND p.is_deleted = false
                )
            ) as completed_subtopics,
-           us.progress_percent as progress_percent
+           us.progress_percent as progress_percent,
+           us.is_completed,
+           true as can_manage
          FROM user_subjects us
          JOIN subjects s ON us.subject_id = s.id
          WHERE us.user_id = $1
          ORDER BY us.started_at DESC`,
+        [id],
+      ),
+      pool.query(
+        `SELECT er.id, er.subject_id, s.name AS subject_name, er.status, er.rejection_reason, er.created_at,
+                true as can_manage
+         FROM enrollment_requests er
+         JOIN subjects s ON er.subject_id = s.id
+         WHERE er.user_id = $1 AND er.status = 'pending'
+         ORDER BY er.created_at DESC`,
         [id],
       ),
     ]);
@@ -4128,10 +4139,16 @@ exports.getStudentProfile = async (req, res) => {
     }
 
     const subjects = subjectsRes.rows;
+    const pendingRequests = pendingRequestsRes.rows;
 
     res.json({
       success: true,
-      data: { ...userRes.rows[0], stats: statsRes.rows[0], subjects },
+      data: {
+        ...userRes.rows[0],
+        stats: statsRes.rows[0],
+        subjects,
+        pending_requests: pendingRequests,
+      },
     });
   } catch (err) {
     console.error('Error fetching student profile:', err.message);
@@ -4300,6 +4317,178 @@ exports.createCurriculumDeveloper = async (req, res) => {
   } catch (error) {
     console.error('Error creating curriculum developer:', error);
     res.status(500).json({ message: 'Server error creating user' });
+  }
+};
+
+const courseEnrollmentService = require('../services/courseEnrollmentService');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Get available courses for student (Admin - all published courses student is not in)
+ * GET /api/v1/admin/students/:studentId/available-courses
+ */
+exports.getAvailableCoursesForStudent = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    if (!studentId || !UUID_RE.test(studentId)) {
+      return res.status(400).json({ message: 'Invalid student ID format' });
+    }
+
+    const courses = await courseEnrollmentService.getAvailableCoursesForStudent({
+      userId: studentId,
+      allowedSubjectIds: null, // Admin sees all available courses
+    });
+    res.json({ success: true, data: courses });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    serverError(res, err, 'admin:getAvailableCoursesForStudent');
+  }
+};
+
+/**
+ * Directly enroll a student in a course (Admin - unrestricted)
+ * POST /api/v1/admin/students/:studentId/courses
+ */
+exports.addStudentCourse = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { subject_id } = req.body;
+
+    if (!studentId || !UUID_RE.test(studentId)) {
+      return res.status(400).json({ message: 'Invalid student ID format' });
+    }
+
+    if (!subject_id || !UUID_RE.test(subject_id)) {
+      return res.status(400).json({ message: 'Invalid or missing subject_id' });
+    }
+
+    await courseEnrollmentService.enrollStudentInSubject(null, {
+      userId: studentId,
+      subjectId: subject_id,
+      reviewerId: req.user.id,
+      notifyStudent: true,
+    });
+
+    logAction({
+      req,
+      action: 'ADMIN_ENROLL_COURSE',
+      entityType: 'user_subjects',
+      entityId: studentId,
+      details: { subject_id, enrolled_by: req.user.id },
+    });
+
+    res.status(201).json({ success: true, message: 'Course enrolled successfully' });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    serverError(res, err, 'admin:addStudentCourse');
+  }
+};
+
+/**
+ * Revoke student's course access (Admin - unrestricted)
+ * DELETE /api/v1/admin/students/:studentId/courses/:subjectId
+ */
+exports.removeStudentCourse = async (req, res) => {
+  try {
+    const { studentId, subjectId } = req.params;
+    const force = req.query.force === 'true';
+
+    if (!studentId || !UUID_RE.test(studentId)) {
+      return res.status(400).json({ message: 'Invalid student ID format' });
+    }
+    if (!subjectId || !UUID_RE.test(subjectId)) {
+      return res.status(400).json({ message: 'Invalid subject ID format' });
+    }
+
+    const result = await courseEnrollmentService.removeStudentFromSubject({
+      userId: studentId,
+      subjectId,
+      force,
+    });
+
+    logAction({
+      req,
+      action: 'ADMIN_REVOKE_COURSE',
+      entityType: 'user_subjects',
+      entityId: studentId,
+      details: { subject_id: subjectId, revoked_by: req.user.id, force },
+    });
+
+    res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message, isCompleted: err.isCompleted });
+    }
+    serverError(res, err, 'admin:removeStudentCourse');
+  }
+};
+
+/**
+ * List enrollment requests (Admin - all requests across all colleges and subjects)
+ * GET /api/v1/admin/enrollment-requests
+ */
+exports.getEnrollmentRequests = async (req, res) => {
+  try {
+    const { status, search, limit = 20, offset = 0 } = req.query;
+
+    const result = await courseEnrollmentService.listEnrollmentRequests({
+      status: status || 'pending',
+      search: search || '',
+      allowedCollegeIds: null,
+      allowedSubjectIds: null,
+      isAdmin: true,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10),
+    });
+
+    res.json({ success: true, data: result.requests, total: result.total });
+  } catch (err) {
+    serverError(res, err, 'admin:getEnrollmentRequests');
+  }
+};
+
+/**
+ * Review an enrollment request (Admin - unrestricted)
+ * PATCH /api/v1/admin/enrollment-requests/:requestId
+ */
+exports.reviewEnrollmentRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status, rejection_reason } = req.body;
+
+    const updated = await courseEnrollmentService.reviewEnrollmentRequest({
+      requestId,
+      reviewerId: req.user.id,
+      status,
+      rejectionReason: rejection_reason,
+      allowedCollegeIds: null,
+      allowedSubjectIds: null,
+      isAdmin: true,
+    });
+
+    logAction({
+      req,
+      action: status === 'approved' ? 'ADMIN_APPROVE_ENROLLMENT' : 'ADMIN_REJECT_ENROLLMENT',
+      entityType: 'enrollment_requests',
+      entityId: requestId,
+      details: { status, rejection_reason },
+    });
+
+    res.json({
+      success: true,
+      message: `Enrollment request ${status} successfully`,
+      data: updated,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    serverError(res, err, 'admin:reviewEnrollmentRequest');
   }
 };
 

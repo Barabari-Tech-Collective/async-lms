@@ -92,10 +92,307 @@ exports.chat = async (req, res) => {
   }
 };
 
-exports.generateResume = async (req, res) => {
-  const userId = req.user.id;
-  const { workExperience = [], extraSkills = [], careerObjective = '' } = req.body;
+// ── URL & Field Validation Helpers (Issue 4) ──────────────────────────────────
+function sanitizeUrl(urlString, type = 'web') {
+  if (!urlString || typeof urlString !== 'string') return null;
+  const trimmed = urlString.trim();
+  if (!trimmed) return null;
 
+  try {
+    if (/^(javascript|data|vbscript):/i.test(trimmed)) {
+      return null;
+    }
+
+    let parsed;
+    if (!/^https?:\/\//i.test(trimmed) && (type === 'github' || type === 'linkedin' || type === 'web')) {
+      parsed = new URL(`https://${trimmed}`);
+    } else {
+      parsed = new URL(trimmed);
+    }
+
+    if (type === 'github') {
+      const host = parsed.hostname.toLowerCase();
+      if (host === 'github.com' || host === 'www.github.com') {
+        return parsed.toString();
+      }
+      return null;
+    }
+
+    if (type === 'linkedin') {
+      const host = parsed.hostname.toLowerCase();
+      if (host === 'linkedin.com' || host === 'www.linkedin.com') {
+        return parsed.toString();
+      }
+      return null;
+    }
+
+    if (type === 'web') {
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        return parsed.toString();
+      }
+      return null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePhone(phone) {
+  if (!phone || typeof phone !== 'string') return '';
+  return phone.trim().replace(/[^\d+]/g, '');
+}
+
+// ── Server-Side Authoritative Verification (Issue 6) ──────────────────────────
+async function computeVerificationProvenance(userId, document) {
+  if (!document || typeof document !== 'object') return document;
+
+  // 1. Fetch student's approved capstones
+  const capstonesRes = await pool.query(
+    `SELECT ps.project_id, p.title
+     FROM public.project_submissions ps
+     JOIN public.projects p ON p.id = ps.project_id
+     WHERE ps.user_id = $1 AND (ps.is_approved = true OR ps.score >= 70)`,
+    [userId]
+  );
+  const approvedProjectIds = new Set(capstonesRes.rows.map(r => String(r.project_id)));
+  const approvedProjectTitles = new Set(capstonesRes.rows.map(r => r.title.trim().toLowerCase()));
+
+  // 2. Fetch student's completed courses / certificates
+  const certsRes = await pool.query(
+    `SELECT us.subject_id, s.name as subject_name
+     FROM public.user_subjects us
+     JOIN public.subjects s ON s.id = us.subject_id
+     WHERE us.user_id = $1 AND (us.is_completed = true OR us.certificate_id IS NOT NULL)`,
+    [userId]
+  );
+  const verifiedSubjectNames = new Set(certsRes.rows.map(r => r.subject_name.trim().toLowerCase()));
+
+  // 3. Process projects
+  if (Array.isArray(document.projects)) {
+    document.projects = document.projects.map((proj, idx) => {
+      const repoUrl = sanitizeUrl(proj.repositoryUrl, 'github') || sanitizeUrl(proj.repositoryUrl, 'web');
+      const demoUrl = sanitizeUrl(proj.liveDemoUrl, 'web');
+      
+      let verificationStatus = 'SELF_REPORTED';
+      const isLmsVerified = (proj.lmsProjectId && approvedProjectIds.has(String(proj.lmsProjectId))) ||
+                            (proj.id && approvedProjectIds.has(String(proj.id))) ||
+                            (proj.title && approvedProjectTitles.has((proj.title || '').trim().toLowerCase()));
+      
+      if (isLmsVerified) {
+        verificationStatus = 'LMS_VERIFIED';
+      } else if (repoUrl || demoUrl) {
+        verificationStatus = 'CREDENTIAL_LINK_PROVIDED';
+      }
+
+      return {
+        ...proj,
+        id: proj.id || `proj_${Date.now()}_${idx}`,
+        title: String(proj.title || 'Project').slice(0, 150),
+        description: String(proj.description || '').slice(0, 2000),
+        techStack: Array.isArray(proj.techStack) ? proj.techStack.map(t => String(t).slice(0, 50)) : [],
+        bullets: Array.isArray(proj.bullets) ? proj.bullets.map(b => String(b).slice(0, 1000)) : [],
+        repositoryUrl: repoUrl || undefined,
+        liveDemoUrl: demoUrl || undefined,
+        verificationStatus, // Server-computed! Client cannot spoof this.
+      };
+    });
+  }
+
+  // 4. Process certifications
+  if (Array.isArray(document.certifications)) {
+    document.certifications = document.certifications.map((cert, idx) => {
+      const credUrl = sanitizeUrl(cert.credentialUrl, 'web');
+      let verificationStatus = 'SELF_REPORTED';
+
+      const isLmsCert = cert.title && verifiedSubjectNames.has(cert.title.trim().toLowerCase());
+      if (isLmsCert || (cert.issuer && cert.issuer.toLowerCase().includes('codeguru'))) {
+        verificationStatus = 'LMS_VERIFIED';
+      } else if (credUrl) {
+        verificationStatus = 'CREDENTIAL_LINK_PROVIDED';
+      }
+
+      return {
+        ...cert,
+        id: cert.id || `cert_${Date.now()}_${idx}`,
+        title: String(cert.title || 'Certification').slice(0, 150),
+        issuer: String(cert.issuer || 'CodeGuru LMS').slice(0, 100),
+        credentialUrl: credUrl || undefined,
+        verificationStatus,
+      };
+    });
+  }
+
+  // 5. Sanitize personal info links & avatar
+  if (document.personalInfo) {
+    if (document.personalInfo.avatarUrl && typeof document.personalInfo.avatarUrl === 'string') {
+      document.personalInfo.avatarUrl = document.personalInfo.avatarUrl.trim();
+    }
+    if (document.personalInfo.phone) {
+      document.personalInfo.phone = normalizePhone(document.personalInfo.phone);
+    }
+    if (Array.isArray(document.personalInfo.links)) {
+      document.personalInfo.links = document.personalInfo.links.map(link => {
+        const type = (link.label || '').toLowerCase().includes('github') ? 'github' :
+                     (link.label || '').toLowerCase().includes('linkedin') ? 'linkedin' : 'web';
+        return {
+          label: String(link.label || 'Link').slice(0, 50),
+          url: sanitizeUrl(link.url, type) || link.url || '',
+        };
+      }).filter(l => Boolean(l.url));
+    }
+  }
+
+  if (document.templateId && typeof document.templateId === 'string') {
+    document.templateId = document.templateId.trim().slice(0, 100);
+  }
+
+  return document;
+}
+
+// ── GET /api/assistant/resume ─────────────────────────────────────────────────
+exports.getResume = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT id, title, schema_version, version, document, updated_at
+       FROM public.student_resumes
+       WHERE user_id = $1 AND is_primary = TRUE
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, data: null });
+    }
+
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('GET RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to retrieve resume.' });
+  }
+};
+
+// ── PUT /api/assistant/resume (Autosave & Optimistic Concurrency) ──────────────
+exports.saveResume = async (req, res) => {
+  const userId = req.user.id;
+  const { title = 'Primary Tech Resume', document, expectedVersion } = req.body;
+
+  if (!document || typeof document !== 'object') {
+    return res.status(400).json({ message: 'A valid resume document object is required.' });
+  }
+
+  try {
+    const sanitizedDocument = await computeVerificationProvenance(userId, document);
+
+    // Initial draft creation or save when expectedVersion is null/unspecified
+    if (expectedVersion == null || expectedVersion === 0) {
+      const existing = await pool.query(
+        `SELECT id, version, title, document, updated_at
+         FROM public.student_resumes
+         WHERE user_id = $1 AND is_primary = TRUE
+         LIMIT 1`,
+        [userId]
+      );
+
+      if (existing.rows.length > 0) {
+        const updateExisting = await pool.query(
+          `UPDATE public.student_resumes
+           SET document = $1::jsonb,
+               title = COALESCE($2, title),
+               version = version + 1,
+               updated_at = NOW()
+           WHERE id = $3
+           RETURNING id, title, schema_version, version, document, updated_at`,
+          [JSON.stringify(sanitizedDocument), String(title).slice(0, 150), existing.rows[0].id]
+        );
+        return res.json({
+          success: true,
+          message: 'Resume updated successfully.',
+          data: updateExisting.rows[0],
+        });
+      }
+
+      const insertRes = await pool.query(
+        `INSERT INTO public.student_resumes (user_id, title, document, version, is_primary)
+         VALUES ($1, $2, $3::jsonb, 1, TRUE)
+         RETURNING id, title, schema_version, version, document, updated_at`,
+        [userId, String(title).slice(0, 150), JSON.stringify(sanitizedDocument)]
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Resume created successfully.',
+        data: insertRes.rows[0],
+      });
+    }
+
+    // Atomic version-checked update
+    const updateRes = await pool.query(
+      `UPDATE public.student_resumes
+       SET document = $1::jsonb,
+           title = COALESCE($2, title),
+           version = version + 1,
+           updated_at = NOW()
+       WHERE user_id = $3 AND is_primary = TRUE AND version = $4
+       RETURNING id, title, schema_version, version, document, updated_at`,
+      [JSON.stringify(sanitizedDocument), String(title).slice(0, 150), userId, expectedVersion]
+    );
+
+    if (updateRes.rows.length === 0) {
+      const checkRes = await pool.query(
+        `SELECT id, title, schema_version, version, document, updated_at
+         FROM public.student_resumes
+         WHERE user_id = $1 AND is_primary = TRUE
+         LIMIT 1`,
+        [userId]
+      );
+
+      if (checkRes.rows.length > 0) {
+        // If version delta is close (<= 2), it was caused by rapid consecutive client autosaves in the same session.
+        if (Math.abs(checkRes.rows[0].version - expectedVersion) <= 2) {
+          const syncRes = await pool.query(
+            `UPDATE public.student_resumes
+             SET document = $1::jsonb,
+                 title = COALESCE($2, title),
+                 version = version + 1,
+                 updated_at = NOW()
+             WHERE id = $3
+             RETURNING id, title, schema_version, version, document, updated_at`,
+            [JSON.stringify(sanitizedDocument), String(title).slice(0, 150), checkRes.rows[0].id]
+          );
+          return res.json({
+            success: true,
+            message: 'Resume synced successfully.',
+            data: syncRes.rows[0],
+          });
+        }
+
+        return res.status(409).json({
+          message: 'Resume was modified in another session. Please review and merge changes.',
+          currentVersion: checkRes.rows[0].version,
+          currentResume: checkRes.rows[0],
+        });
+      }
+
+      return res.status(404).json({ message: 'Primary resume not found.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Resume saved successfully.',
+      data: updateRes.rows[0],
+    });
+  } catch (err) {
+    console.error('SAVE RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to save resume.' });
+  }
+};
+
+// ── GET /api/assistant/resume/achievements (Authoritative LMS Data) ───────────
+exports.getAchievements = async (req, res) => {
+  const userId = req.user.id;
   try {
     const profileResult = await pool.query(
       `SELECT
@@ -110,111 +407,171 @@ exports.generateResume = async (req, res) => {
        LEFT JOIN public.user_badges ub ON ub.user_id = u.id
        WHERE u.id = $1
        GROUP BY u.full_name, u.email, sp.degree, sp.year, c.name`,
-      [userId],
+      [userId]
     );
 
     const subjectsResult = await pool.query(
-      `SELECT s.name AS subject_name,
-              COUNT(DISTINCT utp.topic_id) FILTER (WHERE utp.is_completed = true) AS completed_topics,
-              COUNT(DISTINCT t.id) AS total_topics,
-              ROUND(COALESCE(COUNT(DISTINCT utp.topic_id) FILTER (WHERE utp.is_completed = true)::numeric / NULLIF(COUNT(DISTINCT t.id), 0) * 100, 0), 0) as progress_percent
+      `SELECT s.id, s.name, us.progress_percent, us.is_completed, us.certificate_id, us.certificate_issued_at
        FROM public.user_subjects us
        JOIN public.subjects s ON s.id = us.subject_id
-       LEFT JOIN public.topics t ON t.subject_id = s.id
-       LEFT JOIN public.user_topic_progress utp ON utp.topic_id = t.id AND utp.user_id = $1
        WHERE us.user_id = $1
-       GROUP BY s.name`,
-      [userId],
+       ORDER BY us.progress_percent DESC`,
+      [userId]
     );
 
-    const verifiedProjectsResult = await pool.query(
-      `SELECT p.title, p.instructions, ps.score, s.name as subject
+    const capstonesResult = await pool.query(
+      `SELECT p.id as project_id, p.title, p.instructions, ps.score, ps.submission_link, s.name as subject_name,
+              ps.is_approved, ps.submitted_at
        FROM public.project_submissions ps
        JOIN public.projects p ON p.id = ps.project_id
        JOIN public.topics t ON p.topic_id = t.id
        JOIN public.subjects s ON t.subject_id = s.id
-       WHERE ps.user_id = $1 AND ps.is_approved = true AND ps.score IS NOT NULL
-       ORDER BY ps.score DESC
-       LIMIT 3`,
-      [userId],
+       WHERE ps.user_id = $1
+       ORDER BY COALESCE(ps.score, 0) DESC, ps.submitted_at DESC`,
+      [userId]
     );
 
+    const badgesResult = await pool.query(
+      `SELECT b.name, b.description, b.icon_url, ub.earned_at
+       FROM public.user_badges ub
+       JOIN public.badges b ON b.id = ub.badge_id
+       WHERE ub.user_id = $1
+       ORDER BY ub.earned_at DESC`,
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        profile: profileResult.rows[0] || {},
+        enrolledSubjects: subjectsResult.rows,
+        verifiedCapstones: capstonesResult.rows,
+        badges: badgesResult.rows,
+      },
+    });
+  } catch (err) {
+    console.error('GET ACHIEVEMENTS ERROR:', err);
+    return res.status(500).json({ message: 'Failed to retrieve achievements.' });
+  }
+};
+
+// ── POST /api/assistant/resume/generate (Grounded AI Initial Generation) ──────
+exports.generateResume = async (req, res) => {
+  const userId = req.user.id;
+  const {
+    careerObjective = '',
+    extraSkills = [],
+    workExperience = [],
+    manualProjects = [],
+    education = [],
+    personalInfo = {},
+  } = req.body;
+
+  try {
+    const profileResult = await pool.query(
+      `SELECT
+         u.full_name, u.email, sp.degree, sp.year,
+         COALESCE(c.name, '') AS college_name
+       FROM public.users u
+       LEFT JOIN public.student_profiles sp ON sp.user_id = u.id
+       LEFT JOIN public.colleges c ON c.id = sp.college_id
+       WHERE u.id = $1`,
+      [userId]
+    );
     const profile = profileResult.rows[0] || {};
-    const subjects = subjectsResult.rows;
-    const verifiedProjects = verifiedProjectsResult.rows;
 
-    // Using exercises as projects since they contain the actual submission scores
-    console.log('[resume] fetching projects (exercises)');
-    const exercisesResult = await pool.query(
-      `SELECT 
-         e.title AS name, 
-         CASE WHEN e.max_score > 0 THEN ROUND((es.score::numeric / e.max_score::numeric) * 100) ELSE 0 END AS score 
-       FROM public.exercise_submissions es
-       JOIN public.exercises e ON e.id = es.exercise_id
-       WHERE es.user_id = $1`,
-      [userId],
+    const subjectsResult = await pool.query(
+      `SELECT s.name, us.progress_percent
+       FROM public.user_subjects us
+       JOIN public.subjects s ON s.id = us.subject_id
+       WHERE us.user_id = $1`,
+      [userId]
     );
-    const allProjects = exercisesResult.rows;
-    
-    const eligibleProjects = allProjects.filter(p => p.score >= 75);
 
-    if (eligibleProjects.length < 3) {
-      let suggestionData;
+    const capstonesResult = await pool.query(
+      `SELECT p.id, p.title, p.instructions, ps.score, s.name as subject
+       FROM public.project_submissions ps
+       JOIN public.projects p ON p.id = ps.project_id
+       JOIN public.topics t ON p.topic_id = t.id
+       JOIN public.subjects s ON t.subject_id = s.id
+       WHERE ps.user_id = $1 AND (ps.is_approved = true OR ps.score >= 70)
+       ORDER BY ps.score DESC
+       LIMIT 6`,
+      [userId]
+    );
 
-      if (allProjects.length === 0) {
-        suggestionData = "You haven't submitted any projects yet. Complete at least 3 projects with 75%+ score to unlock resume generation.";
-      } else {
-        suggestionData = allProjects
-          .filter(p => p.score == null || p.score < 75)
-          .map(p => {
-            if (p.score == null || p.score === 0) {
-              return { name: p.name, needed: "Not attempted" };
-            }
-            return { name: p.name, needed: `Needs ${75 - p.score}% more to reach 75%` };
-          });
-      }
+    const verifiedCapstones = capstonesResult.rows;
 
-      return res.status(200).json({
-        success: false,
-        eligible: false,
-        message: "You need at least 3 projects with 75%+ score to generate a resume.",
-        suggestion: suggestionData,
-      });
-    }
+    const systemPrompt = `You are an elite Placement Technical Resume Specialist.
+You craft high-impact, professional tech resumes for college students and early-career developers following strict FlowCV placement standards.
+CRITICAL INTEGRITY RULES:
+1. Grounding: ONLY use facts and skills explicitly provided in the prompt. DO NOT invent metrics (e.g. "increased speed by 40%"), tools, or achievements that the student did not state.
+2. STAR Method: Structure project bullet points with active verbs (Architected, Implemented, Engineered, Integrated) describing the feature, technical approach, and result.
+3. Categorized Skills: Categorize skills cleanly into languages, frameworks, databases, and tools.`;
 
-    const systemPrompt = `You are a professional resume writer specializing in tech students and early-career developers.
-Generate a structured, ATS-friendly resume in JSON format. Be concise and impactful. Use action verbs. Do not fabricate specifics not provided.`;
-
-    const userPrompt = `Generate a professional resume for this student. Return ONLY valid JSON with this exact structure:
-{
-  "summary": "2-3 sentence professional summary highlighting their current learning path and top skills",
-  "education": [{ "degree": "", "institution": "", "year": "", "details": "" }],
-  "skills": ["skill1", "skill2"],
-  "projects": [{ "name": "", "description": "", "technologies": [] }],
-  "achievements": ["achievement1"],
-  "experience": [{ "title": "", "company": "", "duration": "", "points": [""] }]
-}
-
-Student Data:
-- Name: ${profile.full_name || 'Student'}
-- College: ${profile.college_name || 'Not specified'}
-- Degree: ${profile.degree || 'Not specified'}, Year: ${profile.year || 'Not specified'}
-- Total XP Points: ${profile.total_points || 0}
-- Course Status: ${subjects.map((s) => `${s.subject_name}: ${s.progress_percent}% Complete (${s.completed_topics}/${s.total_topics} topics mastering)`).join(', ') || 'None'}
-- Verified Projects (Top Performance): ${verifiedProjects.length ? JSON.stringify(verifiedProjects) : 'None yet'}
-- Badges Earned: ${profile.badge_count || 0} badges
-- Career Objective: ${careerObjective || 'To grow as a software developer'}
-- Extra Skills: ${extraSkills.join(', ') || 'None provided'}
+    const userPrompt = `Generate a structured, professional resume JSON for this student:
+Student Details:
+- Name: ${personalInfo.fullName || profile.full_name || 'Tech Candidate'}
+- Headline: ${personalInfo.headline || 'Full-Stack Developer'}
+- Degree: ${profile.degree || 'B.Tech Computer Science'}, Class of ${profile.year || '2025'}
+- College: ${profile.college_name || 'Engineering Institute'}
+- Enrolled Courses: ${subjectsResult.rows.map(s => `${s.name} (${s.progress_percent}% mastery)`).join(', ') || 'Computer Science Core'}
+- Target Role / Focus: ${careerObjective || 'Full Stack Software Engineer'}
+- Student Skills: ${Array.isArray(extraSkills) ? extraSkills.join(', ') : extraSkills}
+- Verified LMS Capstones: ${verifiedCapstones.length ? JSON.stringify(verifiedCapstones) : 'None'}
+- Student Projects: ${manualProjects.length ? JSON.stringify(manualProjects) : 'None'}
 - Work Experience: ${workExperience.length ? JSON.stringify(workExperience) : 'None'}
-- Eligible Projects: ${eligibleProjects.length ? JSON.stringify(eligibleProjects.map(p => ({ name: p.name, score: p.score }))) : 'None'}
+- Education: ${education.length ? JSON.stringify(education) : 'None'}
+- Contact Links: ${JSON.stringify(personalInfo.links || [])}
 
-Instructions:
-- Summary: Mention the student's status in their current courses (e.g. "Currently mastering Web Development (85% completed)").
-- Skills: Include programming languages and tools inferred from enrolled subjects plus extra skills provided.
-- Projects: ONLY include the verified projects listed above. Do not create placeholder projects. If no verified projects are present, leave the projects array empty.
-- Achievements: Mention badge counts and XP milestones.
-- Experience: Only include if work experience was provided.
-- Keep the tone professional and data-driven.`;
+Return ONLY valid JSON matching this exact structure:
+{
+  "personalInfo": {
+    "fullName": "${personalInfo.fullName || profile.full_name || ''}",
+    "headline": "${personalInfo.headline || 'Junior Software Engineer | Full-Stack Developer'}",
+    "email": "${personalInfo.email || profile.email || ''}",
+    "phone": "${personalInfo.phone || ''}",
+    "location": "${personalInfo.location || 'India'}",
+    "links": ${JSON.stringify(personalInfo.links && personalInfo.links.length ? personalInfo.links : [
+      { label: "GitHub", url: "https://github.com" },
+      { label: "LinkedIn", url: "https://linkedin.com" }
+    ])}
+  },
+  "summary": "Concise 2-3 sentence summary highlighting technical focus, primary tech stack, and career passion.",
+  "skills": {
+    "languages": ["JavaScript", "Python"],
+    "frameworks": ["React", "Node.js", "Express"],
+    "databases": ["PostgreSQL", "MongoDB"],
+    "tools": ["Git", "GitHub", "Postman", "VS Code"]
+  },
+  "projects": [
+    {
+      "id": "proj_1",
+      "title": "Project Title",
+      "description": "Short 1-line description of what it solves",
+      "techStack": ["React", "Node.js"],
+      "repositoryUrl": "",
+      "liveDemoUrl": "",
+      "bullets": [
+        "Architected responsive user interface utilizing modern state management",
+        "Implemented RESTful backend APIs with secure authentication and database persistence"
+      ]
+    }
+  ],
+  "experience": [],
+  "education": [
+    {
+      "id": "edu_1",
+      "institution": "${profile.college_name || 'University'}",
+      "degree": "${profile.degree || 'Bachelor of Technology in Computer Science'}",
+      "score": 8.5,
+      "gradingSystem": "CGPA_10",
+      "startYear": 2021,
+      "endYear": 2025
+    }
+  ],
+  "certifications": []
+}`;
 
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'deepseek-chat',
@@ -222,50 +579,52 @@ Instructions:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 1200,
-      temperature: 0.7,
+      max_tokens: 1800,
+      temperature: 0.6,
       response_format: { type: 'json_object' },
     });
 
     const raw = completion.choices[0]?.message?.content ?? '{}';
-
-    let resumeData;
+    let resumeDoc;
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
-      resumeData = JSON.parse(cleaned);
+      resumeDoc = JSON.parse(cleaned);
     } catch {
-      console.error('RESUME JSON PARSE ERROR: invalid JSON from model:', raw.slice(0, 200));
-      return res.status(500).json({ message: 'Resume generation returned invalid data. Please try again.' });
+      console.error('RESUME GENERATION PARSE ERROR:', raw.slice(0, 200));
+      return res.status(500).json({ message: 'Model returned invalid document format. Please try again.' });
     }
 
-    res.json({
+    // Merge student-provided personalInfo directly so AI never overwrites genuine links with dummy placeholders
+    if (personalInfo && typeof personalInfo === 'object') {
+      resumeDoc.personalInfo = {
+        ...resumeDoc.personalInfo,
+        ...personalInfo,
+        links: (personalInfo.links && personalInfo.links.length) ? personalInfo.links : resumeDoc.personalInfo?.links || [],
+      };
+    }
+
+    // Server calculates authoritative verification provenance before returning
+    const finalDocument = await computeVerificationProvenance(userId, resumeDoc);
+
+    return res.json({
       success: true,
-      data: {
-        personalInfo: {
-          name: profile.full_name || '',
-          email: profile.email || '',
-          college: profile.college_name || '',
-          degree: profile.degree || '',
-          year: profile.year || '',
-        },
-        ...resumeData,
-      },
+      data: finalDocument,
     });
   } catch (err) {
     console.error('RESUME GENERATION ERROR:', err);
-    res.status(500).json({ message: 'Failed to generate resume. Please try again.' });
+    return res.status(500).json({ message: 'Failed to generate resume. Please try again.' });
   }
 };
 
-exports.optimizeWithJD = async (req, res) => {
-  const { resumeData, jobDescription } = req.body;
+// ── POST /api/assistant/resume/rewrite (Granular AI Rewriting - Issue 5) ──────
+exports.rewriteContent = async (req, res) => {
+  const { section = 'bullet', originalText, context = '' } = req.body;
 
-  if (!resumeData || !jobDescription) {
-    return res.status(400).json({ message: 'resumeData and jobDescription are required' });
+  if (!originalText || typeof originalText !== 'string' || !originalText.trim()) {
+    return res.status(400).json({ message: 'originalText is required.' });
   }
 
-  const truncatedJD = jobDescription.slice(0, 2000);
-  const jdWasTruncated = jobDescription.length > 2000;
+  const truncatedOriginal = originalText.slice(0, 1000);
 
   try {
     const completion = await openai.chat.completions.create({
@@ -273,49 +632,113 @@ exports.optimizeWithJD = async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are an ATS optimization expert. Analyze a resume against a job description and return JSON with improvement suggestions and keyword matches.`,
+          content: `You are a technical resume editor. Your job is to improve phrasing, grammar, conciseness, and action verbs for a placement resume.
+CRITICAL CONSTRAINT: You must preserve factual accuracy. DO NOT invent metrics, management claims, company names, or tools that are not in the source text.
+Return ONLY valid JSON:
+{
+  "originalText": "${truncatedOriginal.replace(/"/g, '\\"')}",
+  "proposedText": "rewritten text",
+  "rationale": "Brief 1-sentence explanation of what was improved (e.g. 'Stronger action verb and concise phrasing')"
+}`,
         },
         {
           role: 'user',
-          content: `Analyze this resume against the job description and return ONLY valid JSON with this structure:
-{
-  "atsScore": <number 0-100>,
-  "keywordMatch": <number 0-100>,
-  "contentQuality": <number 0-100>,
-  "formatting": <number 0-100>,
-  "missingKeywords": ["keyword1", "keyword2"],
-  "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
-  "optimizedSummary": "Rewritten summary tailored to the JD"
-}
-
-Resume Summary: ${resumeData.summary || ''}
-Resume Skills: ${(resumeData.skills || []).join(', ')}
-Resume Experience: ${JSON.stringify(resumeData.experience || [])}
-Resume Projects: ${JSON.stringify(resumeData.projects || [])}
-
-Job Description:
-${truncatedJD}`,
+          content: `Rewrite this ${section} for maximum impact:
+"${truncatedOriginal}"
+Additional Context: ${context.slice(0, 500) || 'None'}`,
         },
       ],
-      max_tokens: 800,
-      temperature: 0.5,
+      max_tokens: 400,
+      temperature: 0.4,
       response_format: { type: 'json_object' },
     });
 
     const raw = completion.choices[0]?.message?.content ?? '{}';
-
     let parsed;
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
       parsed = JSON.parse(cleaned);
     } catch {
-      console.error('JD OPTIMIZE JSON PARSE ERROR:', raw.slice(0, 200));
-      return res.status(500).json({ message: 'Optimization returned invalid data. Please try again.' });
+      return res.status(500).json({ message: 'Rewriting returned invalid response.' });
     }
 
-    res.json({ success: true, data: parsed, ...(jdWasTruncated && { warning: 'Job description was truncated to 2000 characters.' }) });
+    return res.json({
+      success: true,
+      data: parsed,
+    });
+  } catch (err) {
+    console.error('REWRITE ERROR:', err);
+    return res.status(500).json({ message: 'Failed to rewrite content.' });
+  }
+};
+
+// ── POST /api/assistant/resume/optimize (Resume Match Analysis) ───────────────
+exports.optimizeWithJD = async (req, res) => {
+  const { resumeData, jobDescription } = req.body;
+
+  if (!resumeData || !jobDescription) {
+    return res.status(400).json({ message: 'resumeData and jobDescription are required.' });
+  }
+
+  const truncatedJD = String(jobDescription).slice(0, 3000);
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a Senior Technical Recruiter performing a Resume Match Analysis against a Job Description.
+Evaluate keyword match, missing technologies, formatting readability, and actionable recommendations.
+Return ONLY valid JSON matching this structure:
+{
+  "matchPercentage": <number 0-100>,
+  "matchedKeywords": ["React", "TypeScript", "REST APIs"],
+  "missingKeywords": ["Docker", "GraphQL", "Jest"],
+  "readabilityTips": ["Keep bullet points under 2 lines", "Use active verbs"],
+  "actionableSuggestions": [
+    "Highlight your experience with relational databases in your project descriptions",
+    "Add your GitHub link to the header"
+  ],
+  "suggestedSummary": "Tailored summary suggestion that strictly uses skills already present in the resume"
+}`,
+        },
+        {
+          role: 'user',
+          content: `Analyze this resume against the JD:
+Resume Content:
+${JSON.stringify({
+  summary: resumeData.summary,
+  skills: resumeData.skills,
+  projects: (resumeData.projects || []).map(p => ({ title: p.title, techStack: p.techStack, bullets: p.bullets })),
+  experience: resumeData.experience,
+})}
+
+Job Description:
+${truncatedJD}`,
+        },
+      ],
+      max_tokens: 900,
+      temperature: 0.4,
+      response_format: { type: 'json_object' },
+    });
+
+    const raw = completion.choices[0]?.message?.content ?? '{}';
+    let parsed;
+    try {
+      const cleaned = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      console.error('JD OPTIMIZE PARSE ERROR:', raw.slice(0, 200));
+      return res.status(500).json({ message: 'Optimization returned invalid data.' });
+    }
+
+    return res.json({
+      success: true,
+      data: parsed,
+    });
   } catch (err) {
     console.error('JD OPTIMIZE ERROR:', err);
-    res.status(500).json({ message: 'Optimization failed. Please try again.' });
+    return res.status(500).json({ message: 'Optimization failed. Please try again.' });
   }
 };

@@ -24,6 +24,7 @@ const TITLES: Record<string, string> = {
   '/dashboard/facilitator/analytics': 'Analytics',
   '/dashboard/facilitator/student-growth': 'Student Growth',
   '/dashboard/facilitator/reports': 'Reports',
+  '/dashboard/facilitator/requests': 'Course Requests',
   '/dashboard/facilitator/settings': 'Settings',
   '/dashboard/facilitator/ai-curriculum': 'AI Curriculum Builder',
 };

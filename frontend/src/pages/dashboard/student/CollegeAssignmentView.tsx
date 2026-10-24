@@ -21,6 +21,7 @@ import { getErrorMessage } from '@/lib/utils';
 import type { CollegeAssignment, SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 import { FormattedContent } from '@/utils/contentFormat';
+import { formatDateTime, isPastDate } from '@/utils/dateUtils';
 
 // URL Validation Regex Patterns
 const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
@@ -287,11 +288,17 @@ export default function CollegeAssignmentView() {
                 className={`px-3 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1.5 ${
                   isSubmitted
                     ? 'bg-emerald-50 text-emerald-700'
+                    : isPastDate(assignment.due_date)
+                    ? 'bg-red-50 text-red-600'
                     : 'bg-orange-50 text-orange-600'
                 }`}
               >
                 {isSubmitted && <CheckCircle2 className='w-3 h-3' />}
-                {isSubmitted ? 'Completed' : 'Pending'}
+                {isSubmitted
+                  ? 'Completed'
+                  : isPastDate(assignment.due_date)
+                  ? 'Overdue'
+                  : 'Pending'}
               </span>
             </div>
             <h1 className='text-2xl sm:text-3xl font-bold text-[#1e293b] tracking-tight capitalize'>
@@ -302,11 +309,7 @@ export default function CollegeAssignmentView() {
               <span>
                 Due:{' '}
                 {assignment.due_date
-                  ? new Date(assignment.due_date).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })
+                  ? formatDateTime(assignment.due_date)
                   : 'No Deadline'}
               </span>
             </div>
@@ -541,6 +544,16 @@ export default function CollegeAssignmentView() {
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* Late Submission Notice if Past Due Date */}
+              {isPastDate(assignment.due_date) && !isSubmitted && (
+                <div className='flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs'>
+                  <AlertTriangle className='w-4 h-4 text-red-600 shrink-0 mt-0.5' />
+                  <div>
+                    <span className='font-semibold'>Deadline has passed:</span> Submitting now will be recorded as a <span className='font-semibold underline'>Late Submission</span>.
                   </div>
                 </div>
               )}

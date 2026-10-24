@@ -27,6 +27,7 @@ export interface LessonContent {
 export interface QuizOption {
   id: string;
   option_text: string;
+  is_correct?: boolean;
 }
 
 export interface QuizQuestion {

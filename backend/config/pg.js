@@ -773,6 +773,56 @@ pool.on('error', (err, client) => {
       ON CONFLICT DO NOTHING;
     `).catch((err) => console.warn('[Migration] Course update notification sync notice:', err.message));
 
+    // ── Student Course Enrollment Requests Table & Indexes ──────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enrollment_requests (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject_id       UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        status           VARCHAR(20) NOT NULL DEFAULT 'pending' 
+                         CHECK (status IN ('pending', 'approved', 'rejected')),
+        rejection_reason TEXT,
+        reviewed_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at      TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_enrollment_request 
+        ON enrollment_requests(user_id, subject_id) 
+        WHERE status = 'pending';
+
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_status ON enrollment_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_user ON enrollment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_subject ON enrollment_requests(subject_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_created_at ON enrollment_requests(created_at DESC);
+    `).catch((err) => console.warn('[Migration] enrollment_requests setup notice:', err.message));
+
+    // ── Student Resumes (Placement Assistance Resume Builder) ─────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS student_resumes (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title          VARCHAR(150) NOT NULL DEFAULT 'Primary Tech Resume',
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        document       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        version        INTEGER NOT NULL DEFAULT 1,
+        is_primary     BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT resume_document_is_object CHECK (jsonb_typeof(document) = 'object'),
+        CONSTRAINT resume_version_positive CHECK (version > 0)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_student_resumes_primary
+        ON student_resumes(user_id)
+        WHERE is_primary = TRUE;
+
+      CREATE INDEX IF NOT EXISTS idx_student_resumes_user_updated
+        ON student_resumes(user_id, updated_at DESC);
+    `).catch((err) => console.warn('[Migration] student_resumes setup notice:', err.message));
+    console.log('[Migration] student_resumes table and optimistic concurrency index verified.');
+
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {

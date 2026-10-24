@@ -28,6 +28,7 @@ import {
   useEnrolledCourses,
   useAllCourses,
   useEnrollMutation,
+  useStudentEnrollmentRequests,
 } from '@/hooks/queries/useCourses';
 
 const getCourseTheme = (slug: string) => {
@@ -50,6 +51,7 @@ const MyCourses = () => {
   const { data: enrolled = [], isLoading: loadingEnrolled } =
     useEnrolledCourses();
   const { data: allSubjects = [], isLoading: loadingAll } = useAllCourses();
+  const { data: enrollmentRequests = [] } = useStudentEnrollmentRequests();
   const enrollMutation = useEnrollMutation();
 
   const loading = loadingEnrolled || loadingAll;
@@ -58,16 +60,21 @@ const MyCourses = () => {
     if (!enrollTarget) return;
     try {
       await enrollMutation.mutateAsync(enrollTarget.id);
-      toast.success(`Enrolled in ${enrollTarget.name}!`);
+      toast.success(`Enrollment request submitted for ${enrollTarget.name}! Waiting for instructor approval.`);
       setEnrollTarget(null);
     } catch (error) {
       toast.error(
-        getErrorMessage(error, 'Enrollment failed. Please try again.'),
+        getErrorMessage(error, 'Enrollment request failed. Please try again.'),
       );
     }
   };
 
   const enrolledIds = new Set(enrolled.map((s) => s.id));
+  const pendingRequestMap = new Map(
+    enrollmentRequests
+      .filter((r) => r.status === 'pending')
+      .map((r) => [r.subject_id, r])
+  );
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: 'enrolled', label: 'Enrolled', count: enrolled.length },
@@ -191,6 +198,11 @@ const MyCourses = () => {
                       Enrolled
                     </span>
                   )}
+                  {activeTab === 'all' && !isEnrolled && pendingRequestMap.has(course.id) && (
+                    <span className='absolute top-3 right-3 bg-amber-500/90 backdrop-blur-sm text-white text-[10px] font-bold uppercase px-2.5 py-1 rounded-full'>
+                      Pending Approval
+                    </span>
+                  )}
                 </div>
 
                 <div className='p-5 sm:p-8 space-y-4 sm:space-y-5'>
@@ -236,6 +248,16 @@ const MyCourses = () => {
                         className={`h-2 bg-slate-100 rounded-full ${progress >= 100 ? '[&>div]:bg-emerald-500' : ''}`}
                       />
                     </div>
+                  ) : pendingRequestMap.has(course.id) ? (
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      disabled
+                      className='w-full gap-2 border-amber-300 bg-amber-50 text-amber-700 h-10 min-h-[40px] font-semibold text-xs sm:text-sm cursor-not-allowed'
+                    >
+                      <Loader2 className='w-4 h-4 animate-spin text-amber-600' />
+                      Request Pending Approval
+                    </Button>
                   ) : (
                     <Button
                       size='sm'
@@ -246,7 +268,7 @@ const MyCourses = () => {
                       }}
                     >
                       <PlusCircle className='w-4 h-4' />
-                      Enroll Now
+                      Request Enrollment
                     </Button>
                   )}
                 </div>
@@ -262,14 +284,13 @@ const MyCourses = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enroll in {enrollTarget?.name}?</DialogTitle>
+            <DialogTitle>Request Enrollment in {enrollTarget?.name}?</DialogTitle>
             <DialogDescription>
-              You're about to enroll in{' '}
+              You are requesting access to{' '}
               <span className='font-semibold text-slate-700'>
                 {enrollTarget?.name}
               </span>
-              . This will add the course to your learning path and unlock the
-              first module.
+              . Once an instructor or administrator approves your request, the course will be added to your learning dashboard.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -288,7 +309,7 @@ const MyCourses = () => {
               {enrollMutation.isPending && (
                 <Loader2 className='w-4 h-4 animate-spin mr-2' />
               )}
-              {enrollMutation.isPending ? 'Enrolling...' : 'Confirm Enroll'}
+              {enrollMutation.isPending ? 'Submitting...' : 'Submit Request'}
             </Button>
           </DialogFooter>
         </DialogContent>
