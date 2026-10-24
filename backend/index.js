@@ -127,6 +127,7 @@ app.use(express.json());
 const server = http.createServer(app);
 
 app.use('/api/v1/auth', authLimiter, require('./routes/auth.routes'));
+app.use('/api/v1/me/google-identity', require('./routes/googleIdentity.routes'));
 app.use('/api/v1/users', require('./routes/user.routes'));
 app.use('/api/v1/students', require('./routes/student.routes'));
 app.use('/api/v1/editor', require('./routes/editor.routes'));

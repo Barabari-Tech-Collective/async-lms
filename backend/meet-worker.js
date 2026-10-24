@@ -1,8 +1,5 @@
 require('dotenv').config();
 
-const { getGoogleMeetConfig } = require('./config/googleMeet');
-getGoogleMeetConfig();
-
 const { Worker } = require('bullmq');
 const {
   MEET_QUEUE_NAME,
@@ -20,6 +17,7 @@ const {
 const { createMeetJob } = require('./services/meetJob.service');
 const { enqueueMeetJob } = require('./services/meetQueue.service');
 const pool = require('./config/pg');
+const { normalizeMeetUserId } = require('./utils/meetIdentity');
 
 const WORKER_CONCURRENCY = parseInt(
   process.env.MEET_WORKER_CONCURRENCY || '2',
@@ -47,7 +45,7 @@ async function processMeetJob(job) {
     const current = await getMeetJobAvailability(meetJob.id);
     if (!current) throw new Error(`Meet job ${meetJob.id} disappeared during claim`);
     if (current.state === 'succeeded' || current.state === 'running') return;
-    if (current.state === 'retrying') {
+    if (current.state === 'retrying' || current.state === 'pending') {
       const waitMs = Math.max(
         new Date(current.available_at).getTime() - Date.now(),
         0,
@@ -158,7 +156,19 @@ async function endMeetSpace(meetJob, service) {
     return;
   }
 
-  await service.endActiveConference(result.rows[0].meet_space_name);
+  try {
+    await service.endActiveConference(result.rows[0].meet_space_name);
+  } catch (error) {
+    const status = error?.status || error?.cause?.response?.status;
+    const message = error?.message || '';
+    const isNoActiveConference =
+      status === 400 &&
+      /FAILED_PRECONDITION|no active conference|active conference/i.test(message);
+    if (!isNoActiveConference) throw error;
+    console.info(
+      `[meet-worker] No active conference for ${result.rows[0].meet_space_name}; continuing attendance sync.`,
+    );
+  }
   const endResult = await pool.query(
     `UPDATE classes
         SET actual_end_at = COALESCE(actual_end_at, NOW()),
@@ -207,7 +217,7 @@ async function syncMeetSessions(meetJob, service) {
 
 async function saveMeetSession(classId, conferenceRecord, participant, session) {
   if (!session.startTime) return;
-  const meetUserId = participant.signedinUser?.user || null;
+  const meetUserId = normalizeMeetUserId(participant.signedinUser?.user);
   const participantType = meetUserId
     ? 'signed_in'
     : participant.anonymousUser

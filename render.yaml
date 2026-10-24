@@ -55,6 +55,14 @@ services:
         sync: false
       - key: GOOGLE_AUTH_CLIENT_SECRET
         sync: false
+      - key: GOOGLE_IDENTITY_CLIENT_ID
+        sync: false
+      - key: GOOGLE_IDENTITY_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_IDENTITY_CALLBACK_URL
+        sync: false
+      - key: GOOGLE_IDENTITY_STATE_SECRET
+        sync: false
       - key: GOOGLE_MEET_CLIENT_ID
         sync: false
       - key: GOOGLE_MEET_CLIENT_SECRET

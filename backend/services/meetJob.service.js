@@ -11,7 +11,32 @@ async function createMeetJob({
        (class_id, operation, idempotency_key, available_at)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (idempotency_key)
-     DO UPDATE SET updated_at = NOW()
+     DO UPDATE SET
+       state = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN 'pending'
+         ELSE meet_jobs.state
+       END,
+       available_at = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN EXCLUDED.available_at
+         ELSE meet_jobs.available_at
+       END,
+       attempt_count = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN 0
+         ELSE meet_jobs.attempt_count
+       END,
+       started_at = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
+         ELSE meet_jobs.started_at
+       END,
+       completed_at = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
+         ELSE meet_jobs.completed_at
+       END,
+       error_summary = CASE
+         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
+         ELSE meet_jobs.error_summary
+       END,
+       updated_at = NOW()
      RETURNING *`,
     [classId, operation, idempotencyKey, availableAt],
   );

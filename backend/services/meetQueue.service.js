@@ -5,6 +5,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const MEET_QUEUE_NAME = 'meet-queue';
 
 const redisConnection = new Redis(REDIS_URL, {
+  family: 4,
   maxRetriesPerRequest: null,
   retryStrategy(times) {
     return Math.min(times * 50, 2000);
@@ -24,7 +25,7 @@ async function enqueueMeetJob(meetJob, options = {}) {
     meetJob.operation,
     { meetJobId: meetJob.id },
     {
-      jobId: `meet-${meetJob.id}`,
+      jobId: `meet-${meetJob.id}-${Date.now()}`,
       attempts: options.attempts || 3,
       backoff: options.backoff || { type: 'exponential', delay: 5000 },
       removeOnComplete: 1000,
