@@ -1,5 +1,6 @@
-import { Briefcase, GraduationCap, Code2, Award, User, Lightbulb } from 'lucide-react';
-import type { ResumeMatchResult, ResumeDocument, Section, SectionKey } from './types';
+import { Briefcase, GraduationCap, Code2, Award, User, Lightbulb, Calendar } from 'lucide-react';
+import type { ResumeMatchResult, ResumeDocument, Section, SectionKey, ResumeCategory } from './types';
+import { getCategoryConfig } from './types';
 
 export const DEFAULT_SECTIONS: Section[] = [
   { id: 'summary', label: 'Summary', icon: User },
@@ -7,24 +8,34 @@ export const DEFAULT_SECTIONS: Section[] = [
   { id: 'projects', label: 'Projects', icon: Code2 },
   { id: 'education', label: 'Education', icon: GraduationCap },
   { id: 'experience', label: 'Experience', icon: Briefcase },
+  { id: 'events', label: 'Events & Workshops', icon: Calendar },
   { id: 'certifications', label: 'Certifications', icon: Award },
 ];
 
-export function createEmptyResume(): ResumeDocument {
+export function createEmptyResume(
+  user?: { full_name?: string; email?: string } | null,
+  category: ResumeCategory = 'general',
+  targetRole?: string
+): ResumeDocument {
+  const config = getCategoryConfig(category);
+  const selectedRole = targetRole?.trim() || config.defaultRole;
+
   return {
     schemaVersion: 1,
-    templateId: 'modern-mercury',
+    category,
+    targetRole: selectedRole,
+    templateId: config.recommendedTemplate || 'first-job-fresh',
     personalInfo: {
-      fullName: '',
-      headline: '',
-      email: '',
+      fullName: user?.full_name || '',
+      headline: selectedRole,
+      email: user?.email || '',
       phone: '',
       location: '',
       avatarUrl: '',
-      links: [
-        { label: 'LinkedIn', url: '' },
-        { label: 'GitHub', url: '' },
-      ],
+      links: config.linkSuggestions.map((item) => ({
+        label: item.label,
+        url: '',
+      })),
     },
     summary: '',
     skills: {
@@ -35,6 +46,7 @@ export function createEmptyResume(): ResumeDocument {
     },
     projects: [],
     experience: [],
+    events: [],
     education: [],
     certifications: [],
   };
@@ -159,6 +171,10 @@ export function calcLocalMatchAnalysis(doc: ResumeDocument | null): ResumeMatchR
     score += 10;
   }
 
+  if (doc.events && doc.events.length >= 1) {
+    score += 5;
+  }
+
   const matchedKeywords = [
     ...(doc.skills?.languages || []),
     ...(doc.skills?.frameworks || []),
@@ -180,14 +196,88 @@ export const calcLocalATS = calcLocalMatchAnalysis;
 export function getResolvedSectionOrder(
   sections?: Section[],
   docSectionOrder?: SectionKey[],
-  defaultOrder: SectionKey[] = ['summary', 'skills', 'projects', 'education', 'experience', 'certifications']
+  defaultOrder: SectionKey[] = [
+    'summary',
+    'skills',
+    'projects',
+    'education',
+    'experience',
+    'events',
+    'certifications',
+  ]
 ): SectionKey[] {
+  let resolved: SectionKey[];
   if (sections && sections.length > 0) {
-    return sections.map((s) => s.id);
+    resolved = sections.map((s) => s.id);
+  } else if (docSectionOrder && docSectionOrder.length > 0) {
+    resolved = [...docSectionOrder];
+  } else {
+    resolved = [...defaultOrder];
   }
-  if (docSectionOrder && docSectionOrder.length > 0) {
-    return docSectionOrder;
+
+  // Ensure 'events' is present if missing from legacy/saved sectionOrder
+  if (!resolved.includes('events')) {
+    const expIdx = resolved.indexOf('experience');
+    if (expIdx !== -1) {
+      resolved.splice(expIdx + 1, 0, 'events');
+    } else {
+      resolved.push('events');
+    }
   }
-  return defaultOrder;
+
+  return resolved;
+}
+
+export function calculateExperienceDuration(
+  startDate?: string,
+  endDate?: string,
+  isCurrent?: boolean
+): string {
+  if (!startDate || !startDate.trim()) return '';
+
+  const parseDate = (str?: string): Date | null => {
+    if (!str || !str.trim()) return null;
+    const s = str.trim().toLowerCase();
+    if (s === 'present' || s === 'current' || s === 'now') return new Date();
+
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) return parsed;
+
+    const yearMatch = str.match(/\b(19\d\d|20\d\d)\b/);
+    if (yearMatch) {
+      const year = parseInt(yearMatch[1], 10);
+      const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      let month = 0;
+      for (let i = 0; i < months.length; i++) {
+        if (s.includes(months[i])) {
+          month = i;
+          break;
+        }
+      }
+      return new Date(year, month, 1);
+    }
+    return null;
+  };
+
+  const start = parseDate(startDate);
+  const end = isCurrent ? new Date() : (parseDate(endDate) || new Date());
+
+  if (!start || !end || end < start) return '';
+
+  let years = end.getFullYear() - start.getFullYear();
+  let months = end.getMonth() - start.getMonth() + 1;
+
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years <= 0 && months <= 0) return '1 mo';
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} ${years === 1 ? 'yr' : 'yrs'}`);
+  if (months > 0) parts.push(`${months} ${months === 1 ? 'mo' : 'mos'}`);
+
+  return parts.join(' ');
 }
 

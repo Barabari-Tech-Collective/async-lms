@@ -92,7 +92,7 @@ export function TemplateModal({
         </div>
 
         {/* Filter Tabs */}
-        <div className='flex items-center gap-1.5 px-6 py-2.5 bg-white border-b border-slate-100 overflow-x-auto scrollbar-none'>
+        <div className='flex items-center gap-1.5 px-6 py-2.5 bg-white border-b border-slate-100 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
           {filters.map((f) => (
             <button
               key={f.id}

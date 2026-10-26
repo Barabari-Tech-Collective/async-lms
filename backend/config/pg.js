@@ -814,14 +814,21 @@ pool.on('error', (err, client) => {
         CONSTRAINT resume_version_positive CHECK (version > 0)
       );
 
+      ALTER TABLE student_resumes 
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL DEFAULT NULL;
+
+      DROP INDEX IF EXISTS uq_student_resumes_primary;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_student_resumes_primary
         ON student_resumes(user_id)
-        WHERE is_primary = TRUE;
+        WHERE is_primary = TRUE AND deleted_at IS NULL;
 
       CREATE INDEX IF NOT EXISTS idx_student_resumes_user_updated
         ON student_resumes(user_id, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_resumes_user_deleted
+        ON student_resumes(user_id, deleted_at);
     `).catch((err) => console.warn('[Migration] student_resumes setup notice:', err.message));
-    console.log('[Migration] student_resumes table and optimistic concurrency index verified.');
+    console.log('[Migration] student_resumes table, recycle bin support, and optimistic concurrency index verified.');
 
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);

@@ -2,6 +2,7 @@ import { Fragment } from 'react';
 import { Sparkles, Loader2, Table } from 'lucide-react';
 import { formatHref, getResolvedSectionOrder } from '../resumeUtils';
 import type { SectionKey } from '../types';
+import { getCategoryConfig } from '../types';
 import { InlineText, InlineTextarea } from '../InlineEdit';
 import { VerificationBadge, ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
@@ -15,6 +16,7 @@ export function ClassicCorporateTemplate({
   onTriggerRewrite,
   rewritingKey,
 }: TemplateProps) {
+  const catCfg = getCategoryConfig(data.category);
   const pi = data.personalInfo || {
     fullName: '',
     headline: '',
@@ -49,7 +51,7 @@ export function ClassicCorporateTemplate({
         </h1>
         <p className='text-xs font-bold text-slate-700 tracking-wider uppercase mt-1'>
           <InlineText
-            value={pi.headline || 'Business Analyst | Advanced Excel & MIS Specialist'}
+            value={pi.headline || catCfg.defaultRole}
             onChange={onUpdate && !readOnly ? (v) => upPI({ headline: v }) : undefined}
             placeholder='Target Role'
             className='text-xs font-bold text-slate-700 tracking-wider uppercase'
@@ -122,7 +124,7 @@ export function ClassicCorporateTemplate({
                 {data.skills.languages?.length > 0 && (
                   <div>
                     <span className='font-bold text-slate-900 block text-[11px] uppercase tracking-wide text-slate-600'>
-                      Analytics & Scripting:
+                      {catCfg.skillLabels.languages}:
                     </span>
                     <span className='text-slate-800 font-medium'>{data.skills.languages.join(' • ')}</span>
                   </div>
@@ -130,7 +132,7 @@ export function ClassicCorporateTemplate({
                 {data.skills.frameworks?.length > 0 && (
                   <div>
                     <span className='font-bold text-slate-900 block text-[11px] uppercase tracking-wide text-slate-600'>
-                      BI & Reporting Tools:
+                      {catCfg.skillLabels.frameworks}:
                     </span>
                     <span className='text-slate-800 font-medium'>{data.skills.frameworks.join(' • ')}</span>
                   </div>
@@ -138,7 +140,7 @@ export function ClassicCorporateTemplate({
                 {data.skills.databases?.length > 0 && (
                   <div>
                     <span className='font-bold text-slate-900 block text-[11px] uppercase tracking-wide text-slate-600'>
-                      Data Management & SQL:
+                      {catCfg.skillLabels.databases}:
                     </span>
                     <span className='text-slate-800 font-medium'>{data.skills.databases.join(' • ')}</span>
                   </div>
@@ -146,7 +148,7 @@ export function ClassicCorporateTemplate({
                 {data.skills.tools?.length > 0 && (
                   <div>
                     <span className='font-bold text-slate-900 block text-[11px] uppercase tracking-wide text-slate-600'>
-                      Excel & Business Software:
+                      {catCfg.skillLabels.tools}:
                     </span>
                     <span className='text-slate-800 font-medium'>{data.skills.tools.join(' • ')}</span>
                   </div>
@@ -161,7 +163,7 @@ export function ClassicCorporateTemplate({
           return (
             <section key='projects' className='mb-5'>
               <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                ANALYTICAL PROJECTS & CAPSTONES
+                {catCfg.projectLabels.sectionTitle.toUpperCase()}
               </h2>
               <div className='space-y-3.5'>
                 {data.projects.map((proj, pIdx) => (
@@ -327,12 +329,66 @@ export function ClassicCorporateTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <section key='events' className='mb-5'>
+              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
+                WORKSHOPS, HACKATHONS & EVENTS
+              </h2>
+              <div className='space-y-2 text-[11.5px]'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='p-2.5 rounded bg-slate-50 border border-slate-200 page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-2'>
+                          <span className='font-bold text-slate-900'>{evt.title}</span>
+                          {evt.eventType && (
+                            <span className='text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-800'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <span className='text-[10.5px] text-slate-600 block mt-0.5'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2'>
+                        {evt.date && <span className='text-[10.5px] text-slate-500'>{evt.date}</span>}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-[10px] font-bold text-blue-700 hover:underline'
+                          >
+                            Proof ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-1 text-[11px] text-slate-700'>
+                        <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           summary: renderSummary,
           skills: renderSkills,
           projects: renderProjects,
           education: renderEducation,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

@@ -236,6 +236,57 @@ export function PhotoModernTemplate({
         </section>
       ) : null,
 
+    events: () =>
+      data.events && data.events.length > 0 ? (
+        <section className='mb-6'>
+          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2 font-mono'>
+            WORKSHOPS & EVENTS
+          </h2>
+          <div className='space-y-3'>
+            {data.events.map((evt, eIdx) => (
+              <div key={evt.id || eIdx} className='page-break-inside-avoid text-[12px]'>
+                <div className='flex justify-between items-baseline'>
+                  <div>
+                    <div className='flex items-center gap-2'>
+                      <span className='font-bold text-slate-900'>{evt.title}</span>
+                      {evt.eventType && (
+                        <span className='text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-teal-50 text-teal-800 border border-teal-200'>
+                          {evt.eventType}
+                        </span>
+                      )}
+                    </div>
+                    {(evt.organizer || evt.location) && (
+                      <span className='text-[11px] text-teal-800 font-medium block mt-0.5'>
+                        {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                      </span>
+                    )}
+                  </div>
+                  <div className='flex items-center gap-2'>
+                    {evt.date && <span className='text-[11px] text-slate-500 font-medium'>{evt.date}</span>}
+                    {evt.credentialUrl && (
+                      <a
+                        href={formatHref(evt.credentialUrl, 'web')}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='text-[10px] text-teal-700 hover:underline font-bold'
+                      >
+                        Proof ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+                {evt.learnings && (
+                  <p className='mt-1 text-[11.5px] text-slate-700 leading-relaxed'>
+                    <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                    {evt.learnings}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null,
+
     certifications: () =>
       data.certifications?.length > 0 ? (
         <section className='mb-6'>

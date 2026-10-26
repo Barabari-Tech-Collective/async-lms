@@ -240,6 +240,54 @@ export function CleanSlateTemplate({
         </section>
       ) : null,
 
+    events: () =>
+      data.events && data.events.length > 0 ? (
+        <section className='mb-6 page-break-inside-avoid'>
+          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2'>
+            Workshops & Events
+          </h2>
+          <div className='space-y-3 text-[12.5px] text-slate-700'>
+            {data.events.map((evt, eIdx) => (
+              <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                <div className='flex justify-between items-baseline'>
+                  <div>
+                    <span className='font-semibold text-slate-900'>{evt.title}</span>
+                    {evt.eventType && (
+                      <span className='ml-2 text-[10px] text-slate-400 uppercase tracking-wider'>
+                        ({evt.eventType})
+                      </span>
+                    )}
+                    {(evt.organizer || evt.location) && (
+                      <span className='text-[11.5px] text-slate-500 block'>
+                        {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                      </span>
+                    )}
+                  </div>
+                  <div className='flex items-center gap-2'>
+                    {evt.date && <span className='text-[11px] text-slate-400'>{evt.date}</span>}
+                    {evt.credentialUrl && (
+                      <a
+                        href={formatHref(evt.credentialUrl, 'web')}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='text-[10.5px] text-slate-600 hover:text-slate-900 underline'
+                      >
+                        Proof ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+                {evt.learnings && (
+                  <p className='mt-1 text-[11.5px] text-slate-600'>
+                    {evt.learnings}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null,
+
     certifications: () =>
       data.certifications && data.certifications.length > 0 ? (
         <section className='mb-6 page-break-inside-avoid'>

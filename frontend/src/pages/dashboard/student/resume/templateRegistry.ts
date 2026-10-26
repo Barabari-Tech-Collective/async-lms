@@ -127,7 +127,7 @@ export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
     headline: 'Education & Capstones First Priority',
     recommendedFor: 'Campus Fresher & Internships',
     description:
-      'Reordered structure placing Education & verified CodeGuru LMS Capstone Projects at the very top. Gives college students maximum placement leverage without requiring past work experience.',
+      'Reordered structure placing Education & verified Barabari Capstone Projects at the very top. Gives college students maximum placement leverage without requiring past work experience.',
     layoutType: 'single-column',
     fontFamily: 'sans',
     accentColor: '#059669',

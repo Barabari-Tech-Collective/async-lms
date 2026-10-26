@@ -6,7 +6,6 @@ import {
   Linkedin,
   Github,
   Globe,
-  ExternalLink,
   ShieldCheck,
   X,
   Camera,
@@ -50,7 +49,7 @@ export function OrganizationLogoBadge({
         />
         <div className='text-left leading-tight'>
           <div className='text-[10px] font-black tracking-widest text-white uppercase font-mono'>
-            CODEGURU
+            BARABARI
           </div>
           <div className='text-[8.5px] text-sky-300 font-semibold tracking-wide'>
             PLACEMENT VERIFIED
@@ -69,7 +68,7 @@ export function OrganizationLogoBadge({
           className='h-5 w-5 object-contain shrink-0'
         />
         <span className='text-[10px] font-black tracking-[0.22em] text-slate-700 uppercase font-mono'>
-          CODEGURU VERIFIED CANDIDATE
+          BARABARI VERIFIED CANDIDATE
         </span>
       </div>
     );
@@ -86,7 +85,7 @@ export function OrganizationLogoBadge({
             className='h-5 w-5 object-contain shrink-0'
           />
           <span className='text-[9.5px] font-serif tracking-[0.25em] text-stone-600 uppercase font-semibold'>
-            CODEGURU ACCREDITED
+            BARABARI ACCREDITED
           </span>
         </div>
         <div className='w-10 h-px bg-stone-300' />
@@ -105,7 +104,7 @@ export function OrganizationLogoBadge({
           className='h-4 w-4 object-contain shrink-0'
         />
         <span className='text-[9.5px] font-black text-slate-800 font-mono tracking-tight'>
-          CODEGURU
+          BARABARI
         </span>
       </div>
     );
@@ -122,7 +121,7 @@ export function OrganizationLogoBadge({
           className='h-5 w-5 object-contain shrink-0'
         />
         <span className='text-[10px] font-bold text-blue-700 tracking-wide font-mono uppercase'>
-          CODEGURU FELLOW
+          BARABARI FELLOW
         </span>
       </div>
     );
@@ -137,7 +136,7 @@ export function OrganizationLogoBadge({
           className='h-5 w-5 object-contain opacity-90 shrink-0'
         />
         <span className='text-[9.5px] font-medium tracking-[0.25em] text-slate-400 uppercase font-mono'>
-          CODEGURU VERIFIED
+          BARABARI VERIFIED
         </span>
       </div>
     );
@@ -155,7 +154,7 @@ export function OrganizationLogoBadge({
         />
         <div className='text-left leading-tight'>
           <div className='text-[9.5px] font-black text-teal-950 font-mono tracking-wider'>
-            CODEGURU
+            BARABARI
           </div>
           <div className='text-[8px] font-bold text-teal-700 uppercase tracking-wide'>
             PLACEMENT TRACK
@@ -174,7 +173,7 @@ export function OrganizationLogoBadge({
           className='h-5 w-5 object-contain shrink-0'
         />
         <span className='text-[10px] font-bold uppercase tracking-widest text-amber-900 font-mono'>
-          CODEGURU PORTFOLIO DOSSIER • VERIFIED CANDIDATE
+          BARABARI PORTFOLIO DOSSIER • VERIFIED CANDIDATE
         </span>
       </div>
     );
@@ -190,7 +189,7 @@ export function OrganizationLogoBadge({
           alt='Organization Logo'
           className='h-4 w-4 object-contain shrink-0'
         />
-        <span>CodeGuru Campus Placement • Verified Fresher</span>
+        <span>Barabari Campus Placement • Verified Fresher</span>
       </div>
     );
   }
@@ -207,7 +206,7 @@ export function OrganizationLogoBadge({
       />
       <div className='text-left leading-tight'>
         <div className='text-[10px] font-black tracking-wider text-slate-900 font-mono'>
-          CODEGURU
+          BARABARI
         </div>
         <div className='text-[8.5px] font-bold text-[#333d7c] uppercase tracking-wide'>
           VERIFIED GRADUATE
@@ -222,23 +221,11 @@ export function VerificationBadge({ status }: { status?: VerificationStatus }) {
   if (status === 'LMS_VERIFIED') {
     return (
       <span
-        title='Authoritative CodeGuru verified achievement'
+        title='Authoritative Barabari verified achievement'
         className='inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200'
       >
         <ShieldCheck size={11} className='text-emerald-600' />
-        <span>CodeGuru Verified</span>
-      </span>
-    );
-  }
-
-  if (status === 'CREDENTIAL_LINK_PROVIDED') {
-    return (
-      <span
-        title='Public repository or demo link provided'
-        className='inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200'
-      >
-        <ExternalLink size={10} className='text-blue-500' />
-        <span>Link Provided</span>
+        <span>Barabari Verified</span>
       </span>
     );
   }
@@ -433,10 +420,10 @@ export function ContactLinksRow({
         <button
           type='button'
           onClick={onEditLinks}
-          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded transition-colors print:hidden ${
+          className={`inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full border transition-all cursor-pointer print:hidden ${
             isDark
-              ? 'bg-white/10 text-white hover:bg-white/20'
-              : 'text-[#333d7c] hover:bg-slate-100'
+              ? 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+              : 'bg-slate-50 text-slate-600 border-slate-200 hover:text-[#333d7c] hover:border-slate-300 hover:bg-slate-100 shadow-2xs'
           }`}
           title='Edit Contact Details & Links'
         >

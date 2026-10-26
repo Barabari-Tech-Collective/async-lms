@@ -375,7 +375,10 @@ export function MercuryTemplate({
                     <div className='flex justify-between items-baseline'>
                       <div>
                         <h3 className='font-bold text-[13px] text-slate-900'>{exp.role}</h3>
-                        <p className='text-[12px] text-[#333d7c] font-medium'>{exp.organization}</p>
+                        <p className='text-[12px] text-[#333d7c] font-medium'>
+                          {[exp.organization || exp.company, exp.location].filter(Boolean).join(' • ')}
+                          {exp.employmentType ? ` (${exp.employmentType})` : ''}
+                        </p>
                       </div>
                       <span className='text-[11px] text-slate-500 font-medium'>
                         {exp.startDate} - {exp.endDate || 'Present'}
@@ -433,12 +436,71 @@ export function MercuryTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <div key='events' className='mb-6'>
+              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
+                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
+                  WORKSHOPS, HACKATHONS & EVENTS
+                </h2>
+              </div>
+              <div className='space-y-3'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-2'>
+                          <h3 className='font-bold text-[13px] text-slate-900'>{evt.title}</h3>
+                          {evt.eventType && (
+                            <span className='text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <p className='text-[12px] text-slate-600 font-medium'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </p>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2'>
+                        {evt.date && (
+                          <span className='text-[11px] text-slate-500 font-medium'>{evt.date}</span>
+                        )}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='inline-flex items-center gap-0.5 text-xs text-[#333d7c] hover:underline underline-offset-2 ml-1'
+                          >
+                            <ExternalLink size={11} />
+                            <span>Proof</span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-1.5 text-[12px] text-slate-700 leading-relaxed'>
+                        <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           summary: renderSummary,
           skills: renderSkills,
           projects: renderProjects,
           education: renderEducation,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

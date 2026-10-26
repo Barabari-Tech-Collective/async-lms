@@ -325,12 +325,67 @@ export function ExecutiveSerifTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <section key='events' className='mb-6'>
+              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
+                Workshops & Professional Events
+              </h2>
+              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
+              <div className='space-y-3 text-[12px]'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-2'>
+                          <span className='font-bold text-stone-900 font-serif'>{evt.title}</span>
+                          {evt.eventType && (
+                            <span className='text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-800 border border-stone-300 font-sans'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <span className='text-[11.5px] text-stone-600 block mt-0.5'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2 font-sans'>
+                        {evt.date && <span className='text-[11px] text-stone-500'>{evt.date}</span>}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-[11px] text-stone-700 hover:underline'
+                          >
+                            Proof ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-1 text-[11.5px] text-stone-700 leading-relaxed'>
+                        <span className='font-semibold text-stone-900'>Key Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           summary: renderSummary,
           skills: renderSkills,
           projects: renderProjects,
           education: renderEducation,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const pool = require('../config/pg');
+const { filterLmsDataForTrack } = require('../utils/resumeDomainMatcher');
 
 const openai = new OpenAI({ 
   apiKey: process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY,
@@ -207,7 +208,7 @@ async function computeVerificationProvenance(userId, document) {
       let verificationStatus = 'SELF_REPORTED';
 
       const isLmsCert = cert.title && verifiedSubjectNames.has(cert.title.trim().toLowerCase());
-      if (isLmsCert || (cert.issuer && cert.issuer.toLowerCase().includes('codeguru'))) {
+      if (isLmsCert || (cert.issuer && (cert.issuer.toLowerCase().includes('barabari') || cert.issuer.toLowerCase().includes('codeguru')))) {
         verificationStatus = 'LMS_VERIFIED';
       } else if (credUrl) {
         verificationStatus = 'CREDENTIAL_LINK_PROVIDED';
@@ -217,11 +218,43 @@ async function computeVerificationProvenance(userId, document) {
         ...cert,
         id: cert.id || `cert_${Date.now()}_${idx}`,
         title: String(cert.title || 'Certification').slice(0, 150),
-        issuer: String(cert.issuer || 'CodeGuru LMS').slice(0, 100),
+        issuer: String(cert.issuer || 'Barabari').slice(0, 100),
         credentialUrl: credUrl || undefined,
         verificationStatus,
       };
     });
+  }
+
+  // 4b. Process work experience
+  if (Array.isArray(document.experience)) {
+    document.experience = document.experience.map((exp, idx) => ({
+      ...exp,
+      id: exp.id || `exp_${Date.now()}_${idx}`,
+      role: String(exp.role || '').slice(0, 150),
+      organization: String(exp.organization || exp.company || '').slice(0, 150),
+      company: exp.company ? String(exp.company).slice(0, 150) : undefined,
+      employmentType: exp.employmentType ? String(exp.employmentType).slice(0, 50) : undefined,
+      location: exp.location ? String(exp.location).slice(0, 100) : undefined,
+      startDate: String(exp.startDate || '').slice(0, 50),
+      endDate: exp.current ? 'Present' : String(exp.endDate || '').slice(0, 50),
+      current: Boolean(exp.current),
+      bullets: Array.isArray(exp.bullets) ? exp.bullets.map(b => String(b).slice(0, 1000)).filter(Boolean) : [],
+    }));
+  }
+
+  // 4c. Process and sanitize education (Degree, Intermediate, Schooling, etc.)
+  if (Array.isArray(document.education)) {
+    document.education = document.education.map((edu, idx) => ({
+      ...edu,
+      id: edu.id || `edu_${Date.now()}_${idx}`,
+      institution: String(edu.institution || '').slice(0, 200),
+      degree: String(edu.degree || '').slice(0, 200),
+      score: edu.score !== undefined && edu.score !== null ? String(edu.score).slice(0, 30) : undefined,
+      gradingSystem: ['CGPA_10', 'GPA_4', 'PERCENTAGE'].includes(edu.gradingSystem) ? edu.gradingSystem : 'CGPA_10',
+      startYear: edu.startYear ? String(edu.startYear).slice(0, 10) : undefined,
+      endYear: edu.endYear ? String(edu.endYear).slice(0, 10) : undefined,
+      level: edu.level ? String(edu.level).slice(0, 50) : undefined,
+    })).filter(edu => edu.institution || edu.degree);
   }
 
   // 5. Sanitize personal info links & avatar
@@ -242,6 +275,24 @@ async function computeVerificationProvenance(userId, document) {
         };
       }).filter(l => Boolean(l.url));
     }
+  }
+
+  // 6. Process optional events & workshops
+  if (Array.isArray(document.events)) {
+    document.events = document.events.map((evt, idx) => {
+      const credUrl = sanitizeUrl(evt.credentialUrl, 'web');
+      return {
+        ...evt,
+        id: evt.id || `evt_${Date.now()}_${idx}`,
+        title: String(evt.title || 'Event / Workshop').slice(0, 150),
+        eventType: evt.eventType ? String(evt.eventType).slice(0, 50) : undefined,
+        organizer: evt.organizer ? String(evt.organizer).slice(0, 120) : undefined,
+        date: evt.date ? String(evt.date).slice(0, 50) : undefined,
+        location: evt.location ? String(evt.location).slice(0, 80) : undefined,
+        learnings: String(evt.learnings || '').slice(0, 2000),
+        credentialUrl: credUrl || undefined,
+      };
+    });
   }
 
   if (document.templateId && typeof document.templateId === 'string') {
@@ -390,6 +441,485 @@ exports.saveResume = async (req, res) => {
   }
 };
 
+// ── DELETE /api/assistant/resume (Legacy Primary Delete) ─────────────────────
+exports.deleteResume = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    await pool.query(
+      `DELETE FROM public.student_resumes WHERE user_id = $1`,
+      [userId]
+    );
+    return res.json({ success: true, message: 'Resume deleted successfully.' });
+  } catch (err) {
+    console.error('DELETE RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to delete resume.' });
+  }
+};
+
+// ── GET /api/assistant/resumes (List All Resumes for Student) ─────────────────
+exports.getAllResumes = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT id, title, schema_version, version, is_primary,
+              document->>'templateId' as template_id,
+              document->>'category' as category,
+              document->>'targetRole' as target_role,
+              created_at, updated_at
+       FROM public.student_resumes
+       WHERE user_id = $1 AND deleted_at IS NULL
+       ORDER BY is_primary DESC, updated_at DESC`,
+      [userId]
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('GET ALL RESUMES ERROR:', err);
+    return res.status(500).json({ message: 'Failed to retrieve resumes.' });
+  }
+};
+
+// ── GET /api/assistant/resume/:id (Get Specific Resume) ───────────────────────
+exports.getResumeById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT id, title, schema_version, version, document, is_primary, created_at, updated_at
+       FROM public.student_resumes
+       WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+       LIMIT 1`,
+      [id, userId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('GET RESUME BY ID ERROR:', err);
+    return res.status(500).json({ message: 'Failed to retrieve resume.' });
+  }
+};
+
+// ── POST /api/assistant/resume/new (Create New Named Resume) ─────────────────
+exports.createResume = async (req, res) => {
+  const userId = req.user.id;
+  const { title, document, is_primary = false } = req.body;
+
+  if (!document || typeof document !== 'object') {
+    return res.status(400).json({ message: 'A valid resume document object is required.' });
+  }
+
+  const defaultCategory = document?.category || 'general';
+  const fallbackTitle = defaultCategory === 'general' ? 'General Job Resume' : `${defaultCategory.charAt(0).toUpperCase() + defaultCategory.slice(1)} Resume`;
+  const sanitizedTitle = String(title || fallbackTitle).trim().slice(0, 150);
+
+  try {
+    const sanitizedDocument = await computeVerificationProvenance(userId, document);
+
+    // Check if student currently has any active resumes
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int as count FROM public.student_resumes WHERE user_id = $1 AND deleted_at IS NULL`,
+      [userId]
+    );
+    const isFirstResume = countRes.rows[0].count === 0;
+    const shouldBePrimary = isFirstResume || Boolean(is_primary);
+
+    if (shouldBePrimary) {
+      await pool.query(
+        `UPDATE public.student_resumes SET is_primary = FALSE WHERE user_id = $1`,
+        [userId]
+      );
+    }
+
+    const insertRes = await pool.query(
+      `INSERT INTO public.student_resumes (user_id, title, document, version, is_primary)
+       VALUES ($1, $2, $3::jsonb, 1, $4)
+       RETURNING id, title, schema_version, version, document, is_primary, created_at, updated_at`,
+      [userId, sanitizedTitle, JSON.stringify(sanitizedDocument), shouldBePrimary]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Resume created successfully.',
+      data: insertRes.rows[0],
+    });
+  } catch (err) {
+    console.error('CREATE RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to create resume.' });
+  }
+};
+
+// ── PUT /api/assistant/resume/:id (Update Specific Resume) ───────────────────
+exports.updateResumeById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const { title, document, expectedVersion } = req.body;
+
+  if (!document || typeof document !== 'object') {
+    return res.status(400).json({ message: 'A valid resume document object is required.' });
+  }
+
+  try {
+    const sanitizedDocument = await computeVerificationProvenance(userId, document);
+
+    if (expectedVersion == null) {
+      const updateRes = await pool.query(
+        `UPDATE public.student_resumes
+         SET document = $1::jsonb,
+             title = COALESCE($2, title),
+             version = version + 1,
+             updated_at = NOW()
+         WHERE id = $3 AND user_id = $4
+         RETURNING id, title, schema_version, version, document, is_primary, created_at, updated_at`,
+        [JSON.stringify(sanitizedDocument), title ? String(title).slice(0, 150) : null, id, userId]
+      );
+      if (updateRes.rows.length === 0) {
+        return res.status(404).json({ message: 'Resume not found.' });
+      }
+      return res.json({
+        success: true,
+        message: 'Resume updated successfully.',
+        data: updateRes.rows[0],
+      });
+    }
+
+    // Optimistic concurrency version check
+    const updateRes = await pool.query(
+      `UPDATE public.student_resumes
+       SET document = $1::jsonb,
+           title = COALESCE($2, title),
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $3 AND user_id = $4 AND version = $5
+       RETURNING id, title, schema_version, version, document, is_primary, created_at, updated_at`,
+      [JSON.stringify(sanitizedDocument), title ? String(title).slice(0, 150) : null, id, userId, expectedVersion]
+    );
+
+    if (updateRes.rows.length === 0) {
+      const checkRes = await pool.query(
+        `SELECT id, title, schema_version, version, document, is_primary, updated_at
+         FROM public.student_resumes
+         WHERE id = $1 AND user_id = $2
+         LIMIT 1`,
+        [id, userId]
+      );
+
+      if (checkRes.rows.length > 0) {
+        if (Math.abs(checkRes.rows[0].version - expectedVersion) <= 2) {
+          const syncRes = await pool.query(
+            `UPDATE public.student_resumes
+             SET document = $1::jsonb,
+                 title = COALESCE($2, title),
+                 version = version + 1,
+                 updated_at = NOW()
+             WHERE id = $3
+             RETURNING id, title, schema_version, version, document, is_primary, created_at, updated_at`,
+            [JSON.stringify(sanitizedDocument), title ? String(title).slice(0, 150) : null, id]
+          );
+          return res.json({
+            success: true,
+            message: 'Resume synced successfully.',
+            data: syncRes.rows[0],
+          });
+        }
+
+        return res.status(409).json({
+          message: 'Resume was modified in another session.',
+          currentVersion: checkRes.rows[0].version,
+          currentResume: checkRes.rows[0],
+        });
+      }
+
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Resume saved successfully.',
+      data: updateRes.rows[0],
+    });
+  } catch (err) {
+    console.error('UPDATE RESUME BY ID ERROR:', err);
+    return res.status(500).json({ message: 'Failed to update resume.' });
+  }
+};
+
+// ── PATCH /api/assistant/resume/:id/rename (Rename Title) ─────────────────────
+exports.renameResume = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const { title } = req.body;
+
+  if (!title || typeof title !== 'string' || !title.trim()) {
+    return res.status(400).json({ message: 'A non-empty title string is required.' });
+  }
+
+  const sanitizedTitle = title.trim().slice(0, 150);
+
+  try {
+    const updateRes = await pool.query(
+      `UPDATE public.student_resumes
+       SET title = $1, updated_at = NOW()
+       WHERE id = $2 AND user_id = $3
+       RETURNING id, title, version, is_primary, updated_at`,
+      [sanitizedTitle, id, userId]
+    );
+
+    if (updateRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Resume renamed successfully.',
+      data: updateRes.rows[0],
+    });
+  } catch (err) {
+    console.error('RENAME RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to rename resume.' });
+  }
+};
+
+// ── POST /api/assistant/resume/:id/duplicate (Duplicate/Clone Resume) ─────────
+exports.duplicateResume = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const { title } = req.body || {};
+
+  try {
+    const originalRes = await pool.query(
+      `SELECT title, document FROM public.student_resumes WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+
+    if (originalRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Original resume not found.' });
+    }
+
+    const original = originalRes.rows[0];
+    const cloneTitle = title && String(title).trim()
+      ? String(title).trim().slice(0, 150)
+      : `${original.title} (Copy)`.slice(0, 150);
+
+    const insertRes = await pool.query(
+      `INSERT INTO public.student_resumes (user_id, title, document, version, is_primary)
+       VALUES ($1, $2, $3::jsonb, 1, FALSE)
+       RETURNING id, title, schema_version, version, document, is_primary, created_at, updated_at`,
+      [userId, cloneTitle, JSON.stringify(original.document)]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Resume duplicated successfully.',
+      data: insertRes.rows[0],
+    });
+  } catch (err) {
+    console.error('DUPLICATE RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to duplicate resume.' });
+  }
+};
+
+// ── PATCH /api/assistant/resume/:id/primary (Set As Primary) ──────────────────
+exports.setPrimaryResume = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const checkRes = await pool.query(
+      `SELECT id, title FROM public.student_resumes WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+
+    await pool.query(
+      `UPDATE public.student_resumes SET is_primary = FALSE WHERE user_id = $1`,
+      [userId]
+    );
+
+    const updateRes = await pool.query(
+      `UPDATE public.student_resumes
+       SET is_primary = TRUE, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING id, title, is_primary, updated_at`,
+      [id, userId]
+    );
+
+    return res.json({
+      success: true,
+      message: `"${checkRes.rows[0].title}" set as primary resume.`,
+      data: updateRes.rows[0],
+    });
+  } catch (err) {
+    console.error('SET PRIMARY RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to set primary resume.' });
+  }
+};
+
+// ── DELETE /api/assistant/resume/:id (Soft-Delete Specific Resume to Recycle Bin) ──
+exports.deleteResumeById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const targetRes = await pool.query(
+      `SELECT id, title, is_primary FROM public.student_resumes WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [id, userId]
+    );
+    if (targetRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+
+    const wasPrimary = targetRes.rows[0].is_primary;
+
+    // Soft delete: set deleted_at = NOW() and remove is_primary
+    await pool.query(
+      `UPDATE public.student_resumes
+       SET deleted_at = NOW(), is_primary = FALSE, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+
+    // If deleted resume was primary, promote most recently updated remaining active resume
+    if (wasPrimary) {
+      await pool.query(
+        `UPDATE public.student_resumes
+         SET is_primary = TRUE
+         WHERE id = (
+           SELECT id FROM public.student_resumes
+           WHERE user_id = $1 AND deleted_at IS NULL
+           ORDER BY updated_at DESC
+           LIMIT 1
+         )`,
+        [userId]
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: `"${targetRes.rows[0].title}" moved to Recycle Bin.`,
+      data: { id, title: targetRes.rows[0].title },
+    });
+  } catch (err) {
+    console.error('DELETE RESUME BY ID ERROR:', err);
+    return res.status(500).json({ message: 'Failed to delete resume.' });
+  }
+};
+
+// ── GET /api/assistant/resumes/bin (List Soft-Deleted Resumes for Student) ────
+exports.getRecycleBinResumes = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT id, title, schema_version, version, is_primary,
+              document->>'templateId' as template_id,
+              document->>'category' as category,
+              document->>'targetRole' as target_role,
+              deleted_at, created_at, updated_at
+       FROM public.student_resumes
+       WHERE user_id = $1 AND deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC`,
+      [userId]
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('GET RECYCLE BIN RESUMES ERROR:', err);
+    return res.status(500).json({ message: 'Failed to load recycle bin.' });
+  }
+};
+
+// ── PATCH /api/assistant/resume/:id/restore (Restore Soft-Deleted Resume) ─────
+exports.restoreResumeById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const checkRes = await pool.query(
+      `SELECT id, title FROM public.student_resumes WHERE id = $1 AND user_id = $2 AND deleted_at IS NOT NULL`,
+      [id, userId]
+    );
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found in recycle bin.' });
+    }
+
+    // Check if user currently has any active resumes
+    const activeCountRes = await pool.query(
+      `SELECT COUNT(*)::int as count FROM public.student_resumes WHERE user_id = $1 AND deleted_at IS NULL`,
+      [userId]
+    );
+    const shouldBePrimary = activeCountRes.rows[0].count === 0;
+
+    const restoreRes = await pool.query(
+      `UPDATE public.student_resumes
+       SET deleted_at = NULL,
+           is_primary = $3,
+           updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING id, title, schema_version, version, is_primary, created_at, updated_at`,
+      [id, userId, shouldBePrimary]
+    );
+
+    return res.json({
+      success: true,
+      message: `"${checkRes.rows[0].title}" restored successfully.`,
+      data: restoreRes.rows[0],
+    });
+  } catch (err) {
+    console.error('RESTORE RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to restore resume.' });
+  }
+};
+
+// ── DELETE /api/assistant/resume/:id/destroy (Permanently Delete from Recycle Bin) ──
+exports.destroyResumeById = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const targetRes = await pool.query(
+      `SELECT id, title FROM public.student_resumes WHERE id = $1 AND user_id = $2 AND deleted_at IS NOT NULL`,
+      [id, userId]
+    );
+    if (targetRes.rows.length === 0) {
+      return res.status(404).json({ message: 'Resume not found in recycle bin.' });
+    }
+
+    await pool.query(
+      `DELETE FROM public.student_resumes WHERE id = $1 AND user_id = $2 AND deleted_at IS NOT NULL`,
+      [id, userId]
+    );
+
+    return res.json({
+      success: true,
+      message: `"${targetRes.rows[0].title}" permanently destroyed.`,
+    });
+  } catch (err) {
+    console.error('DESTROY RESUME ERROR:', err);
+    return res.status(500).json({ message: 'Failed to permanently destroy resume.' });
+  }
+};
+
+// ── DELETE /api/assistant/resumes/bin/empty (Empty Recycle Bin for Student) ──
+exports.emptyRecycleBin = async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    const deleteRes = await pool.query(
+      `DELETE FROM public.student_resumes WHERE user_id = $1 AND deleted_at IS NOT NULL`,
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      message: `Recycle bin emptied (${deleteRes.rowCount} resumes purged).`,
+    });
+  } catch (err) {
+    console.error('EMPTY RECYCLE BIN ERROR:', err);
+    return res.status(500).json({ message: 'Failed to empty recycle bin.' });
+  }
+};
+
 // ── GET /api/assistant/resume/achievements (Authoritative LMS Data) ───────────
 exports.getAchievements = async (req, res) => {
   const userId = req.user.id;
@@ -459,9 +989,12 @@ exports.getAchievements = async (req, res) => {
 exports.generateResume = async (req, res) => {
   const userId = req.user.id;
   const {
+    category = 'general',
+    targetRole = '',
     careerObjective = '',
     extraSkills = [],
     workExperience = [],
+    events = [],
     manualProjects = [],
     education = [],
     personalInfo = {},
@@ -500,87 +1033,214 @@ exports.generateResume = async (req, res) => {
       [userId]
     );
 
-    const verifiedCapstones = capstonesResult.rows;
+    // Filter LMS enrolled courses & capstone projects strictly for this career track
+    const { relevantSubjects, relevantCapstones, hasRelevantCourses } = filterLmsDataForTrack(
+      subjectsResult.rows,
+      capstonesResult.rows,
+      category
+    );
 
-    const systemPrompt = `You are an elite Placement Technical Resume Specialist.
-You craft high-impact, professional tech resumes for college students and early-career developers following strict FlowCV placement standards.
-CRITICAL INTEGRITY RULES:
-1. Grounding: ONLY use facts and skills explicitly provided in the prompt. DO NOT invent metrics (e.g. "increased speed by 40%"), tools, or achievements that the student did not state.
-2. STAR Method: Structure project bullet points with active verbs (Architected, Implemented, Engineered, Integrated) describing the feature, technical approach, and result.
-3. Categorized Skills: Categorize skills cleanly into languages, frameworks, databases, and tools.`;
+    // Define Category-Specific Prompts & Configurations with Strict Anti-Hallucination Grounding
+    const categoryConfigs = {
+      general: {
+        roleLabel: 'Campus Fresher & Multi-Disciplinary Professional',
+        templateId: 'first-job-fresh',
+        systemPrompt: `You are an expert Career Advisor & Placement Resume Specialist for entry-level, campus graduate, and general roles.
+You create simple, clean, crisp resumes emphasizing versatile strengths, communication, work ethic, and core academic achievements.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts and skills explicitly provided in the prompt. DO NOT invent skills, certifications, metrics, or company claims.
+2. STAR Method: Structure bullet points with clear active verbs (Organized, Coordinated, Delivered, Resolved, Facilitated) highlighting initiative and reliability.
+3. Categorized Skills: ONLY include skills explicitly provided or derived from verified courses. If none provided, return an EMPTY ARRAY []. Never insert made-up tools or languages.`,
+        skillCategoryLabels: {
+          languages: 'Core Strengths & Abilities',
+          frameworks: 'Communication & Interpersonal',
+          databases: 'Office & Productivity Tools',
+          tools: 'Key Professional Competencies',
+        },
+      },
+      tech: {
+        roleLabel: 'Software Engineer | Full-Stack Developer',
+        templateId: 'modern-mercury',
+        systemPrompt: `You are an elite Placement Technical Resume Specialist.
+You craft high-impact, professional tech resumes for college students and developers following strict placement standards.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use programming languages, frameworks, and developer tools explicitly provided in the prompt or derived from verified courses. NEVER invent technologies (e.g. AWS, Docker, Kubernetes) if not listed.
+2. STAR Method: Structure project bullet points with active verbs (Architected, Implemented, Engineered, Integrated) describing feature, technical approach, and result. DO NOT invent false metrics.
+3. Categorized Skills: Categorize skills cleanly into programming languages, frameworks, databases, and developer tools. If no skills exist in the input, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Programming Languages',
+          frameworks: 'Frameworks & Libraries',
+          databases: 'Databases & Storage',
+          tools: 'Developer Tools & Cloud',
+        },
+      },
+      data: {
+        roleLabel: 'Data Analyst | Business Intelligence',
+        templateId: 'atlantic-sidebar',
+        systemPrompt: `You are a Lead Data Science & Analytics Hiring Specialist.
+You craft high-impact resumes for Data Analysts, BI Developers, and Data Scientists.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts and data tools provided in the prompt. NEVER invent tools (e.g. Power BI, Tableau, Snowflake) unless explicitly studied or stated.
+2. Data Storytelling: Emphasize SQL query design, ETL data pipelines, dashboards, and analytical reasoning based strictly on real work.
+3. Categorized Skills: Group into query/scripting languages, BI & visualization, data warehouses, and analytics/statistical tools. If none exist in the input, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Query & Scripting Languages',
+          frameworks: 'BI & Data Visualization Tools',
+          databases: 'Data Warehousing & Databases',
+          tools: 'Analytics, Modeling & Statistics',
+        },
+      },
+      design: {
+        roleLabel: 'UI/UX Designer | Product Designer',
+        templateId: 'creative-cobalt',
+        systemPrompt: `You are a Principal Product Design & UI/UX Recruiter.
+You craft compelling design resumes emphasizing human-centered design, user research, wireframing, design systems, and prototyping.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts provided. NEVER invent design tools (e.g. Figma, Adobe XD) or client design projects unless explicitly provided.
+2. Design Focus: Emphasize problem definition, user journey mapping, and prototyping based strictly on provided student data.
+3. Categorized Skills: Group into design disciplines, design systems & prototyping, user research & usability, and design software. If none exist, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Design Disciplines & UX Methodologies',
+          frameworks: 'Design Systems & Prototyping',
+          databases: 'User Research & Usability Testing',
+          tools: 'Design Software & Tooling',
+        },
+      },
+      sales_marketing: {
+        roleLabel: 'Business Development Executive | Sales Specialist',
+        templateId: 'classic-corporate',
+        systemPrompt: `You are a Commercial Sales & Growth Marketing Recruitment Director.
+You craft high-conversion resumes for B2B Sales, Business Development, and Digital Marketing professionals.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts provided. NEVER invent CRM tools (e.g. Salesforce, HubSpot), sales quotas, or languages (English, Hindi, Telugu) unless explicitly provided in the prompt.
+2. Commercial Clarity: Structure provided experience and achievements with active verbs. DO NOT fabricate false revenue or quota numbers.
+3. Categorized Skills: Group into sales competencies, growth & inbound marketing, CRM platforms, and productivity suites. If none exist, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Core Sales & Deal Competencies',
+          frameworks: 'Growth & Inbound Marketing',
+          databases: 'CRM Platforms & Outreach Tools',
+          tools: 'Analytics & Productivity Suites',
+        },
+      },
+      product_operations: {
+        roleLabel: 'Associate Product Manager | Operations Analyst',
+        templateId: 'executive-serif',
+        systemPrompt: `You are a Senior Product & Operations Hiring Manager.
+You craft impactful resumes for Associate Product Managers (APMs), Scrum Masters, and Operations Analysts.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts provided. NEVER invent project management tools (e.g. Jira, Confluence) or metrics unless explicitly provided.
+2. Product Leadership: Emphasize agile delivery, cross-functional alignment, and problem-solving strictly based on real coursework or student input.
+3. Categorized Skills: Group into product methodologies, tracking tools, product analytics, and communication suites. If none exist, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Product Management Methodologies',
+          frameworks: 'Tracking & Project Management Tools',
+          databases: 'Product Analytics & Metrics',
+          tools: 'Documentation & Communication Suites',
+        },
+      },
+      business_finance: {
+        roleLabel: 'Financial Analyst | Business Operations',
+        templateId: 'classic-corporate',
+        systemPrompt: `You are a Corporate Finance & Business Strategy Hiring Specialist.
+You craft structured, credible resumes for Financial Analysts, Accountants, and Corporate Operations.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Grounding: ONLY use facts provided. NEVER invent ERP systems (e.g. SAP, Tally) or accounting certifications unless explicitly provided.
+2. Financial Precision: Emphasize financial analysis, Excel modeling, and compliance based strictly on provided student data.
+3. Categorized Skills: Group into financial modeling, accounting/compliance standards, ERP systems, and enterprise software. If none exist, return an EMPTY ARRAY [].`,
+        skillCategoryLabels: {
+          languages: 'Financial Modeling & Analysis',
+          frameworks: 'Accounting & Compliance Standards',
+          databases: 'ERP & Accounting Systems',
+          tools: 'Corporate Software & Analytics',
+        },
+      },
+    };
+
+    const activeConfig = categoryConfigs[category] || categoryConfigs.general;
+    const resolvedRole = targetRole || careerObjective || activeConfig.roleLabel;
+
+    const enrolledCoursesText = relevantSubjects.length
+      ? relevantSubjects.map((s) => `${s.name} (${s.progress_percent}% mastery)`).join(', ')
+      : 'None (No courses completed in this domain yet)';
+
+    const verifiedCapstonesText = relevantCapstones.length
+      ? JSON.stringify(relevantCapstones)
+      : 'None (No verified capstones in this domain yet)';
+
+    const studentSkillsText = Array.isArray(extraSkills) && extraSkills.length
+      ? extraSkills.join(', ')
+      : (typeof extraSkills === 'string' && extraSkills.trim() ? extraSkills : 'None provided');
+
+    const studentProjectsText = Array.isArray(manualProjects) && manualProjects.length
+      ? JSON.stringify(manualProjects)
+      : 'None provided';
 
     const userPrompt = `Generate a structured, professional resume JSON for this student:
+Target Career Track: ${category.toUpperCase()}
+Target Role: ${resolvedRole}
 Student Details:
-- Name: ${personalInfo.fullName || profile.full_name || 'Tech Candidate'}
-- Headline: ${personalInfo.headline || 'Full-Stack Developer'}
-- Degree: ${profile.degree || 'B.Tech Computer Science'}, Class of ${profile.year || '2025'}
-- College: ${profile.college_name || 'Engineering Institute'}
-- Enrolled Courses: ${subjectsResult.rows.map(s => `${s.name} (${s.progress_percent}% mastery)`).join(', ') || 'Computer Science Core'}
-- Target Role / Focus: ${careerObjective || 'Full Stack Software Engineer'}
-- Student Skills: ${Array.isArray(extraSkills) ? extraSkills.join(', ') : extraSkills}
-- Verified LMS Capstones: ${verifiedCapstones.length ? JSON.stringify(verifiedCapstones) : 'None'}
-- Student Projects: ${manualProjects.length ? JSON.stringify(manualProjects) : 'None'}
+- Name: ${personalInfo.fullName || profile.full_name || 'Candidate'}
+- Headline: ${personalInfo.headline || resolvedRole}
+- Degree: ${profile.degree || 'Bachelor Degree'}, Class of ${profile.year || '2025'}
+- College: ${profile.college_name || 'University Institute'}
+- Relevant Enrolled LMS Courses for ${category.toUpperCase()}: ${enrolledCoursesText}
+- Career Focus: ${resolvedRole}
+- Student Stated Skills: ${studentSkillsText}
+- Verified LMS Capstones / Achievements for ${category.toUpperCase()}: ${verifiedCapstonesText}
+- Student Stated Projects: ${studentProjectsText}
 - Work Experience: ${workExperience.length ? JSON.stringify(workExperience) : 'None'}
 - Education: ${education.length ? JSON.stringify(education) : 'None'}
 - Contact Links: ${JSON.stringify(personalInfo.links || [])}
+
+CRITICAL ANTI-HALLUCINATION INSTRUCTIONS:
+- You are an editor and formatter. You must NEVER invent skills, tools, programming languages, spoken languages, or technologies that are not explicitly in the courses or student skills above.
+- If no skills are provided or verified for a category, you MUST return an empty array [] for that category.
+- If no verified capstones or student projects are provided, you MUST return an empty array [] for "projects".
+- Structure summary and existing project bullets using active verbs and the STAR method, but DO NOT invent fictional numbers or metrics.
 
 Return ONLY valid JSON matching this exact structure:
 {
   "personalInfo": {
     "fullName": "${personalInfo.fullName || profile.full_name || ''}",
-    "headline": "${personalInfo.headline || 'Junior Software Engineer | Full-Stack Developer'}",
+    "headline": "${personalInfo.headline || resolvedRole}",
     "email": "${personalInfo.email || profile.email || ''}",
     "phone": "${personalInfo.phone || ''}",
     "location": "${personalInfo.location || 'India'}",
     "links": ${JSON.stringify(personalInfo.links && personalInfo.links.length ? personalInfo.links : [
-      { label: "GitHub", url: "https://github.com" },
       { label: "LinkedIn", url: "https://linkedin.com" }
     ])}
   },
-  "summary": "Concise 2-3 sentence summary highlighting technical focus, primary tech stack, and career passion.",
+  "summary": "Concise 2-3 sentence summary tailored specifically to the ${resolvedRole} role and ${category} track, highlighting the candidate's genuine background.",
   "skills": {
-    "languages": ["JavaScript", "Python"],
-    "frameworks": ["React", "Node.js", "Express"],
-    "databases": ["PostgreSQL", "MongoDB"],
-    "tools": ["Git", "GitHub", "Postman", "VS Code"]
+    "languages": [],
+    "frameworks": [],
+    "databases": [],
+    "tools": []
   },
-  "projects": [
-    {
-      "id": "proj_1",
-      "title": "Project Title",
-      "description": "Short 1-line description of what it solves",
-      "techStack": ["React", "Node.js"],
-      "repositoryUrl": "",
-      "liveDemoUrl": "",
-      "bullets": [
-        "Architected responsive user interface utilizing modern state management",
-        "Implemented RESTful backend APIs with secure authentication and database persistence"
-      ]
-    }
-  ],
-  "experience": [],
-  "education": [
+  "projects": [],
+  "experience": ${JSON.stringify(workExperience || [])},
+  "education": ${education && education.length ? JSON.stringify(education) : `[
     {
       "id": "edu_1",
       "institution": "${profile.college_name || 'University'}",
-      "degree": "${profile.degree || 'Bachelor of Technology in Computer Science'}",
+      "degree": "${profile.degree || 'Bachelor Degree'}",
       "score": 8.5,
       "gradingSystem": "CGPA_10",
       "startYear": 2021,
       "endYear": 2025
     }
-  ],
+  ]`},
   "certifications": []
 }`;
 
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'deepseek-chat',
       messages: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: activeConfig.systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       max_tokens: 1800,
-      temperature: 0.6,
+      temperature: 0.4,
       response_format: { type: 'json_object' },
     });
 
@@ -594,13 +1254,53 @@ Return ONLY valid JSON matching this exact structure:
       return res.status(500).json({ message: 'Model returned invalid document format. Please try again.' });
     }
 
+    // Safety guard 1: If student has no relevant LMS courses and provided no manual skills,
+    // guarantee skills remain strictly empty arrays (prevents any rogue LLM hallucination).
+    const studentProvidedSkillsCount = Array.isArray(extraSkills)
+      ? extraSkills.length
+      : (typeof extraSkills === 'string' && extraSkills.trim() ? 1 : 0);
+    if (!hasRelevantCourses && studentProvidedSkillsCount === 0) {
+      resumeDoc.skills = {
+        languages: [],
+        frameworks: [],
+        databases: [],
+        tools: [],
+      };
+    }
+
+    // Safety guard 2: If student has no verified capstones and provided no manual projects,
+    // guarantee projects array remains strictly empty.
+    if (relevantCapstones.length === 0 && (!manualProjects || manualProjects.length === 0)) {
+      resumeDoc.projects = [];
+    }
+
+    // Attach category, role, and recommended template
+    resumeDoc.category = category;
+    resumeDoc.targetRole = resolvedRole;
+    resumeDoc.templateId = activeConfig.templateId;
+
     // Merge student-provided personalInfo directly so AI never overwrites genuine links with dummy placeholders
     if (personalInfo && typeof personalInfo === 'object') {
       resumeDoc.personalInfo = {
         ...resumeDoc.personalInfo,
         ...personalInfo,
+        headline: personalInfo.headline || resolvedRole,
         links: (personalInfo.links && personalInfo.links.length) ? personalInfo.links : resumeDoc.personalInfo?.links || [],
       };
+    }
+
+    // Preserve any student-entered events
+    if (Array.isArray(events) && events.length > 0) {
+      resumeDoc.events = events;
+    } else if (!resumeDoc.events) {
+      resumeDoc.events = [];
+    }
+
+    // Preserve any student-entered education (Degree, Intermediate, Schooling)
+    if (Array.isArray(education) && education.length > 0) {
+      resumeDoc.education = education;
+    } else if (!resumeDoc.education) {
+      resumeDoc.education = [];
     }
 
     // Server calculates authoritative verification provenance before returning

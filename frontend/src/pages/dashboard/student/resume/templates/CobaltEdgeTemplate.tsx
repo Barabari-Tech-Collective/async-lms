@@ -375,12 +375,69 @@ export function CobaltEdgeTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <section key='events' className='mb-5'>
+              <div className='flex items-center gap-2 mb-2'>
+                <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
+                <h2 className='text-[11px] font-black tracking-wider text-slate-900 uppercase font-mono'>
+                  WORKSHOPS, HACKATHONS & EVENTS
+                </h2>
+              </div>
+              <div className='space-y-3 pl-3.5'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-2'>
+                          <h3 className='font-bold text-[12.5px] text-slate-900'>{evt.title}</h3>
+                          {evt.eventType && (
+                            <span className='text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <span className='text-[11px] text-slate-500 block mt-0.5'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2'>
+                        {evt.date && <span className='text-[10.5px] text-slate-500 font-medium'>{evt.date}</span>}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-[10.5px] font-bold text-blue-600 hover:underline'
+                          >
+                            Proof ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-1 text-[11.5px] text-slate-700 leading-relaxed'>
+                        <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           summary: renderSummary,
           skills: renderSkills,
           projects: renderProjects,
           education: renderEducation,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

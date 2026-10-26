@@ -9,6 +9,7 @@ import {
   Sparkles,
   Loader2,
   Briefcase,
+  Calendar,
 } from 'lucide-react';
 import { formatHref, getResolvedSectionOrder } from '../resumeUtils';
 import type { SectionKey } from '../types';
@@ -144,7 +145,7 @@ export function FirstJobFresherTemplate({
               <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-3'>
                 <Code2 size={14} className='text-emerald-700' />
                 <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  PORTFOLIO PROJECTS & CODEGURU CAPSTONES
+                  PORTFOLIO PROJECTS & BARABARI CAPSTONES
                 </h2>
               </div>
               <div className='space-y-3.5'>
@@ -323,7 +324,10 @@ export function FirstJobFresherTemplate({
                     <div className='flex justify-between items-baseline'>
                       <div>
                         <h3 className='font-bold text-[13px] text-slate-900'>{exp.role}</h3>
-                        <p className='text-[12px] text-emerald-800 font-medium'>{exp.organization}</p>
+                        <p className='text-[12px] text-emerald-800 font-medium'>
+                          {[exp.organization || exp.company, exp.location].filter(Boolean).join(' • ')}
+                          {exp.employmentType ? ` (${exp.employmentType})` : ''}
+                        </p>
                       </div>
                       <span className='text-[11px] text-slate-500 font-medium'>
                         {exp.startDate} - {exp.endDate || 'Present'}
@@ -381,12 +385,71 @@ export function FirstJobFresherTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <section key='events' className='mb-5'>
+              <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-2'>
+                <Calendar size={14} className='text-emerald-700' />
+                <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
+                  WORKSHOPS, HACKATHONS & EVENTS
+                </h2>
+              </div>
+              <div className='space-y-3'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-2'>
+                          <h3 className='font-bold text-[13px] text-slate-900'>{evt.title}</h3>
+                          {evt.eventType && (
+                            <span className='text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <p className='text-[12px] text-emerald-800 font-medium'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </p>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-2'>
+                        {evt.date && (
+                          <span className='text-[11px] text-slate-500 font-medium'>{evt.date}</span>
+                        )}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-emerald-700 hover:underline text-[11px] font-bold ml-1'
+                          >
+                            Proof ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-1 text-[11.5px] text-slate-700 leading-relaxed'>
+                        <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           education: renderEducation,
           projects: renderProjects,
           skills: renderSkills,
           summary: renderSummary,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

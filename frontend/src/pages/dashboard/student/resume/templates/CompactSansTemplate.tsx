@@ -308,12 +308,66 @@ export function CompactSansTemplate({
           );
         };
 
+        const renderEvents = () => {
+          if (!data.events?.length) return null;
+          return (
+            <section key='events' className='mb-4'>
+              <h2 className='text-[11px] font-black tracking-widest text-slate-800 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
+                WORKSHOPS & EVENTS
+              </h2>
+              <div className='space-y-2 text-[11.5px]'>
+                {data.events.map((evt, eIdx) => (
+                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <div>
+                        <div className='flex items-center gap-1.5'>
+                          <span className='font-bold text-slate-900'>{evt.title}</span>
+                          {evt.eventType && (
+                            <span className='text-[9.5px] font-bold px-1 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200'>
+                              {evt.eventType}
+                            </span>
+                          )}
+                        </div>
+                        {(evt.organizer || evt.location) && (
+                          <span className='text-[10.5px] text-slate-500 block'>
+                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-1.5'>
+                        {evt.date && <span className='text-[10.5px] text-slate-500'>{evt.date}</span>}
+                        {evt.credentialUrl && (
+                          <a
+                            href={formatHref(evt.credentialUrl, 'web')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-[10px] text-[#333d7c] font-bold hover:underline'
+                          >
+                            Proof ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {evt.learnings && (
+                      <p className='mt-0.5 text-[11px] text-slate-600 leading-snug'>
+                        <span className='font-semibold text-slate-800'>Learnings: </span>
+                        {evt.learnings}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        };
+
         const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
           summary: renderSummary,
           skills: renderSkills,
           projects: renderProjects,
           education: renderEducation,
           experience: renderExperience,
+          events: renderEvents,
           certifications: renderCertifications,
         };
 

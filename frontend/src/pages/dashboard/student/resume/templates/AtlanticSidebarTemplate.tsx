@@ -495,7 +495,10 @@ export function AtlanticSidebarTemplate({
                           <div className='flex justify-between items-baseline'>
                             <div>
                               <h3 className='font-bold text-[12.5px] text-slate-900'>{exp.role}</h3>
-                              <p className='text-[11.5px] font-medium text-[#1e2653]'>{exp.organization || exp.company}</p>
+                              <p className='text-[11.5px] font-medium text-[#1e2653]'>
+                                {[exp.organization || exp.company, exp.location].filter(Boolean).join(' • ')}
+                                {exp.employmentType ? ` (${exp.employmentType})` : ''}
+                              </p>
                             </div>
                             <span className='text-[10.5px] text-slate-500 font-medium'>
                               {exp.startDate} - {exp.endDate || 'Present'}
@@ -510,6 +513,60 @@ export function AtlanticSidebarTemplate({
                                 </li>
                               ))}
                             </ul>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null;
+              }
+
+              if (sectionKey === 'events') {
+                return data.events && data.events.length > 0 ? (
+                  <section key='events' className='space-y-3'>
+                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
+                      WORKSHOPS & EVENTS
+                    </h2>
+                    <div className='space-y-3'>
+                      {data.events.map((evt, eIdx) => (
+                        <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+                          <div className='flex justify-between items-baseline'>
+                            <div>
+                              <div className='flex items-center gap-2'>
+                                <h3 className='font-bold text-[12.5px] text-slate-900'>{evt.title}</h3>
+                                {evt.eventType && (
+                                  <span className='text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200'>
+                                    {evt.eventType}
+                                  </span>
+                                )}
+                              </div>
+                              {(evt.organizer || evt.location) && (
+                                <p className='text-[11.5px] font-medium text-[#1e2653]'>
+                                  {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
+                                </p>
+                              )}
+                            </div>
+                            <div className='flex items-center gap-2'>
+                              {evt.date && (
+                                <span className='text-[10.5px] text-slate-500 font-medium'>{evt.date}</span>
+                              )}
+                              {evt.credentialUrl && (
+                                <a
+                                  href={formatHref(evt.credentialUrl, 'web')}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='text-sky-700 hover:underline text-[10.5px] font-bold'
+                                >
+                                  Proof ↗
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                          {evt.learnings && (
+                            <p className='mt-1 text-[11.5px] text-slate-700 leading-relaxed'>
+                              <span className='font-semibold text-slate-900'>Key Learnings: </span>
+                              {evt.learnings}
+                            </p>
                           )}
                         </div>
                       ))}
