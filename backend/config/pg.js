@@ -804,6 +804,7 @@ pool.on('error', (err, client) => {
                                         )),
           meet_space_name               TEXT,
           meet_uri                      TEXT,
+          conference_record_name        TEXT,
           idempotency_key               TEXT NOT NULL UNIQUE,
           created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -836,6 +837,8 @@ pool.on('error', (err, client) => {
 
         CREATE INDEX IF NOT EXISTS idx_class_students_student_id
           ON class_students(student_id);
+        CREATE INDEX IF NOT EXISTS idx_class_students_class_status_student
+          ON class_students(class_id, roster_status, student_id);
       `);
 
       await client.query(`
@@ -844,7 +847,6 @@ pool.on('error', (err, client) => {
           class_id              UUID NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
           student_id            UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
           ticket_hash           TEXT NOT NULL UNIQUE,
-          session_binding_hash  TEXT NOT NULL,
           issued_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           expires_at            TIMESTAMPTZ NOT NULL,
           consumed_at           TIMESTAMPTZ,
@@ -859,6 +861,10 @@ pool.on('error', (err, client) => {
           ON class_access_tickets(class_id, student_id, state);
         CREATE INDEX IF NOT EXISTS idx_class_access_tickets_expiry
           ON class_access_tickets(expires_at);
+      `);
+      await client.query(`
+        ALTER TABLE class_access_tickets
+          DROP COLUMN IF EXISTS session_binding_hash;
       `);
 
       await client.query(`
@@ -906,6 +912,8 @@ pool.on('error', (err, client) => {
           ON meet_sessions(meet_user_id);
         CREATE INDEX IF NOT EXISTS idx_meet_sessions_matched_student
           ON meet_sessions(matched_student_id);
+        CREATE INDEX IF NOT EXISTS idx_meet_sessions_class_student_joined
+          ON meet_sessions(class_id, matched_student_id, joined_at);
       `);
 
       await client.query(`

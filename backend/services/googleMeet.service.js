@@ -1,4 +1,5 @@
 const axios = require('axios');
+const https = require('https');
 const { OAuth2Client } = require('google-auth-library');
 const { getGoogleMeetConfig } = require('../config/googleMeet');
 
@@ -42,14 +43,40 @@ class GoogleMeetService {
       config.redirectUri || undefined,
     );
     this.oauthClient.setCredentials({ refresh_token: config.refreshToken });
+    this.accessTokenPromise = null;
+    this.cachedAccessToken = null;
+    this.accessTokenExpiresAt = 0;
+    this.httpAgent = new https.Agent({ keepAlive: true, maxSockets: 20 });
   }
 
   async getAccessToken() {
+    if (
+      this.cachedAccessToken &&
+      this.accessTokenExpiresAt > Date.now() + 60 * 1000
+    ) {
+      return this.cachedAccessToken;
+    }
+    if (this.accessTokenPromise) return this.accessTokenPromise;
+    this.accessTokenPromise = this.fetchAccessToken();
     try {
-      const { token } = await this.oauthClient.getAccessToken();
-      if (!token) {
-        throw new GoogleMeetError('Google returned no access token');
-      }
+      return await this.accessTokenPromise;
+    } finally {
+      this.accessTokenPromise = null;
+    }
+  }
+
+  async fetchAccessToken() {
+    const startedAt = Date.now();
+    try {
+      const { token, res } = await this.oauthClient.getAccessToken();
+      if (!token) throw new GoogleMeetError('Google returned no access token');
+      this.cachedAccessToken = token;
+      this.accessTokenExpiresAt = res?.data?.expiry_date || Date.now() + 5 * 60 * 1000;
+      console.info(JSON.stringify({
+        component: 'google-meet',
+        operation: 'access_token',
+        elapsedMilliseconds: Date.now() - startedAt,
+      }));
       return token;
     } catch (error) {
       if (error instanceof GoogleMeetError) throw error;
@@ -62,19 +89,30 @@ class GoogleMeetService {
 
   async request(method, path, { data, params, headers = {} } = {}) {
     const accessToken = await this.getAccessToken();
+    const startedAt = Date.now();
 
     try {
-      return await axios({
+      const response = await axios({
         method,
         url: `${this.config.apiBaseUrl}/v2${path}`,
         data,
         params,
         timeout: this.config.requestTimeoutMs,
+        httpsAgent: this.httpAgent,
         headers: {
           Authorization: `Bearer ${accessToken}`,
           ...headers,
         },
       });
+      console.info(JSON.stringify({
+        component: 'google-meet',
+        operation: 'request',
+        method,
+        path,
+        status: response.status,
+        elapsedMilliseconds: Date.now() - startedAt,
+      }));
+      return response;
     } catch (error) {
       throw new GoogleMeetError(
         `Google Meet API request failed: ${getErrorMessage(error)}`,
@@ -88,7 +126,15 @@ class GoogleMeetService {
   }
 
   async createSpace(space = {}) {
-    return (await this.request('POST', '/spaces', { data: space })).data;
+    const payload = {
+      config: {
+        accessType: 'OPEN',
+        moderation: 'ON',
+        ...(space.config || {}),
+      },
+      ...space,
+    };
+    return (await this.request('POST', '/spaces', { data: payload })).data;
   }
 
   async getSpace(spaceName) {
@@ -102,6 +148,35 @@ class GoogleMeetService {
         params: { updateMask },
       })
     ).data;
+  }
+
+  async addCohost(spaceName, email) {
+    if (!email) {
+      throw new GoogleMeetError('A facilitator email is required to add a co-host');
+    }
+    try {
+      return (
+        await this.request('POST', `/${encodePath(spaceName)}/members`, {
+          data: { email, role: 'COHOST' },
+        })
+      ).data;
+    } catch (error) {
+      if (error.status === 409 && /exist|duplicate|already/i.test(error.message)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async restrictSpace(spaceName) {
+    return this.updateSpace(
+      spaceName,
+      {
+        name: spaceName,
+        config: { accessType: 'RESTRICTED' },
+      },
+      'config.accessType',
+    );
   }
 
   async endActiveConference(spaceName) {

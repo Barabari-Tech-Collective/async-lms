@@ -25,7 +25,7 @@ async function enqueueMeetJob(meetJob, options = {}) {
     meetJob.operation,
     { meetJobId: meetJob.id },
     {
-      jobId: `meet-${meetJob.id}-${Date.now()}`,
+      jobId: `meet-${meetJob.id}`,
       attempts: options.attempts || 3,
       backoff: options.backoff || { type: 'exponential', delay: 5000 },
       removeOnComplete: 1000,
