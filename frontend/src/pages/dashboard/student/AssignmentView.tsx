@@ -23,7 +23,11 @@ import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
 import { FormattedContent } from '@/utils/contentFormat';
 import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
-import type { SubmissionType } from '@/utils/types';
+import { AssignmentEvaluationStatusCard, type AssignmentEvaluationData } from '@/components/common/assignment/AssignmentEvaluationStatusCard';
+import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
+import { UrlPermissionStatusBanner } from '@/components/common/assignment/UrlPermissionStatusBanner';
+import { useUrlPermissionGuard } from '@/hooks/useUrlPermissionGuard';
+import type { SubmissionType, StudentAssignmentOverviewItem } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 
 const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: string }> = {
@@ -33,7 +37,7 @@ const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: strin
     example: 'https://github.com/username/repository',
   },
   docs: {
-    pattern: /^https?:\/\/(docs\.google\.com\/(document|presentation)|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
+    pattern: /^https?:\/\/(drive\.google\.com|docs\.google\.com|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
     example: 'https://docs.google.com/document/d/...',
   },
   figma: {
@@ -43,6 +47,10 @@ const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: strin
   excel: {
     pattern: /^https?:\/\/(docs\.google\.com\/spreadsheets|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
     example: 'https://docs.google.com/spreadsheets/d/...',
+  },
+  drive: {
+    pattern: /^https?:\/\/(drive\.google\.com|docs\.google\.com)/i,
+    example: 'https://drive.google.com/file/d/.../view',
   },
   url: {
     pattern: /^https?:\/\/.+/i,
@@ -107,6 +115,7 @@ interface AssignmentDetail {
   submission_file_name?: string | null;
   submitted_at?: string | null;
   updated_at?: string | null;
+  evaluation?: AssignmentEvaluationData | null;
 }
 
 export default function AssignmentView() {
@@ -122,7 +131,30 @@ export default function AssignmentView() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    permissionStatus,
+    checkUrl,
+    recheck,
+  } = useUrlPermissionGuard(solutionUrl, activeType !== 'file');
+
+  const overviewItem: StudentAssignmentOverviewItem | null = useMemo(() => {
+    if (!assignment || !assignment.evaluation) return null;
+    return {
+      id: assignment.id,
+      title: assignment.title,
+      type: 'CURRICULUM',
+      course_name: assignment.subject_title || (slug ? slug.replace(/-/g, ' ').toUpperCase() : 'Course Assignment'),
+      max_score: assignment.max_score || 100,
+      status: assignment.evaluation.status === 'evaluated' ? 'evaluated' : 'pending_evaluation',
+      marks: assignment.evaluation.marks,
+      submission_link: assignment.submission_link,
+      feedback: assignment.evaluation.feedback,
+      navigation_url: window.location.pathname,
+    };
+  }, [assignment, slug]);
 
   useEffect(() => {
     if (!slug) return;
@@ -169,8 +201,13 @@ export default function AssignmentView() {
       setAssignment(data);
 
       const available = Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
-        ? data.allowed_submission_types
-        : ALL_SUBMISSION_TYPES;
+        ? [...data.allowed_submission_types]
+        : [...ALL_SUBMISSION_TYPES];
+
+      // Universal requirement: direct file uploading is accessible for every evaluator and assignment
+      if (!available.includes('file')) {
+        available.unshift('file');
+      }
 
       if (data.submission_type && available.includes(data.submission_type)) {
         setActiveType(data.submission_type);
@@ -193,9 +230,13 @@ export default function AssignmentView() {
   }, [assignmentId]);
 
   const allowedTypes: SubmissionType[] = useMemo(() => {
-    return Array.isArray(assignment?.allowed_submission_types) && assignment.allowed_submission_types.length > 0
-      ? assignment.allowed_submission_types
-      : ALL_SUBMISSION_TYPES;
+    const list = Array.isArray(assignment?.allowed_submission_types) && assignment.allowed_submission_types.length > 0
+      ? [...assignment.allowed_submission_types]
+      : [...ALL_SUBMISSION_TYPES];
+    if (!list.includes('file')) {
+      list.unshift('file');
+    }
+    return list;
   }, [assignment?.allowed_submission_types]);
 
   const handleTypeSelect = (type: SubmissionType) => {
@@ -263,6 +304,19 @@ export default function AssignmentView() {
       const validator = SUBMISSION_REGEX[activeType];
       if (validator && !validator.pattern.test(solutionUrl.trim())) {
         toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
+        return;
+      }
+
+      // Pre-submission URL Permission Guard
+      const guardResult = await checkUrl(solutionUrl, true);
+      if (guardResult.verdict === 'DEFINITE_RESTRICTED') {
+        toast.error(
+          guardResult.message || 'Access Denied: Your document is private. Please update sharing permissions before submitting.'
+        );
+        return;
+      }
+      if (guardResult.verdict === 'SSRF_BLOCKED' || guardResult.verdict === 'INVALID_URL') {
+        toast.error(guardResult.message || 'Invalid submission link.');
         return;
       }
     }
@@ -382,6 +436,18 @@ export default function AssignmentView() {
         />
       )}
 
+      {/* Evaluation Results / Status Card */}
+      <AssignmentEvaluationStatusCard
+        evaluation={assignment.evaluation}
+        submittedAt={assignment.submitted_at}
+        updatedAt={assignment.updated_at}
+        submissionLink={assignment.submission_link}
+        submissionFileName={assignment.submission_file_name}
+        onOpenFeedbackModal={() => setFeedbackModalOpen(true)}
+        onRefresh={fetchAssignment}
+        isRefreshing={loading}
+      />
+
       {/* Submission Card */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0'>
         <div className='px-4 sm:px-8 pt-5 sm:pt-6'>
@@ -423,12 +489,13 @@ export default function AssignmentView() {
           )}
 
           {/* Cloud Permissions Warning */}
-          {currentTypeConfig.requiresPermissionsWarning && (
+          {(currentTypeConfig.requiresPermissionsWarning ||
+            /drive\.google\.com|docs\.google\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com/i.test(solutionUrl)) && (
             <div className='flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs'>
               <AlertTriangle className='w-4 h-4 text-amber-600 shrink-0 mt-0.5' />
               <div>
-                <span className='font-semibold'>Sharing Permission Notice:</span> Ensure your link is set to{' '}
-                <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> so instructors can grade your deliverable.
+                <span className='font-semibold'>Sharing Permission Notice:</span> If submitting via Google Sheets, Google Drive, or OneDrive, ensure your link is set to{' '}
+                <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> without requiring sign-in or access requests. You can also upload your file directly.
               </div>
             </div>
           )}
@@ -450,7 +517,7 @@ export default function AssignmentView() {
                 className='hidden'
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar'
+                accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar,.sql,.py,.js'
               />
               <div
                 className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-transform group-hover:scale-110 ${
@@ -500,6 +567,10 @@ export default function AssignmentView() {
                   {currentTypeConfig.helperText}
                 </p>
               )}
+              <UrlPermissionStatusBanner
+                status={permissionStatus}
+                onRecheck={recheck}
+              />
             </div>
           )}
 
@@ -568,7 +639,8 @@ export default function AssignmentView() {
               <Button
                 onClick={handleSubmit}
                 loading={submitting}
-                className='bg-[#333D7C] hover:bg-[#2a3268] h-11 px-8 font-semibold w-full sm:w-auto shadow-sm'
+                disabled={activeType !== 'file' && (permissionStatus.verdict === 'DEFINITE_RESTRICTED' || permissionStatus.isChecking)}
+                className='bg-[#333D7C] hover:bg-[#2a3268] h-11 px-8 font-semibold w-full sm:w-auto shadow-sm disabled:opacity-50'
               >
                 {isSubmitted ? 'Update Submission' : 'Submit Assignment'}
               </Button>
@@ -597,6 +669,13 @@ export default function AssignmentView() {
           </Button>
         </div>
       )}
+
+      {/* Detailed Rubric & Breakdown Modal */}
+      <StudentAssignmentFeedbackModal
+        isOpen={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        assignment={overviewItem}
+      />
     </div>
   );
 }

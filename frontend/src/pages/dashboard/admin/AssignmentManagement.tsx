@@ -17,6 +17,7 @@ import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { cn, getErrorMessage } from '@/lib/utils';
 import { formatDateTime, isPastDate } from '@/utils/dateUtils';
+import { ALL_SUBMISSION_TYPES } from '@/utils/types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -249,7 +250,7 @@ export default function AssignmentManagement() {
             topicId: item.topic_id || '',
             assignmentDescription: item.assignment_description || '',
             evaluatorType: item.evaluator_type || '',
-            allowedSubmissionTypes: item.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url'],
+            allowedSubmissionTypes: item.allowed_submission_types || ALL_SUBMISSION_TYPES,
             testCases: item.test_cases || null,
             rubric: item.rubric || null,
             instructionFileUrl: item.instruction_file_url || '',

@@ -19,14 +19,21 @@ const StatsCard = ({ results }: Props) => {
   );
 
 
-  const scores = results.map((r: Result) => r.marks);
+  const evaluatedScores = results
+    .filter((r: any) => 
+      (r.status === 'completed' || r.status === 'evaluated') && 
+      r.marks !== null && 
+      r.marks !== undefined && 
+      !isNaN(Number(r.marks))
+    )
+    .map((r: any) => Number(r.marks));
 
-  const avg = (
-    scores.reduce((a: number, b: number) => a + b, 0) / scores.length
-  ).toFixed(1);
+  const avg = evaluatedScores.length > 0
+    ? (evaluatedScores.reduce((a: number, b: number) => a + b, 0) / evaluatedScores.length).toFixed(1)
+    : "—";
 
-  const top = Math.max(...scores);
-  const low = Math.min(...scores);
+  const top = evaluatedScores.length > 0 ? Math.max(...evaluatedScores) : "—";
+  const low = evaluatedScores.length > 0 ? Math.min(...evaluatedScores) : "—";
 
   const data = [
     {

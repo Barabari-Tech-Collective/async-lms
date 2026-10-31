@@ -351,7 +351,7 @@ exports.getCourseStructure = async (req, res) => {
     const topicsMap = new Map();
 
     const parseSubmissionTypes = (val) => {
-      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
       if (Array.isArray(val) && val.length > 0) return val;
       if (typeof val === 'string') {
         try {
@@ -359,7 +359,7 @@ exports.getCourseStructure = async (req, res) => {
           if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         } catch {}
       }
-      return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     };
 
     rows.forEach((row) => {

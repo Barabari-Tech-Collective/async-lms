@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Terminal, Check, Copy, Code2, Cpu, Lock, FileSpreadsheet, BarChart3, Layers } from 'lucide-react';
+import { Terminal, Check, Copy, Code2, Cpu, Lock, FileSpreadsheet, BarChart3, Layers, Database } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -126,9 +126,11 @@ export const AssignmentTestCasesViewer: React.FC<AssignmentTestCasesViewerProps>
         </div>
         <div className='flex items-center gap-2'>
           {evaluatorType && (
-            <Badge className={`${evaluatorType === 'EXCEL' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200'} text-xs font-semibold px-2.5 py-0.5 uppercase`}>
+            <Badge className={`${evaluatorType === 'EXCEL' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (evaluatorType === 'SQL' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200')} text-xs font-semibold px-2.5 py-0.5 uppercase`}>
               {evaluatorType === 'EXCEL' ? (
                 <FileSpreadsheet className='h-3 w-3 mr-1 inline' />
+              ) : evaluatorType === 'SQL' ? (
+                <Database className='h-3 w-3 mr-1 inline' />
               ) : (
                 <Cpu className='h-3 w-3 mr-1 inline' />
               )}

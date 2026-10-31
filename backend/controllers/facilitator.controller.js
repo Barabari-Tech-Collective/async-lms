@@ -794,6 +794,7 @@ exports.getFacilitatorStudentSubmissions = async (req, res) => {
         a.created_at,
         sub.id AS submission_id,
         sub.submission_link,
+        sub.submission_file_url,
         sub.submitted_at,
         sub.score AS sub_score,
         er.id AS evaluation_result_id,
@@ -890,7 +891,7 @@ exports.getFacilitatorStudentSubmissions = async (req, res) => {
     const items = [];
 
     for (const row of currRes.rows) {
-      const isSubmitted = Boolean(row.submission_link || row.submitted_at);
+      const isSubmitted = Boolean(row.submission_link || row.submission_file_url || row.submitted_at);
       const maxScore = Number(row.max_score) || 100;
       let score = null;
       if (row.er_marks !== null && row.er_marks !== undefined) {
@@ -909,7 +910,7 @@ exports.getFacilitatorStudentSubmissions = async (req, res) => {
         }
       }
 
-      let submissionLink = row.submission_link;
+      let submissionLink = row.submission_link || row.submission_file_url;
       if (submissionLink) {
         try {
           submissionLink = await presignS3Url(submissionLink);

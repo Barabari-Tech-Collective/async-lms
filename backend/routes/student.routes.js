@@ -48,6 +48,7 @@ const {
   getStudentProjectsOverview,
   getAssignmentById,
   submitAssignment,
+  verifySubmissionUrl,
   getCapstone,
   submitCapstone,
   getStudentScorecard,
@@ -135,6 +136,12 @@ router.get(
 );
 router.get('/assignments', verifyToken, isStudent, getStudentAssignments);
 router.get('/assignments/:id', verifyToken, isStudentOrFacilitator, getAssignmentById);
+router.post(
+  '/assignments/verify-url-access',
+  verifyToken,
+  isStudent,
+  verifySubmissionUrl,
+);
 router.post(
   '/assignments/:id/submit',
   verifyToken,

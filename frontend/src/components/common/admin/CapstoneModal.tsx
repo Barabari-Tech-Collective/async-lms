@@ -256,10 +256,10 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
 
     let finalTestCases = testCases.trim();
     const upperType = (evaluatorType || '').toUpperCase();
-    const isTestCasesRequired = Boolean(evaluatorType && evaluatorType.trim()) && (['JS', 'PYTHON', 'EXCEL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL'));
+    const isTestCasesRequired = Boolean(evaluatorType && evaluatorType.trim()) && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL') || upperType.includes('SQL'));
 
     if (isTestCasesRequired && !finalTestCases) {
-      toast.error('Test Cases / Spec are required for Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
+      toast.error('Test Cases / Spec are required for SQL, Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
       return;
     }
     if (upperType === 'REACT' || upperType === 'AI' || upperType === 'FULLSTACK' || upperType === 'BACKEND') {
@@ -410,6 +410,7 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
                 <option value='FULLSTACK'>Full Stack Evaluator</option>
                 <option value='AI'>Backend API Evaluator</option>
                 <option value='EXCEL'>Excel Spreadsheet Evaluator</option>
+                <option value='SQL'>SQL Database Evaluator</option>
               </select>
             </div>
 
@@ -501,6 +502,22 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
                         <path d='M14 2V8H20L14 2Z' fill='#87CEAC' />
                         <rect x='7.5' y='11.5' width='9' height='7' rx='0.5' stroke='white' strokeWidth='1.2' fill='none' />
                         <path d='M7.5 14H16.5M12 11.5V18.5' stroke='white' strokeWidth='1.2' />
+                      </svg>
+                    ),
+                  },
+                  {
+                    id: 'drive' as SubmissionType,
+                    title: 'Google Drive',
+                    desc: 'Files or folders in Google Drive (Anyone with link)',
+                    iconBg: 'bg-emerald-50 border-emerald-100',
+                    renderIcon: () => (
+                      <svg className='w-4 h-4' viewBox='0 0 87.3 78'>
+                        <path d='M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z' fill='#0066DA'/>
+                        <path d='M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44C.4 50 0 51.55 0 53.1h27.5z' fill='#00AC47'/>
+                        <path d='M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 10.1z' fill='#EA4335'/>
+                        <path d='M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z' fill='#00832D'/>
+                        <path d='M59.8 53.1H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z' fill='#2684FC'/>
+                        <path d='M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.15 28.1H87.3c0-1.55-.4-3.1-1.2-4.5z' fill='#FFBA00'/>
                       </svg>
                     ),
                   },

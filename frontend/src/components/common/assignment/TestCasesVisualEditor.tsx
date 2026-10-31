@@ -466,7 +466,7 @@ export const TestCasesVisualEditor: React.FC<TestCasesVisualEditorProps> = ({
               <label className='text-xs sm:text-sm font-bold text-slate-800 tracking-tight'>
                 Test Cases & Automated Specs
               </label>
-              {['JS', 'PYTHON', 'EXCEL'].includes(upperType) && (
+              {['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperType) && (
                 <span className='text-rose-500 font-bold'>*</span>
               )}
             </div>

@@ -45,6 +45,10 @@ const poolConfig = connectionString
 
 const pool = new Pool(poolConfig);
 
+pool.on('connect', (client) => {
+  client.query('SET search_path TO "$user", public;').catch(() => {});
+});
+
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
 });
@@ -53,6 +57,7 @@ pool.on('error', (err, client) => {
   let client;
   try {
     client = await pool.connect();
+    await client.query('SET search_path TO "$user", public;');
     // Accessing the host from the pool's own options
     const connectedHost = pool.options.host;
     const connectedDb = pool.options.database;
@@ -348,7 +353,10 @@ pool.on('error', (err, client) => {
     `);
     await client.query(
       `CREATE INDEX IF NOT EXISTS idx_college_assignments_college_id ON college_assignments(college_id);
-       CREATE INDEX IF NOT EXISTS idx_cas_submission_type ON college_assignment_submissions(submission_type);`,
+       CREATE INDEX IF NOT EXISTS idx_cas_submission_type ON college_assignment_submissions(submission_type);
+       ALTER TABLE evaluation_results ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ;
+       CREATE INDEX IF NOT EXISTS idx_eval_results_student_created ON evaluation_results (student_id, created_at DESC);
+       CREATE INDEX IF NOT EXISTS idx_eval_results_submission ON evaluation_results (submission_id);`,
     );
 
     await client.query(`

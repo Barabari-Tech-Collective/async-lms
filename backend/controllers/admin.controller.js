@@ -489,7 +489,7 @@ exports.getAdminSubjectStructure = async (req, res) => {
     const topicsMap = new Map();
 
     const parseSubmissionTypes = (val) => {
-      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
       if (Array.isArray(val)) return val;
       if (typeof val === 'string') {
         try {
@@ -497,7 +497,7 @@ exports.getAdminSubjectStructure = async (req, res) => {
           if (Array.isArray(parsed)) return parsed;
         } catch {}
       }
-      return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     };
 
     rows.forEach((row) => {
@@ -2069,11 +2069,11 @@ exports.createAssignment = async (req, res) => {
       });
     }
 
-    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL') || upperEvalType.includes('SQL'));
     if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
       return res.status(400).json({
         success: false,
-        message: 'Test cases are required for Excel, JavaScript, and Python assignments',
+        message: 'Test cases are required for SQL, Excel, JavaScript, and Python assignments',
       });
     }
 
@@ -2099,7 +2099,7 @@ exports.createAssignment = async (req, res) => {
       } catch (e) {}
     }
 
-    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
       typesArray = allowed_submission_types;
     } else if (typeof allowed_submission_types === 'string') {
@@ -2175,7 +2175,7 @@ exports.updateAssignment = async (req, res) => {
       values.push(evaluator_type && evaluator_type !== 'none' ? String(evaluator_type).trim() : null);
     }
     if (allowed_submission_types !== undefined) {
-      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
       if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
         typesArray = allowed_submission_types;
       } else if (typeof allowed_submission_types === 'string') {
@@ -2307,7 +2307,7 @@ exports.getProject = async (req, res) => {
       } catch (e) {}
     }
     if (!Array.isArray(row.allowed_submission_types) || row.allowed_submission_types.length === 0) {
-      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     }
     res.json({ success: true, data: row });
   } catch (err) {
@@ -2346,11 +2346,11 @@ exports.createProject = async (req, res) => {
       });
     }
 
-    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL') || upperEvalType.includes('SQL'));
     if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
       return res.status(400).json({
         success: false,
-        message: 'Test cases are required for Excel, JavaScript, and Python assignments',
+        message: 'Test cases are required for SQL, Excel, JavaScript, and Python assignments',
       });
     }
 
@@ -2370,7 +2370,7 @@ exports.createProject = async (req, res) => {
       } catch (e) {}
     }
 
-    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
       typesArray = allowed_submission_types;
     } else if (typeof allowed_submission_types === 'string') {
@@ -2483,7 +2483,7 @@ exports.updateProject = async (req, res) => {
       values.push(rubricObj ? JSON.stringify(rubricObj) : null);
     }
     if (allowed_submission_types !== undefined) {
-      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      let typesArray = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
       if (Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0) {
         typesArray = allowed_submission_types;
       } else if (typeof allowed_submission_types === 'string') {

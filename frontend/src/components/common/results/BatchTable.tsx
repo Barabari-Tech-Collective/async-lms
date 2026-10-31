@@ -6,16 +6,19 @@ type Result = {
 
 const BatchTable = ({ results }: { results: Result[] }) => {
   // Group results by college_name
-  const grouped = results.reduce((acc: any, r) => {
+  const grouped = results.reduce((acc: any, r: any) => {
     const college = r.college_name || "Unknown";
     const year = r.expected_graduation_year;
     
     if (!acc[college]) {
-      acc[college] = { college, count: 0, totalScore: 0, years: {} };
+      acc[college] = { college, count: 0, totalScore: 0, evaluatedCount: 0, years: {} };
     }
     
     acc[college].count += 1;
-    acc[college].totalScore += (r.marks || 0);
+    if ((r.status === 'completed' || r.status === 'evaluated') && r.marks !== null && r.marks !== undefined) {
+      acc[college].totalScore += Number(r.marks || 0);
+      acc[college].evaluatedCount += 1;
+    }
     
     if (year) {
       acc[college].years[year] = (acc[college].years[year] || 0) + 1;
@@ -40,7 +43,7 @@ const BatchTable = ({ results }: { results: Result[] }) => {
       year: mostFrequentYear,
       college: g.college,
       submissions: g.count,
-      avg: (g.totalScore / g.count).toFixed(1)
+      avg: g.evaluatedCount > 0 ? (g.totalScore / g.evaluatedCount).toFixed(1) : "—"
     };
   });
 

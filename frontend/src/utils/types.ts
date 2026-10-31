@@ -103,7 +103,7 @@ export interface Exercise {
   is_completed?: boolean;
 }
 
-export type SubmissionType = 'file' | 'github' | 'docs' | 'figma' | 'excel' | 'url';
+export type SubmissionType = 'file' | 'github' | 'docs' | 'figma' | 'excel' | 'drive' | 'url';
 
 export interface SubmissionTypeConfig {
   id: SubmissionType;
@@ -120,7 +120,7 @@ export interface SubmissionTypeConfig {
   requiresPermissionsWarning?: boolean;
 }
 
-export const ALL_SUBMISSION_TYPES: SubmissionType[] = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+export const ALL_SUBMISSION_TYPES: SubmissionType[] = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
 
 export const SUBMISSION_TYPE_CONFIGS: Record<SubmissionType, SubmissionTypeConfig> = {
   file: {
@@ -129,8 +129,8 @@ export const SUBMISSION_TYPE_CONFIGS: Record<SubmissionType, SubmissionTypeConfi
     shortLabel: 'File Upload',
     iconName: 'FileUp',
     emoji: '📁',
-    placeholder: 'Select a file to upload (PDF, DOCX, XLSX, ZIP, etc.)',
-    helperText: 'Upload PDF, DOCX, XLSX, PPTX, TXT, or ZIP archives (max 25MB)',
+    placeholder: 'Select a file to upload (ZIP project archive, XLSX, SQL, PDF, etc.)',
+    helperText: 'Upload ZIP project folder, XLSX, SQL, PDF, or code files (max 25MB)',
     badgeBg: 'bg-blue-500/10 dark:bg-blue-500/20',
     badgeText: 'text-blue-600 dark:text-blue-400',
     badgeBorder: 'border-blue-500/20',
@@ -188,6 +188,20 @@ export const SUBMISSION_TYPE_CONFIGS: Record<SubmissionType, SubmissionTypeConfi
     badgeText: 'text-emerald-600 dark:text-emerald-400',
     badgeBorder: 'border-emerald-500/20',
     patternHelp: 'Must be a Google Sheets or Excel Online URL',
+    requiresPermissionsWarning: true,
+  },
+  drive: {
+    id: 'drive',
+    label: 'Google Drive File / Folder',
+    shortLabel: 'Google Drive',
+    iconName: 'HardDrive',
+    emoji: '📁',
+    placeholder: 'https://drive.google.com/file/d/.../view or folder link',
+    helperText: 'Google Drive shareable file or folder link',
+    badgeBg: 'bg-emerald-500/10 dark:bg-emerald-500/20',
+    badgeText: 'text-emerald-700 dark:text-emerald-300',
+    badgeBorder: 'border-emerald-500/20',
+    patternHelp: 'Must be a valid Google Drive URL (drive.google.com)',
     requiresPermissionsWarning: true,
   },
   url: {

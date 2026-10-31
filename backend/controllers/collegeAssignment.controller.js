@@ -10,6 +10,7 @@ const {
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { withS3Prefix } = require('../utils/s3');
+const { probeUrlAccess } = require('../utils/urlPermissionGuard');
 const path = require('path');
 const fs = require('fs');
 const { promisify } = require('util');
@@ -466,11 +467,11 @@ exports.createAssignment = async (req, res) => {
     });
   }
 
-  const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL'));
+  const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperEvalType) || upperEvalType.includes('JAVASCRIPT') || upperEvalType.includes('PYTHON') || upperEvalType.includes('EXCEL') || upperEvalType.includes('SQL'));
   if (isTestCasesRequired && (!test_cases || (Array.isArray(test_cases) && test_cases.length === 0) || (typeof test_cases === 'string' && !test_cases.trim()))) {
     return res.status(400).json({
       success: false,
-      message: 'test_cases is required for Excel, JavaScript, and Python assignments',
+      message: 'test_cases is required for SQL, Excel, JavaScript, and Python assignments',
     });
   }
 
@@ -511,7 +512,7 @@ exports.createAssignment = async (req, res) => {
   const submissionTypesJson =
     allowed_submission_types && Array.isArray(allowed_submission_types) && allowed_submission_types.length > 0
       ? JSON.stringify(allowed_submission_types)
-      : JSON.stringify(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+      : JSON.stringify(['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url']);
 
   const client = await pool.connect();
   try {
@@ -798,12 +799,28 @@ exports.getCollegeAssignmentById = async (req, res) => {
               ca.test_cases, ca.rubric, ca.evaluator_type, ca.assignment_description,
               ca.allowed_submission_types, ca.created_by,
               u.full_name AS created_by_name,
-              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at, cas.updated_at
+              cas.id AS submission_id,
+              cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at,
+              cas.updated_at AS submission_updated_at,
+              er.id AS evaluation_result_id,
+              er.status AS er_status,
+              er.marks,
+              er.feedback,
+              COALESCE(er.evaluated_at, er.created_at) AS evaluated_at
        FROM college_assignments ca
        LEFT JOIN colleges c ON c.id = ca.college_id
        LEFT JOIN subjects s ON (s.id::text = ca.course OR s.slug = ca.course OR s.name = ca.course)
        LEFT JOIN users u ON u.id = ca.created_by
        LEFT JOIN college_assignment_submissions cas ON cas.assignment_id = ca.id AND cas.student_id = $2
+       LEFT JOIN LATERAL (
+         SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback, er_inner.created_at, er_inner.evaluated_at
+         FROM evaluation_results er_inner
+         JOIN evaluations e ON er_inner.evaluation_id = e.id
+         WHERE (er_inner.submission_id = cas.id OR (er_inner.student_id = $2 AND e.college_assignment_id = ca.id))
+           AND ($2::uuid IS NULL OR er_inner.student_id = $2)
+         ORDER BY er_inner.created_at DESC
+         LIMIT 1
+       ) er ON true
        WHERE ca.id = $1 AND ca.is_deleted = false`,
       [id, student_id],
     );
@@ -886,6 +903,53 @@ exports.getCollegeAssignmentById = async (req, res) => {
       }
     }
 
+    // Normalize feedback object
+    const parseFeedback = (raw) => {
+      if (!raw) return null;
+      let data = raw;
+      if (typeof raw === 'string') {
+        try { data = JSON.parse(raw); } catch { return { summary: String(raw) }; }
+      }
+      if (typeof data.summary === 'string' && data.summary.trim().startsWith('{')) {
+        try {
+          const nested = JSON.parse(data.summary);
+          if (nested && typeof nested === 'object') data = { ...data, ...nested };
+        } catch {}
+      }
+      return {
+        summary: data.summary || data.feedback || '',
+        strengths: Array.isArray(data.strengths) ? data.strengths : [],
+        issues: Array.isArray(data.issues) ? data.issues : (Array.isArray(data.improvements) ? data.improvements : []),
+        breakdown: Array.isArray(data.breakdown) ? data.breakdown : (Array.isArray(data.rubric_breakdown) ? data.rubric_breakdown : []),
+      };
+    };
+
+    const hasSubmitted = Boolean(assignment.submitted_at || assignment.submission_link || assignment.submission_file_url);
+    const evalDate = assignment.evaluated_at ? new Date(assignment.evaluated_at).getTime() : 0;
+    const subUpdateDate = assignment.submission_updated_at ? new Date(assignment.submission_updated_at).getTime() : 0;
+    const isResubmitted = hasSubmitted && evalDate > 0 && subUpdateDate > evalDate + 2000;
+
+    let evaluation_status = 'not_submitted';
+    if (!hasSubmitted) {
+      evaluation_status = 'not_submitted';
+    } else if (isResubmitted) {
+      evaluation_status = 'resubmitted_pending';
+    } else if (assignment.er_status === 'completed' || assignment.er_status === 'evaluated') {
+      evaluation_status = 'evaluated';
+    } else if (assignment.er_status === 'failed') {
+      evaluation_status = 'evaluation_failed';
+    } else {
+      evaluation_status = 'pending_evaluation';
+    }
+
+    assignment.evaluation = {
+      status: evaluation_status,
+      marks: (assignment.marks !== null && assignment.marks !== undefined) ? Number(assignment.marks) : null,
+      max_score: 100,
+      evaluated_at: assignment.evaluated_at,
+      feedback: parseFeedback(assignment.feedback),
+    };
+
     res.json({ success: true, data: await presignRow(assignment) });
   } catch (error) {
     console.error('getCollegeAssignmentById:', error);
@@ -932,8 +996,13 @@ exports.submitCollegeAssignment = async (req, res) => {
     }
 
     const allowed = Array.isArray(assignment.allowed_submission_types) && assignment.allowed_submission_types.length > 0
-      ? assignment.allowed_submission_types
-      : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      ? [...assignment.allowed_submission_types]
+      : ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
+
+    // Universal file uploading requirement: 'file' is always accessible for every evaluator and assignment
+    if (!allowed.includes('file')) {
+      allowed.push('file');
+    }
 
     if (!allowed.includes(submission_type)) {
       return res.status(400).json({
@@ -963,6 +1032,26 @@ exports.submitCollegeAssignment = async (req, res) => {
         return res.status(400).json({
           success: false,
           message: 'Please provide a valid submission link',
+        });
+      }
+
+      // Zero Private Links Guard
+      const probe = await probeUrlAccess(submission_link.trim());
+      if (probe.verdict === 'DEFINITE_RESTRICTED') {
+        return res.status(400).json({
+          success: false,
+          code: 'LINK_PERMISSION_DENIED',
+          message: probe.message || 'Access Denied: Your document is private or restricted.',
+          instructions: probe.instructions,
+          verdict: probe.verdict,
+          platform: probe.platform,
+        });
+      }
+      if (probe.verdict === 'SSRF_BLOCKED' || probe.verdict === 'INVALID_URL') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SUBMISSION_LINK',
+          message: probe.message || 'Invalid submission link.',
         });
       }
     }
