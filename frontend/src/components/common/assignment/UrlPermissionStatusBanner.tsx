@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
-  ExternalLink,
   ShieldAlert,
   Info,
 } from 'lucide-react';

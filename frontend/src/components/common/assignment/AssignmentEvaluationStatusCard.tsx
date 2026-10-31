@@ -1,6 +1,5 @@
 import type { FC } from 'react';
 import {
-  Sparkles,
   Clock,
   CheckCircle2,
   AlertCircle,
@@ -9,8 +8,6 @@ import {
   Trophy,
   History,
   AlertTriangle,
-  ExternalLink,
-  FileText,
   Quote,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -45,8 +42,6 @@ export const AssignmentEvaluationStatusCard: FC<AssignmentEvaluationStatusCardPr
   evaluation,
   submittedAt,
   updatedAt,
-  submissionLink,
-  submissionFileName,
   onOpenFeedbackModal,
   onRefresh,
   isRefreshing = false,

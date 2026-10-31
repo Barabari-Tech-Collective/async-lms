@@ -7,8 +7,6 @@ import {
   CheckCircle2,
   ArrowRight,
   PartyPopper,
-  Eye,
-  Sparkles,
   Upload,
   FileText,
   ExternalLink,
