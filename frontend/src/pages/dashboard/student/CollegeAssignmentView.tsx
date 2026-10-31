@@ -101,10 +101,12 @@ export default function CollegeAssignmentView() {
       const data = res.data.data;
       setAssignment(data);
 
-      const allowed: SubmissionType[] =
+      const rawAllowed: SubmissionType[] =
         Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
           ? data.allowed_submission_types
           : ALL_SUBMISSION_TYPES;
+      const validAllowed = rawAllowed.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+      const allowed = validAllowed.length > 0 ? validAllowed : ALL_SUBMISSION_TYPES;
 
       if (data.submission_type && allowed.includes(data.submission_type)) {
         setActiveType(data.submission_type);
@@ -194,12 +196,12 @@ export default function CollegeAssignmentView() {
       }
     } else {
       if (!solutionUrl.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
       if (validator && !validator.pattern.test(solutionUrl.trim())) {
-        toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
+        toast.error(`Please provide a valid ${currentTypeConfig.shortLabel} URL`);
         return;
       }
     }
@@ -248,11 +250,15 @@ export default function CollegeAssignmentView() {
     );
   }
 
-  const allowedTypes: SubmissionType[] =
-    Array.isArray(assignment.allowed_submission_types) &&
-    assignment.allowed_submission_types.length > 0
-      ? assignment.allowed_submission_types
-      : ALL_SUBMISSION_TYPES;
+  const allowedTypes: SubmissionType[] = useMemo(() => {
+    const raw =
+      Array.isArray(assignment.allowed_submission_types) &&
+      assignment.allowed_submission_types.length > 0
+        ? assignment.allowed_submission_types
+        : ALL_SUBMISSION_TYPES;
+    const valid = raw.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    return valid.length > 0 ? valid : ALL_SUBMISSION_TYPES;
+  }, [assignment.allowed_submission_types]);
 
   const isSubmitted = Boolean(
     assignment.submission_link || assignment.submission_file_url
@@ -536,8 +542,8 @@ export default function CollegeAssignmentView() {
                               : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                           }`}
                         >
-                          <span>{cfg.emoji}</span>
-                          <span className='truncate'>{cfg.shortLabel}</span>
+                          <span>{cfg?.emoji || '📄'}</span>
+                          <span className='truncate'>{cfg?.shortLabel || type}</span>
                         </button>
                       );
                     })}

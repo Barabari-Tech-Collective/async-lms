@@ -258,7 +258,7 @@ pool.on('error', (err, client) => {
       CREATE TABLE IF NOT EXISTS college_assignments (
         id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         college_id   UUID NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
-        created_by   UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+        created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
         title        TEXT NOT NULL,
         description  TEXT,
         due_date     TIMESTAMPTZ,
@@ -266,6 +266,9 @@ pool.on('error', (err, client) => {
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await client.query(`
+      ALTER TABLE college_assignments ALTER COLUMN created_by DROP NOT NULL;
+    `).catch((err) => console.warn('[Migration] college_assignments drop not null notice:', err.message));
     await client.query(`
       ALTER TABLE college_assignments 
       ADD COLUMN IF NOT EXISTS instruction_file_url TEXT,
