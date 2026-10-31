@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Loader2, KeyRound, User, Eye, EyeOff } from 'lucide-react';
+import { Loader2, KeyRound, User, Eye, EyeOff, CheckCircle2, Link2, AlertTriangle } from 'lucide-react';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
@@ -19,6 +19,16 @@ interface UserProfile {
   created_at: string;
 }
 
+type MeetIdentityStatus = 'verified' | 'pending' | 'review_required' | 'revoked' | null;
+
+interface MeetIdentity {
+  linked: boolean;
+  email: string | null;
+  status: MeetIdentityStatus;
+  verifiedAt?: string | null;
+  reviewReason?: string | null;
+}
+
 function getInitials(name: string) {
   return name
     .split(' ')
@@ -31,6 +41,8 @@ function getInitials(name: string) {
 export default function StudentSettings() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [meetIdentity, setMeetIdentity] = useState<MeetIdentity | null>(null);
+  const [linkingMeetAccount, setLinkingMeetAccount] = useState(false);
 
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -42,14 +54,52 @@ export default function StudentSettings() {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   useEffect(() => {
-    apiClient
-      .get<{ success: boolean; data: UserProfile }>('/users/profile')
-      .then((res) => setProfile(res.data.data))
-      .catch(() => {
-        // profile remains null — the null check below shows a fallback UI
+    const params = new URLSearchParams(window.location.search);
+    const linkResult = params.get('meet_link');
+    if (linkResult) {
+      const messages: Record<string, string> = {
+        success: 'Google Meet account linked successfully.',
+        conflict: 'That Google account is already linked to another student.',
+        state_mismatch: 'The Google linking session expired. Please try again.',
+        invalid_identity: 'Google could not verify the selected account.',
+        cancelled: 'Google account linking was cancelled.',
+        failed: 'Google account linking failed. Please try again.',
+      };
+      if (messages[linkResult]) {
+        if (linkResult === 'success') {
+          toast.success(messages[linkResult]);
+        } else if (linkResult === 'cancelled') {
+          toast(messages[linkResult]);
+        } else {
+          toast.error(messages[linkResult]);
+        }
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    Promise.allSettled([
+      apiClient.get<{ success: boolean; data: UserProfile }>('/users/profile'),
+      apiClient.get<{ success: boolean; data: MeetIdentity }>('/me/google-identity'),
+    ])
+      .then(([profileRes, identityRes]) => {
+        if (profileRes.status === 'fulfilled') setProfile(profileRes.value.data.data);
+        if (identityRes.status === 'fulfilled') setMeetIdentity(identityRes.value.data.data);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const handleLinkMeetAccount = async () => {
+    try {
+      setLinkingMeetAccount(true);
+      const response = await apiClient.post<{ authorizationUrl: string }>(
+        '/me/google-identity/link',
+      );
+      window.location.assign(response.data.authorizationUrl);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Google account linking is not available'));
+      setLinkingMeetAccount(false);
+    }
+  };
 
   const handleChangePassword = async () => {
     if (!currentPw || !newPw || !confirmPw) {
@@ -133,6 +183,55 @@ export default function StudentSettings() {
               })}
             </p>
           </div>
+        </div>
+      </Card>
+
+      <Card className='overflow-hidden rounded-2xl'>
+        <div className='bg-slate-50 px-4 sm:px-6 py-3.5 sm:py-4 flex items-center gap-2 border-b'>
+          <Link2 className='h-4 w-4 text-slate-500' />
+          <p className='text-xs sm:text-sm font-semibold text-slate-700'>Meet attendance account</p>
+        </div>
+        <div className='p-4 sm:p-6 space-y-4'>
+          {!meetIdentity?.linked ?(<p className='text-sm text-slate-600'>
+            Link the Google account you will use to join Google Meet classes.We recommend using {profile.email}.
+          </p>) : <p className='text-sm text-slate-600'>Your Google account is linked successfully.</p>}
+          
+          {meetIdentity?.linked && meetIdentity.status === 'verified' ? (
+            <div className='flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4'>
+              <CheckCircle2 className='mt-0.5 h-5 w-5 shrink-0 text-emerald-600' />
+              <div>
+                <p className='text-sm font-semibold text-emerald-800'>Google Meet account verified</p>
+                <p className='mt-1 text-sm text-emerald-700'>{meetIdentity.email}</p>
+                <p className='mt-1 text-xs text-emerald-700'>
+                  Join classes using this Google account for automatic attendance matching.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {meetIdentity?.status === 'review_required' || meetIdentity?.status === 'revoked' ? (
+                <div className='flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4'>
+                  <AlertTriangle className='mt-0.5 h-5 w-5 shrink-0 text-amber-600' />
+                  <p className='text-sm text-amber-800'>
+                    This Google Meet account needs attention before automatic attendance can be recorded.
+                  </p>
+                </div>
+              ) : (
+                <p className='text-sm text-slate-500'>
+                  Your Meet account is not linked. Link it before joining classes so your attendance can be matched.
+                </p>
+              )}
+              <Button
+                type='button'
+                onClick={handleLinkMeetAccount}
+                disabled={linkingMeetAccount}
+                className='w-full sm:w-auto'
+              >
+                {linkingMeetAccount && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+                {linkingMeetAccount ? 'Opening Google...' : 'Sign in with Google for Meet'}
+              </Button>
+            </>
+          )}
         </div>
       </Card>
 

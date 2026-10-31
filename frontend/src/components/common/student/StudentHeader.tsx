@@ -6,6 +6,7 @@ import {
   User,
   Settings,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import NotificationBell from '@/components/common/NotificationBell';
 import { useAppSelector, useAppDispatch } from '@/app/hooks';
@@ -35,6 +36,8 @@ interface HeaderProps {
     days_left: number;
     is_overdue: boolean;
   } | null;
+  meetIdentityStatus?: 'verified' | 'pending' | 'review_required' | 'revoked' | null;
+  meetIdentityLoaded?: boolean;
 }
 
 export default function StudentHeader({
@@ -43,6 +46,8 @@ export default function StudentHeader({
   pendingMilestonesCount = 0,
   onOpenMilestonesModal,
   mostUrgentMilestone,
+  meetIdentityStatus = null,
+  meetIdentityLoaded = false,
 }: HeaderProps) {
   const user = useAppSelector(selectUser);
   const dispatch = useAppDispatch();
@@ -93,6 +98,23 @@ export default function StudentHeader({
       </div>
 
       <div className='flex items-center gap-1.5 sm:gap-3 md:gap-6 shrink-0'>
+        {meetIdentityLoaded && meetIdentityStatus !== 'verified' && (
+          <button
+            type='button'
+            onClick={() => navigate('/dashboard/student/settings')}
+            className='flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-700 transition-colors hover:bg-amber-100 sm:px-3 sm:text-xs'
+            aria-label='Link your Google Meet account for automatic attendance'
+            title='Link your Google account to enable automatic attendance'
+          >
+            <AlertTriangle className='h-3.5 w-3.5 shrink-0' />
+            <span className='hidden sm:inline'>
+              {meetIdentityStatus === 'review_required' || meetIdentityStatus === 'revoked'
+                ? 'Meet account needs attention'
+                : 'Link Meet account'}
+            </span>
+          </button>
+        )}
+
         {/* Milestone Alert Pill */}
         {onOpenMilestonesModal && (
           <button
@@ -209,4 +231,3 @@ export default function StudentHeader({
     </header>
   );
 }
-

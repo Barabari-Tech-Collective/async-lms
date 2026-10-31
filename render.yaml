@@ -55,6 +55,24 @@ services:
         sync: false
       - key: GOOGLE_AUTH_CLIENT_SECRET
         sync: false
+      - key: GOOGLE_IDENTITY_CLIENT_ID
+        sync: false
+      - key: GOOGLE_IDENTITY_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_IDENTITY_CALLBACK_URL
+        sync: false
+      - key: GOOGLE_IDENTITY_STATE_SECRET
+        sync: false
+      - key: GOOGLE_MEET_CLIENT_ID
+        sync: false
+      - key: GOOGLE_MEET_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_MEET_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_MEET_OAUTH_REDIRECT_URI
+        sync: false
+      - key: MEET_WORKER_CONCURRENCY
+        value: 2
       - key: JWT_SECRET
         sync: false
       - key: CHATGPT_API_KEY
@@ -83,7 +101,45 @@ services:
         sync: false
 
   # ---------------------------------------------
-  # 2. Frontend Static Site (Vite/React)
+  # 2. Google Meet background worker
+  # ---------------------------------------------
+  - type: worker
+    name: async-lms-meet-worker
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm run meet-worker
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: async-lms-redis
+          property: connectionString
+      - key: DATABASE_URL
+        sync: false
+      - key: PGHOST
+        sync: false
+      - key: PGDATABASE
+        sync: false
+      - key: PGUSER
+        sync: false
+      - key: PGPASSWORD
+        sync: false
+      - key: PGPORT
+        sync: false
+      - key: GOOGLE_MEET_CLIENT_ID
+        sync: false
+      - key: GOOGLE_MEET_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_MEET_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_MEET_OAUTH_REDIRECT_URI
+        sync: false
+      - key: MEET_WORKER_CONCURRENCY
+        value: 2
+
+  # ---------------------------------------------
+  # 3. Frontend Static Site (Vite/React)
   # ---------------------------------------------
   - type: web
     name: async-lms-frontend
@@ -101,7 +157,7 @@ services:
         sync: false
 
   # ---------------------------------------------
-  # 3. Redis Instance (for bullmq & socket.io)
+  # 4. Redis Instance (for bullmq & socket.io)
   # ---------------------------------------------
   - type: redis
     name: async-lms-redis
