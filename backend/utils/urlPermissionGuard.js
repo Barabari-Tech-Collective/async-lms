@@ -55,11 +55,15 @@ class SimpleLruCache {
   }
 }
 
-const probeCache = new SimpleLruCache(2000, 180000); // 3-minute TTL
+const CACHE_CAPACITY = parseInt(process.env.URL_GUARD_CACHE_LIMIT || '2000', 10);
+const CACHE_TTL_MS = parseInt(process.env.URL_GUARD_CACHE_TTL_MS || '180000', 10);
+const MAX_CONCURRENT_PROBES = parseInt(process.env.URL_GUARD_CONCURRENCY || '15', 10);
 
-// ── 2. Lightweight Concurrency Semaphore (Max 15 Outbound Sockets) ──
+const probeCache = new SimpleLruCache(CACHE_CAPACITY, CACHE_TTL_MS); // Defaults: 2000 items, 3-minute TTL
+
+// ── 2. Lightweight Concurrency Semaphore (Max 15 Outbound Sockets by default) ──
 class Semaphore {
-  constructor(maxConcurrency = 15) {
+  constructor(maxConcurrency = MAX_CONCURRENT_PROBES) {
     this.maxConcurrency = maxConcurrency;
     this.current = 0;
     this.queue = [];
@@ -95,7 +99,7 @@ class Semaphore {
   }
 }
 
-const outboundLimiter = new Semaphore(15);
+const outboundLimiter = new Semaphore(MAX_CONCURRENT_PROBES);
 
 // ── 3. SSRF IP Blacklist & Validation ──
 function isPrivateIp(ip) {

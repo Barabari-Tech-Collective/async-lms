@@ -326,29 +326,33 @@ async function requestEnrollment({ userId, subjectId }) {
       );
 
       if (facRes.rows.length > 0) {
-        for (const fac of facRes.rows) {
-          await notify({
-            userId: fac.facilitator_id,
-            type: 'general',
-            title: 'New Course Enrollment Request',
-            body: `${studentName} requested enrollment in ${subjectName}.`,
-            link: '/dashboard/facilitator/requests',
-          });
-        }
+        await Promise.allSettled(
+          facRes.rows.map((fac) =>
+            notify({
+              userId: fac.facilitator_id,
+              type: 'general',
+              title: 'New Course Enrollment Request',
+              body: `${studentName} requested enrollment in ${subjectName}.`,
+              link: '/dashboard/facilitator/requests',
+            })
+          )
+        );
       } else {
         // Fallback: Notify admins if no facilitator is assigned
         const adminRes = await pool.query(
           `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = 'ADMIN' AND u.deleted_at IS NULL LIMIT 5`,
         );
-        for (const adm of adminRes.rows) {
-          await notify({
-            userId: adm.id,
-            type: 'general',
-            title: 'New Course Enrollment Request (Unassigned)',
-            body: `${studentName} requested enrollment in ${subjectName} (No facilitator assigned).`,
-            link: '/dashboard/admin/requests',
-          });
-        }
+        await Promise.allSettled(
+          adminRes.rows.map((adm) =>
+            notify({
+              userId: adm.id,
+              type: 'general',
+              title: 'New Course Enrollment Request (Unassigned)',
+              body: `${studentName} requested enrollment in ${subjectName} (No facilitator assigned).`,
+              link: '/dashboard/admin/requests',
+            })
+          )
+        );
       }
     }
   } catch (notifErr) {
