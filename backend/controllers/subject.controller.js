@@ -351,7 +351,7 @@ exports.getCourseStructure = async (req, res) => {
     const topicsMap = new Map();
 
     const parseSubmissionTypes = (val) => {
-      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      if (!val) return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
       if (Array.isArray(val) && val.length > 0) return val;
       if (typeof val === 'string') {
         try {
@@ -359,7 +359,7 @@ exports.getCourseStructure = async (req, res) => {
           if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         } catch {}
       }
-      return ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      return ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     };
 
     rows.forEach((row) => {
@@ -544,7 +544,7 @@ exports.getSubtopicContent = async (req, res) => {
     const subtopicId = subtopicResult.rows[0].id;
 
     if (userRole === 'facilitator') {
-      const subjectIds = req.user.subject_ids || [];
+      const subjectIds = (req.user?.subject_ids || []).map(String);
       const subCheck = await pool.query(
         `SELECT t.subject_id FROM subtopics st
          JOIN units u ON st.unit_id = u.id
@@ -552,7 +552,7 @@ exports.getSubtopicContent = async (req, res) => {
          WHERE st.id = $1`,
         [subtopicId],
       );
-      if (subCheck.rows.length === 0 || !subjectIds.includes(subCheck.rows[0].subject_id)) {
+      if (subCheck.rows.length === 0 || !subjectIds.includes(String(subCheck.rows[0].subject_id))) {
         return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
       }
     }
@@ -622,6 +622,7 @@ exports.getSubtopicContent = async (req, res) => {
         qo.id AS option_id,
         qo.option_text,
         qo.order_index AS option_order,
+        (CASE WHEN $2::boolean THEN qo.is_correct ELSE NULL END) AS is_correct,
 
         e.id AS exercise_id,
         e.title AS exercise_title,
@@ -644,7 +645,8 @@ exports.getSubtopicContent = async (req, res) => {
       ORDER BY qq.order_index, qo.order_index
     `;
 
-    const { rows } = await pool.query(query, [subtopicSlug]);
+    const isInstructor = userRole !== 'student';
+    const { rows } = await pool.query(query, [subtopicSlug, isInstructor]);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Lesson not found' });
@@ -719,10 +721,14 @@ exports.getSubtopicContent = async (req, res) => {
           const question = quiz.questions.get(row.question_id);
 
           if (row.option_id) {
-            question.options.push({
+            const opt = {
               id: row.option_id,
               option_text: row.option_text,
-            });
+            };
+            if (isInstructor) {
+              opt.is_correct = row.is_correct;
+            }
+            question.options.push(opt);
           }
         }
       }
@@ -1023,7 +1029,7 @@ exports.getExerciseContent = async (req, res) => {
     const row = rows[0];
 
     if (req.user?.role === 'facilitator') {
-      const subjectIds = req.user.subject_ids || [];
+      const subjectIds = (req.user?.subject_ids || []).map(String);
       const exCheck = await pool.query(
         `SELECT t.subject_id FROM exercises e
          LEFT JOIN subtopics st ON e.subtopic_id = st.id
@@ -1032,7 +1038,7 @@ exports.getExerciseContent = async (req, res) => {
          WHERE e.id = $1`,
         [exerciseId],
       );
-      if (exCheck.rows.length === 0 || !subjectIds.includes(exCheck.rows[0].subject_id)) {
+      if (exCheck.rows.length === 0 || !subjectIds.includes(String(exCheck.rows[0].subject_id))) {
         return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
       }
     }
@@ -1114,7 +1120,8 @@ exports.getQuizContent = async (req, res) => {
         qq.points,
         qq.explanation,
         qo.id AS option_id,
-        qo.option_text
+        qo.option_text,
+        (CASE WHEN $2::boolean THEN qo.is_correct ELSE NULL END) AS is_correct
       FROM quizzes q
       LEFT JOIN units u ON q.unit_id = u.id
       LEFT JOIN quiz_questions qq ON q.id = qq.quiz_id AND qq.is_deleted = false
@@ -1123,14 +1130,15 @@ exports.getQuizContent = async (req, res) => {
       ORDER BY qq.order_index, qo.order_index
     `;
 
-    const { rows } = await pool.query(query, [quizId]);
+    const isInstructor = userRole !== 'student';
+    const { rows } = await pool.query(query, [quizId, isInstructor]);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Quiz not found' });
     }
 
     if (userRole === 'facilitator') {
-      const subjectIds = req.user?.subject_ids || [];
+      const subjectIds = (req.user?.subject_ids || []).map(String);
       const quizCheck = await pool.query(
         `SELECT t.subject_id FROM quizzes q
          JOIN units u ON q.unit_id = u.id
@@ -1138,7 +1146,7 @@ exports.getQuizContent = async (req, res) => {
          WHERE q.id = $1`,
         [quizId],
       );
-      if (quizCheck.rows.length === 0 || !subjectIds.includes(quizCheck.rows[0].subject_id)) {
+      if (quizCheck.rows.length === 0 || !subjectIds.includes(String(quizCheck.rows[0].subject_id))) {
         return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
       }
     }
@@ -1160,10 +1168,14 @@ exports.getQuizContent = async (req, res) => {
         }
         const question = questionsMap.get(row.question_id);
         if (row.option_id) {
-          question.options.push({
+          const opt = {
             id: row.option_id,
             option_text: row.option_text,
-          });
+          };
+          if (isInstructor) {
+            opt.is_correct = row.is_correct;
+          }
+          question.options.push(opt);
         }
       }
     });

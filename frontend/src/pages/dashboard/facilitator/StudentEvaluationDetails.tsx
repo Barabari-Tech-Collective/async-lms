@@ -13,12 +13,137 @@ import {
   Calendar,
   Layers,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Database,
+  FileSpreadsheet,
+  Code2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
+
+const getEvaluatorInfo = (evaluation: any, studentResult: any) => {
+  let rawType = (
+    evaluation?.evaluator_type ||
+    evaluation?.assignment_evaluator_type ||
+    ''
+  ).toString().trim().toUpperCase();
+
+  // If generic or missing, detect from rubric criteria, feedback, or assignment title
+  if (!rawType || rawType === 'JS' || rawType === 'NONE' || rawType === 'AI') {
+    const criteriaTexts = Array.isArray(studentResult?.feedback?.breakdown || studentResult?.feedback?.rubric_breakdown)
+      ? (studentResult?.feedback?.breakdown || studentResult?.feedback?.rubric_breakdown)
+          .map((c: any) => `${c.criteria || c.name || ''} ${c.description || ''}`)
+          .join(' ')
+      : '';
+    const feedbackSummary = typeof studentResult?.feedback === 'string'
+      ? studentResult?.feedback
+      : (studentResult?.feedback?.summary || studentResult?.feedback?.error || '');
+    const title = evaluation?.assignment_name || '';
+    const combined = `${title} ${criteriaTexts} ${feedbackSummary}`.toLowerCase();
+
+    if (
+      combined.includes('formula_range_check') ||
+      combined.includes('acceptedfunctions') ||
+      combined.includes('vlookup') ||
+      combined.includes('pivot_check') ||
+      combined.includes('excel') ||
+      combined.includes('spreadsheet') ||
+      combined.includes('sumif')
+    ) {
+      rawType = 'EXCEL';
+    } else if (
+      combined.includes('inner join') ||
+      combined.includes('left join') ||
+      combined.includes('right join') ||
+      combined.includes('full outer') ||
+      combined.includes('cross join') ||
+      combined.includes('data modeling') ||
+      combined.includes('data model') ||
+      combined.includes('create table') ||
+      combined.includes('alter table') ||
+      combined.includes('schema') ||
+      combined.includes('foreign key') ||
+      combined.includes('primary key') ||
+      combined.includes('database') ||
+      combined.includes('query') ||
+      combined.includes('sql') ||
+      combined.includes('select ')
+    ) {
+      rawType = 'SQL';
+    } else if (
+      combined.includes('def ') ||
+      combined.includes('pytest') ||
+      combined.includes('python')
+    ) {
+      rawType = 'PYTHON';
+    } else if (
+      combined.includes('components render') ||
+      combined.includes('state updates') ||
+      combined.includes('props') ||
+      combined.includes('react')
+    ) {
+      rawType = 'REACT';
+    }
+  }
+
+  const type = rawType || 'JS';
+
+  switch (type) {
+    case 'SQL':
+      return {
+        type: 'SQL',
+        label: 'SQL Evaluator',
+        badgeClass: 'bg-amber-50 text-amber-700 border-amber-200/80',
+        icon: Database,
+      };
+    case 'EXCEL':
+      return {
+        type: 'EXCEL',
+        label: 'Excel Evaluator',
+        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+        icon: FileSpreadsheet,
+      };
+    case 'PYTHON':
+      return {
+        type: 'PYTHON',
+        label: 'Python Evaluator',
+        badgeClass: 'bg-sky-50 text-sky-700 border-sky-200/80',
+        icon: Code2,
+      };
+    case 'REACT':
+      return {
+        type: 'REACT',
+        label: 'React Evaluator',
+        badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-200/80',
+        icon: Layers,
+      };
+    case 'JS':
+    case 'JAVASCRIPT':
+      return {
+        type: 'JS',
+        label: 'JavaScript Evaluator',
+        badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200/80',
+        icon: Code2,
+      };
+    case 'AI':
+    case 'BACKEND':
+      return {
+        type: 'AI',
+        label: 'AI Evaluator',
+        badgeClass: 'bg-purple-50 text-purple-700 border-purple-200/80',
+        icon: Sparkles,
+      };
+    default:
+      return {
+        type: type,
+        label: `${type} Evaluator`,
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+        icon: Layers,
+      };
+  }
+};
 
 export default function StudentEvaluationDetails() {
   const { id, submissionId } = useParams<{ id: string; submissionId: string }>();
@@ -29,6 +154,8 @@ export default function StudentEvaluationDetails() {
   const [reEvaluating, setReEvaluating] = useState(false);
   const [evaluation, setEvaluation] = useState<any>(location.state?.evaluation || null);
   const [studentResult, setStudentResult] = useState<any>(location.state?.studentResult || null);
+
+  const evaluatorInfo = useMemo(() => getEvaluatorInfo(evaluation, studentResult), [evaluation, studentResult]);
 
   const fetchDetails = async (showSkeleton = true) => {
     if (!id) return;
@@ -109,7 +236,7 @@ export default function StudentEvaluationDetails() {
     setStudentResult((prev: any) => prev ? { ...prev, status: 'pending' } : prev);
 
     try {
-      const type = evaluation?.evaluator_type || 'EXCEL';
+      const type = evaluatorInfo?.type || evaluation?.evaluator_type || undefined;
       const res = await apiClient.post('/evaluations/re-evaluate', {
         submissionIds: [subId],
         submissionId: subId,
@@ -210,13 +337,65 @@ export default function StudentEvaluationDetails() {
     return [];
   }, [evaluation?.rubric]);
 
-  const marks = Number(studentResult?.marks ?? 0);
+  const breakdownSum = useMemo(() => {
+    if (!Array.isArray(breakdown) || breakdown.length === 0) return null;
+    return breakdown.reduce((sum: number, item: any) => {
+      const s = Number(item.score ?? item.awarded ?? item.points ?? item.marks ?? 0);
+      return sum + (isNaN(s) ? 0 : s);
+    }, 0);
+  }, [breakdown]);
+
+  // Authoritative grade: Rubric breakdown sum is the mathematical source of truth
+  const marks = Number(breakdownSum !== null ? breakdownSum : (studentResult?.marks ?? 0));
   const maxScore = Number(evaluation?.max_score ?? 100);
   const percentage = Math.min(100, Math.round((marks / (maxScore || 100)) * 100));
 
   const status = studentResult?.status || 'evaluated';
-  const isPending = status === 'pending';
-  const isFailed = status === 'failed';
+  const failureReason = String(
+    summary ||
+    issues?.[0] ||
+    (typeof studentResult?.feedback === 'string' ? studentResult.feedback : '') ||
+    studentResult?.error_message ||
+    studentResult?.error ||
+    ''
+  ).toLowerCase();
+
+  const isPermissionOrAccessFailure =
+    failureReason.includes('permission') ||
+    failureReason.includes('access') ||
+    failureReason.includes('private') ||
+    failureReason.includes('restricted') ||
+    failureReason.includes('anyone with the link') ||
+    failureReason.includes('returned an html web page instead of');
+
+  const isFailed = status === 'failed' || Boolean(
+    (marks === 0 || studentResult?.marks === 0) &&
+    (isPermissionOrAccessFailure || failureReason.includes('evaluation failed'))
+  );
+
+  const isRowUnevaluated = Boolean(
+    !isFailed && (
+      status === 'not_evaluated' ||
+      status === 'not_started' ||
+      status === 'unevaluated' ||
+      status === 'cancelled' ||
+      status === 'stopped' ||
+      (!studentResult?.id && (status === 'pending' || !studentResult?.status))
+    )
+  );
+
+  const isPending = Boolean(
+    !isFailed && !isRowUnevaluated && (status === 'pending' || status === 'evaluating' || status === 'running')
+  );
+
+  const conciseFailureBadge = useMemo(() => {
+    if (isPermissionOrAccessFailure) return 'Permission Denied';
+    if (failureReason.includes('google drive') || failureReason.includes('drive.google')) return 'Drive Link Restricted';
+    if (failureReason.includes('timeout')) return 'Evaluation Timeout';
+    if (failureReason.includes('format') || failureReason.includes('xlsx') || failureReason.includes('sql')) return 'Invalid Format';
+    if (failureReason.includes('not found') || failureReason.includes('empty')) return 'File Not Found';
+    return '';
+  }, [failureReason, isPermissionOrAccessFailure]);
 
   const assignmentName = evaluation?.assignment_name || evaluation?.assignment_id || 'Assignment Evaluation';
 
@@ -258,7 +437,7 @@ export default function StudentEvaluationDetails() {
               className="text-xs font-semibold gap-1.5 border-slate-200 hover:bg-slate-50"
             >
               <RefreshCw size={13} className={reEvaluating ? 'animate-spin' : ''} />
-              {reEvaluating ? 'Re-evaluating...' : 'Re-evaluate'}
+              {reEvaluating ? 'Evaluating...' : isRowUnevaluated ? 'Evaluate' : 'Re-evaluate'}
             </Button>
 
             {studentResult?.submission_link && (
@@ -331,10 +510,10 @@ export default function StudentEvaluationDetails() {
                         Batch {studentResult.expected_graduation_year}
                       </span>
                     )}
-                    {evaluation?.evaluator_type && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 font-semibold uppercase text-[11px]">
-                        <Layers size={13} />
-                        {evaluation.evaluator_type} Evaluator
+                    {evaluatorInfo && (
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-semibold uppercase text-[11px] ${evaluatorInfo.badgeClass}`}>
+                        <evaluatorInfo.icon size={13} />
+                        {evaluatorInfo.label}
                       </span>
                     )}
                   </div>
@@ -346,11 +525,13 @@ export default function StudentEvaluationDetails() {
                     <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Total Score</p>
                     <div className="flex items-baseline justify-end gap-1">
                       <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-                        {isPending ? '—' : marks}
+                        {isPending || isRowUnevaluated || isFailed ? '—' : marks}
                       </span>
                       <span className="text-sm font-semibold text-slate-400">/ {maxScore}</span>
                     </div>
-                    <p className="text-xs font-semibold text-slate-500">{isPending ? 'Evaluating...' : `${percentage}% overall`}</p>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {isPending ? 'Evaluating...' : isRowUnevaluated ? 'Not evaluated' : isFailed ? 'Evaluation failed' : `${percentage}% overall`}
+                    </p>
                   </div>
 
                   <div className="h-12 w-px bg-slate-200" />
@@ -360,10 +541,21 @@ export default function StudentEvaluationDetails() {
                       <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
                         Evaluating
                       </span>
-                    ) : isFailed ? (
-                      <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
-                        Failed
+                    ) : isRowUnevaluated ? (
+                      <span className="px-3 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+                        Not evaluated
                       </span>
+                    ) : isFailed ? (
+                      <div className="flex flex-col items-center">
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                          Failed
+                        </span>
+                        {conciseFailureBadge && (
+                          <span className="text-[10px] text-red-500 font-medium mt-1">
+                            {conciseFailureBadge}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                         <CheckCircle2 size={13} /> Evaluated

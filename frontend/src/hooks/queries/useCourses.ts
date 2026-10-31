@@ -43,16 +43,61 @@ export function useAllCourses() {
   });
 }
 
-export function useEnrollMutation() {
+export interface EnrollmentRequest {
+  id: string;
+  subject_id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  subject_name: string;
+  subject_slug: string;
+  thumbnail_url?: string;
+}
+
+export function useStudentEnrollmentRequests() {
+  return useQuery<EnrollmentRequest[]>({
+    queryKey: ['student', 'enrollment-requests'],
+    queryFn: () =>
+      apiClient.get('/students/enrollment-requests').then((r) => r.data.data ?? []),
+    staleTime: 10 * 1000,
+  });
+}
+
+export function useRequestEnrollmentMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (subjectId: number | string) =>
-      apiClient.post(`/students/subjects/${subjectId}/enroll`),
+      apiClient.post('/students/enrollment-requests', { subject_id: subjectId }),
     onSuccess: () => {
-      // Invalidate both lists so they refetch fresh data
       queryClient.invalidateQueries({ queryKey: ['courses'] });
       queryClient.invalidateQueries({ queryKey: ['student', 'subjects'] });
+      queryClient.invalidateQueries({ queryKey: ['student', 'enrollment-requests'] });
       notifyCourseProgressUpdated();
     },
+  });
+}
+
+export function useEnrollMutation() {
+  return useRequestEnrollmentMutation();
+}
+
+export interface FacilitatorCourse {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  level: string | null;
+  order_index: number;
+  topic_count: number;
+  lesson_count: number;
+}
+
+export function useFacilitatorCourses() {
+  return useQuery<FacilitatorCourse[]>({
+    queryKey: ['facilitator', 'courses'],
+    queryFn: () =>
+      apiClient.get('/facilitator/courses').then((r) => r.data.data ?? []),
+    staleTime: 60 * 1000,
   });
 }

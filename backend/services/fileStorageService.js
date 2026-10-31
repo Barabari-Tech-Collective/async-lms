@@ -28,11 +28,22 @@ const s3Configured = () =>
   );
 
 async function presignS3Url(url) {
-  if (!url || !url.includes('.amazonaws.com/')) return url;
+  if (!url || typeof url !== 'string') return url;
+  const trimmed = url.trim();
+  if (trimmed.includes('X-Amz-Signature') || trimmed.includes('AWSAccessKeyId')) return trimmed;
+  if (!trimmed.includes('.amazonaws.com/')) return trimmed;
   try {
-    const { hostname, pathname } = new URL(url);
-    const bucket = hostname.split('.')[0];
-    const key = decodeURIComponent(pathname.slice(1));
+    const { hostname, pathname } = new URL(trimmed);
+    let bucket = '';
+    let key = '';
+    if (hostname.startsWith('s3.') || hostname.startsWith('s3-')) {
+      const parts = pathname.slice(1).split('/');
+      bucket = parts[0];
+      key = decodeURIComponent(parts.slice(1).join('/'));
+    } else {
+      bucket = hostname.split('.')[0];
+      key = decodeURIComponent(pathname.slice(1));
+    }
     const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
     return await getSignedUrl(s3, cmd, { expiresIn: 3600 });
   } catch {

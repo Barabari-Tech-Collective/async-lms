@@ -10,6 +10,7 @@ const { getTotalXP } = require('../services/xpService');
 const { calculateSubjectProgress, syncUserSubjectProgress } = require('../utils/progress');
 const { presignS3Url } = require('../utils/s3');
 const { storeFile } = require('../services/fileStorageService');
+const { probeUrlAccess } = require('../utils/urlPermissionGuard');
 
 const WORKSPACE_ROOT = path.join(__dirname, '..', 'workspaces');
 // ============================================
@@ -972,7 +973,11 @@ const EXERCISE_COLUMNS = `
  *
  * @throws {ExerciseAccessError} 404 if missing or deleted, 403 if not enrolled
  */
-async function loadAccessibleExercise(userId, exerciseId) {
+async function loadAccessibleExercise(userOrId, exerciseId) {
+  const userId = typeof userOrId === 'object' && userOrId !== null ? userOrId.id : userOrId;
+  const userRole = typeof userOrId === 'object' && userOrId !== null ? userOrId.role : 'student';
+  const userSubjectIds = (typeof userOrId === 'object' && userOrId !== null ? userOrId.subject_ids : []) || [];
+
   const { rows } = await pool.query(
     `SELECT ${EXERCISE_COLUMNS},
             COALESCE(t_unit.subject_id, t_sub.subject_id) AS subject_id
@@ -1001,15 +1006,26 @@ async function loadAccessibleExercise(userId, exerciseId) {
     );
   }
 
-  const enrolled = await pool.query(
-    'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
-    [userId, exercise.subject_id],
-  );
-  if (enrolled.rowCount === 0) {
-    throw new ExerciseAccessError(
-      403,
-      'You are not enrolled in the course this exercise belongs to.',
+  if (userRole === 'facilitator') {
+    if (!userSubjectIds.includes(exercise.subject_id)) {
+      throw new ExerciseAccessError(
+        403,
+        'Access denied: You are not assigned to this subject.',
+      );
+    }
+  } else if (userRole === 'admin') {
+    // Admin has access to preview
+  } else {
+    const enrolled = await pool.query(
+      'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+      [userId, exercise.subject_id],
     );
+    if (enrolled.rowCount === 0) {
+      throw new ExerciseAccessError(
+        403,
+        'You are not enrolled in the course this exercise belongs to.',
+      );
+    }
   }
 
   const hasHtml =
@@ -1360,6 +1376,7 @@ exports.submitExercise = async (req, res) => {
           backend: 'backend',
           javascript: 'javascript',
           python: 'python',
+          sql: 'sql',
         };
         const evaluatorType = evalTypeMap[exercise.language] || 'backend';
 
@@ -1369,7 +1386,29 @@ exports.submitExercise = async (req, res) => {
           assignmentId: exerciseId,
         };
 
-      if (evaluatorType === 'visual') {
+      if (evaluatorType === 'sql') {
+        let rawManifest = exercise.test_cases || exercise.manifest || {};
+        while (typeof rawManifest === 'string') {
+          try {
+            rawManifest = JSON.parse(rawManifest);
+          } catch (e) {
+            break;
+          }
+        }
+        payload.manifest = typeof rawManifest === 'object' ? rawManifest : {};
+        payload.rubric = exercise.rubric || {
+          criteria: [{ name: 'SQL Query & Schema Verification', weight: 100 }],
+        };
+        const sqlFile = files && Array.isArray(files) ? files.find((f) => (f.name || f.path || '').endsWith('.sql')) : null;
+        payload.submissions = [
+          {
+            studentId: userId,
+            studentName: req.user.full_name || 'Student',
+            ideFiles: files,
+            sqlText: sqlFile ? sqlFile.content : '',
+          },
+        ];
+      } else if (evaluatorType === 'visual') {
         payload.expectedUrl = 'https://example.com'; // placeholder since it's ide files
 
         let rubricStr = '';
@@ -1805,7 +1844,7 @@ exports.initExerciseWorkspace = async (req, res) => {
     const { taskId } = req.body;
 
     const { language, initial_files, tasks } = await loadAccessibleExercise(
-      userId,
+      req.user,
       exerciseId,
     );
 
@@ -1920,7 +1959,7 @@ exports.saveExerciseWorkspace = async (req, res) => {
     // Saving creates directories on disk keyed by exercise id — gate it on the
     // same entitlement as the rest, so an unenrolled student cannot seed
     // arbitrary workspaces.
-    await loadAccessibleExercise(userId, exerciseId);
+    await loadAccessibleExercise(req.user, exerciseId);
 
     const projectId = taskId
       ? `exercise-${exerciseId}-task-${taskId}`
@@ -1964,7 +2003,7 @@ exports.runExerciseTests = async (req, res) => {
     const { exerciseId } = req.params;
     const { taskId } = req.body;
 
-    const exercise = await loadAccessibleExercise(userId, exerciseId);
+    const exercise = await loadAccessibleExercise(req.user, exerciseId);
     const { language, tasks } = exercise;
 
     // Grade against the task the student is on, else the legacy exercise row.
@@ -2021,7 +2060,7 @@ exports.runExercise = async (req, res) => {
     const { exerciseId } = req.params;
     const { taskId, activeFile } = req.body;
 
-    const { language } = await loadAccessibleExercise(userId, exerciseId);
+    const { language } = await loadAccessibleExercise(req.user, exerciseId);
 
     const projectId = taskId
       ? `exercise-${exerciseId}-task-${taskId}`
@@ -2380,6 +2419,7 @@ exports.deleteStudentProject = async (req, res) => {
 exports.getAssignmentById = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
     const { id } = req.params;
 
     const result = await pool.query(
@@ -2392,21 +2432,36 @@ exports.getAssignmentById = async (req, res) => {
         a.test_cases,
         a.rubric,
         a.allowed_submission_types,
+        s.id AS subject_id,
         s.name AS subject_title,
         s.slug AS subject_slug,
         u.title AS unit_title,
+        sub.id AS submission_id,
         sub.submission_type,
         sub.submission_link,
         sub.submission_file_url,
         sub.submission_file_name,
         sub.submitted_at,
-        sub.updated_at
+        sub.updated_at AS submission_updated_at,
+        er.id AS evaluation_result_id,
+        er.status AS er_status,
+        er.marks,
+        er.feedback,
+        COALESCE(er.evaluated_at, er.created_at) AS evaluated_at
        FROM assignments a
        INNER JOIN units u ON a.unit_id = u.id
        INNER JOIN topics t ON u.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
-       INNER JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN assignment_submissions sub ON sub.assignment_id = a.id AND sub.user_id = $1
+       LEFT JOIN LATERAL (
+         SELECT er_inner.id, er_inner.status, er_inner.marks, er_inner.feedback, er_inner.created_at, er_inner.evaluated_at
+         FROM evaluation_results er_inner
+         JOIN evaluations e ON er_inner.evaluation_id = e.id
+         WHERE (er_inner.submission_id = sub.id OR (er_inner.student_id = $1 AND e.assignment_id = a.id))
+           AND er_inner.student_id = $1
+         ORDER BY er_inner.created_at DESC
+         LIMIT 1
+       ) er ON true
        WHERE a.id = $2 AND a.is_deleted = false`,
       [userId, id],
     );
@@ -2418,18 +2473,87 @@ exports.getAssignmentById = async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      if (!subjectIds.includes(row.subject_id)) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'Access denied: You are not assigned to this subject' });
+      }
+    } else if (userRole === 'student') {
+      const enrolled = await pool.query(
+        'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+        [userId, row.subject_id],
+      );
+      if (enrolled.rowCount === 0) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'You are not enrolled in the course this assignment belongs to.' });
+      }
+    }
     if (typeof row.allowed_submission_types === 'string') {
       try {
         row.allowed_submission_types = JSON.parse(row.allowed_submission_types);
       } catch (e) {}
     }
     if (!Array.isArray(row.allowed_submission_types) || row.allowed_submission_types.length === 0) {
-      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      row.allowed_submission_types = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     }
 
     if (row.submission_file_url) {
       row.submission_file_url = await presignS3Url(row.submission_file_url);
     }
+    if (row.submission_link) {
+      row.submission_link = await presignS3Url(row.submission_link);
+    }
+
+    // Normalize feedback object
+    const parseFeedback = (raw) => {
+      if (!raw) return null;
+      let data = raw;
+      if (typeof raw === 'string') {
+        try { data = JSON.parse(raw); } catch { return { summary: String(raw) }; }
+      }
+      if (typeof data.summary === 'string' && data.summary.trim().startsWith('{')) {
+        try {
+          const nested = JSON.parse(data.summary);
+          if (nested && typeof nested === 'object') data = { ...data, ...nested };
+        } catch {}
+      }
+      return {
+        summary: data.summary || data.feedback || '',
+        strengths: Array.isArray(data.strengths) ? data.strengths : [],
+        issues: Array.isArray(data.issues) ? data.issues : (Array.isArray(data.improvements) ? data.improvements : []),
+        breakdown: Array.isArray(data.breakdown) ? data.breakdown : (Array.isArray(data.rubric_breakdown) ? data.rubric_breakdown : []),
+      };
+    };
+
+    const hasSubmitted = Boolean(row.submitted_at || row.submission_link || row.submission_file_url);
+    const evalDate = row.evaluated_at ? new Date(row.evaluated_at).getTime() : 0;
+    const subUpdateDate = row.submission_updated_at ? new Date(row.submission_updated_at).getTime() : 0;
+    const isResubmitted = hasSubmitted && evalDate > 0 && subUpdateDate > evalDate + 2000;
+
+    let evaluation_status = 'not_submitted';
+    if (!hasSubmitted) {
+      evaluation_status = 'not_submitted';
+    } else if (isResubmitted) {
+      evaluation_status = 'resubmitted_pending';
+    } else if (row.er_status === 'completed' || row.er_status === 'evaluated') {
+      evaluation_status = 'evaluated';
+    } else if (row.er_status === 'failed') {
+      evaluation_status = 'evaluation_failed';
+    } else {
+      evaluation_status = 'pending_evaluation';
+    }
+
+    row.evaluation = {
+      status: evaluation_status,
+      marks: (row.marks !== null && row.marks !== undefined) ? Number(row.marks) : null,
+      max_score: Number(row.max_score) || 100,
+      evaluated_at: row.evaluated_at,
+      feedback: parseFeedback(row.feedback),
+    };
 
     res.json({ success: true, data: row });
   } catch (error) {
@@ -2473,7 +2597,11 @@ exports.submitAssignment = async (req, res) => {
       } catch (e) {}
     }
     if (!Array.isArray(allowedTypes) || allowedTypes.length === 0) {
-      allowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+      allowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
+    }
+    // Universal file uploading requirement: 'file' is always accessible for every evaluator and assignment
+    if (!allowedTypes.includes('file')) {
+      allowedTypes.push('file');
     }
 
     if (!allowedTypes.includes(submission_type)) {
@@ -2530,6 +2658,26 @@ exports.submitAssignment = async (req, res) => {
         });
       }
       cleanLink = submission_link.trim();
+
+      // Zero Private Links Guard
+      const probe = await probeUrlAccess(cleanLink);
+      if (probe.verdict === 'DEFINITE_RESTRICTED') {
+        return res.status(400).json({
+          success: false,
+          code: 'LINK_PERMISSION_DENIED',
+          message: probe.message || 'Access Denied: Your document is private or restricted.',
+          instructions: probe.instructions,
+          verdict: probe.verdict,
+          platform: probe.platform,
+        });
+      }
+      if (probe.verdict === 'SSRF_BLOCKED' || probe.verdict === 'INVALID_URL') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SUBMISSION_LINK',
+          message: probe.message || 'Invalid submission link.',
+        });
+      }
     }
 
     const result = await pool.query(
@@ -3001,34 +3149,39 @@ exports.getStudentProjectsOverview = async (req, res) => {
 exports.getCapstone = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
+    const isStaff = userRole !== 'student';
     const { projectId } = req.params;
 
     const result = await pool.query(
       `SELECT
         p.id, p.title, p.instructions, p.max_score, p.evaluator_type, p.rubric, p.test_cases, p.allowed_submission_types,
+        s.id AS subject_id,
         ps.submission_type, ps.submission_link, ps.submission_file_url, ps.submission_file_name, ps.is_approved, ps.submitted_at, ps.updated_at,
         COALESCE(er.marks, ps.score) AS score,
         er.feedback AS er_feedback,
         ps.rubric_breakdown AS ps_rubric_breakdown,
         ps.execution_logs,
-        er.status AS evaluation_status
+        er.status AS evaluation_status,
+        COALESCE(er.evaluated_at, er.created_at) AS evaluated_at
        FROM projects p
        INNER JOIN topics t ON p.topic_id = t.id
        INNER JOIN subjects s ON t.subject_id = s.id
        LEFT JOIN user_subjects us ON us.subject_id = s.id AND us.user_id = $1
        LEFT JOIN project_submissions ps ON ps.project_id = p.id AND ps.user_id = $1
        LEFT JOIN LATERAL (
-         SELECT er_inner.marks, er_inner.feedback, er_inner.status
+         SELECT er_inner.marks, er_inner.feedback, er_inner.status, er_inner.created_at, er_inner.evaluated_at
          FROM evaluation_results er_inner
          JOIN evaluations e ON er_inner.evaluation_id = e.id
          WHERE (er_inner.submission_id = ps.id OR (er_inner.student_id = $1 AND e.project_id = p.id))
+           AND er_inner.student_id = $1
          ORDER BY er_inner.created_at DESC
          LIMIT 1
        ) er ON true
        WHERE p.id = $2
          AND (p.is_deleted = false OR p.is_deleted IS NULL)
-         AND (us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
-      [userId, projectId],
+         AND ($3::boolean OR us.user_id IS NOT NULL OR ps.id IS NOT NULL OR er.marks IS NOT NULL)`,
+      [userId, projectId, isStaff],
     );
 
     if (result.rows.length === 0) {
@@ -3038,6 +3191,15 @@ exports.getCapstone = async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    if (userRole === 'facilitator') {
+      const subjectIds = req.user.subject_ids || [];
+      if (!subjectIds.includes(row.subject_id)) {
+        return res
+          .status(403)
+          .json({ success: false, message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
 
     const parseFeedback = (feedback) => {
       if (!feedback) return null;
@@ -3067,7 +3229,7 @@ exports.getCapstone = async (req, res) => {
       ? await presignS3Url(row.submission_file_url)
       : null;
 
-    let capstoneAllowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    let capstoneAllowedTypes = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     if (Array.isArray(row.allowed_submission_types) && row.allowed_submission_types.length > 0) {
       capstoneAllowedTypes = row.allowed_submission_types;
     } else if (typeof row.allowed_submission_types === 'string') {
@@ -3078,6 +3240,37 @@ exports.getCapstone = async (req, res) => {
         }
       } catch (e) {}
     }
+
+    const hasSubmitted = Boolean(row.submitted_at || row.submission_link || row.submission_file_url);
+    const evalDate = row.evaluated_at ? new Date(row.evaluated_at).getTime() : 0;
+    const subUpdateDate = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+    const isResubmitted = hasSubmitted && evalDate > 0 && subUpdateDate > evalDate + 2000;
+
+    let evaluation_status = 'not_submitted';
+    if (!hasSubmitted) {
+      evaluation_status = 'not_submitted';
+    } else if (isResubmitted) {
+      evaluation_status = 'resubmitted_pending';
+    } else if (row.evaluation_status === 'completed' || row.evaluation_status === 'evaluated') {
+      evaluation_status = 'evaluated';
+    } else if (row.evaluation_status === 'failed') {
+      evaluation_status = 'evaluation_failed';
+    } else {
+      evaluation_status = 'pending_evaluation';
+    }
+
+    const normalizedEvaluation = {
+      status: evaluation_status,
+      marks: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+      max_score: row.max_score ? Number(row.max_score) : 100,
+      evaluated_at: row.evaluated_at,
+      feedback: {
+        summary: rubric_breakdown?.summary || rubric_breakdown?.feedback || '',
+        strengths: Array.isArray(rubric_breakdown?.strengths) ? rubric_breakdown.strengths : [],
+        issues: Array.isArray(rubric_breakdown?.issues) ? rubric_breakdown.issues : (Array.isArray(rubric_breakdown?.improvements) ? rubric_breakdown.improvements : []),
+        breakdown: Array.isArray(rubric_breakdown?.breakdown) ? rubric_breakdown.breakdown : (Array.isArray(rubric_breakdown?.rubric_breakdown) ? rubric_breakdown.rubric_breakdown : []),
+      },
+    };
 
     res.json({
       success: true,
@@ -3101,6 +3294,7 @@ exports.getCapstone = async (req, res) => {
         rubric_breakdown,
         execution_logs: row.execution_logs,
         evaluation_status: row.evaluation_status,
+        evaluation: normalizedEvaluation,
       },
     });
   } catch (error) {
@@ -3139,7 +3333,7 @@ exports.submitCapstone = async (req, res) => {
     }
 
     const project = enrolled.rows[0];
-    let allowed = ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    let allowed = ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
     if (Array.isArray(project.allowed_submission_types) && project.allowed_submission_types.length > 0) {
       allowed = project.allowed_submission_types;
     } else if (typeof project.allowed_submission_types === 'string') {
@@ -3149,6 +3343,10 @@ exports.submitCapstone = async (req, res) => {
           allowed = parsed;
         }
       } catch (e) {}
+    }
+
+    if (!allowed.includes('file')) {
+      allowed.push('file');
     }
 
     if (!allowed.includes(submission_type)) {
@@ -3202,6 +3400,26 @@ exports.submitCapstone = async (req, res) => {
         });
       }
       cleanLink = submission_link.trim();
+
+      // Zero Private Links Guard
+      const probe = await probeUrlAccess(cleanLink);
+      if (probe.verdict === 'DEFINITE_RESTRICTED') {
+        return res.status(400).json({
+          success: false,
+          code: 'LINK_PERMISSION_DENIED',
+          message: probe.message || 'Access Denied: Your document is private or restricted.',
+          instructions: probe.instructions,
+          verdict: probe.verdict,
+          platform: probe.platform,
+        });
+      }
+      if (probe.verdict === 'SSRF_BLOCKED' || probe.verdict === 'INVALID_URL') {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_SUBMISSION_LINK',
+          message: probe.message || 'Invalid submission link.',
+        });
+      }
     }
 
     const result = await pool.query(
@@ -3272,81 +3490,95 @@ exports.submitCapstone = async (req, res) => {
 
 // ── Enroll in Subject ──────────────────────────────────────────────────────────
 
+const courseEnrollmentService = require('../services/courseEnrollmentService');
+
+/**
+ * Student requests enrollment in an additional subject
+ * POST /api/v1/students/enrollment-requests
+ */
+exports.requestEnrollment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { subject_id } = req.body;
+
+    if (!subject_id) {
+      return res.status(400).json({ success: false, message: 'subject_id is required' });
+    }
+
+    const request = await courseEnrollmentService.requestEnrollment({
+      userId,
+      subjectId: subject_id,
+    });
+
+    logAction({
+      req,
+      action: 'REQUEST_ENROLLMENT',
+      entityType: 'enrollment_requests',
+      entityId: request.id,
+      details: { subject_id },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Enrollment request submitted. Waiting for instructor approval.',
+      data: request,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message });
+    }
+    serverError(res, err, 'student:requestEnrollment');
+  }
+};
+
+/**
+ * Get current student's enrollment requests
+ * GET /api/v1/students/enrollment-requests
+ */
+exports.getStudentEnrollmentRequests = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      `SELECT er.id, er.subject_id, er.status, er.rejection_reason, er.created_at, er.reviewed_at,
+              s.name AS subject_name, s.slug AS subject_slug
+       FROM enrollment_requests er
+       JOIN subjects s ON er.subject_id = s.id
+       WHERE er.user_id = $1
+       ORDER BY er.created_at DESC`,
+      [userId],
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    serverError(res, err, 'student:getStudentEnrollmentRequests');
+  }
+};
+
+/**
+ * Legacy direct enrollment route: Now safely routes through governed request workflow
+ * POST /api/v1/students/subjects/:subjectId/enroll
+ */
 exports.enrollInSubject = async (req, res) => {
   const userId = req.user.id;
   const { subjectId } = req.params;
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    const request = await courseEnrollmentService.requestEnrollment({
+      userId,
+      subjectId,
+    });
 
-    // Verify subject exists and is published
-    const subjectCheck = await client.query(
-      'SELECT id FROM subjects WHERE id = $1 AND is_published = true AND is_deleted = false',
-      [subjectId],
-    );
-    if (subjectCheck.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({
-        success: false,
-        message: 'Subject not found or not available',
-      });
+    res.status(200).json({
+      success: true,
+      pendingApproval: true,
+      message: 'Enrollment request submitted for instructor approval.',
+      data: request,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message });
     }
-
-    // Insert enrollment (idempotent)
-    await client.query(
-      `INSERT INTO user_subjects (user_id, subject_id, started_at)
-       VALUES ($1, $2, CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id, subject_id) DO NOTHING`,
-      [userId, subjectId],
-    );
-
-    // Seed subtopic progress: unlocked by default (peer-progression locking
-    // not enforced yet); only locked if an admin explicitly locked it.
-    await client.query(
-      `WITH new_student_profile AS (
-        SELECT college_id, year FROM student_profiles WHERE user_id = $1
-      ),
-      subject_subtopics AS (
-        SELECT
-          st.id AS subtopic_id,
-          DENSE_RANK() OVER (
-            PARTITION BY t.subject_id
-            ORDER BY t.order_index, u.order_index
-          ) AS unit_rn
-        FROM topics t
-        INNER JOIN units u ON u.topic_id = t.id
-        INNER JOIN subtopics st ON st.unit_id = u.id
-        WHERE t.subject_id = $2
-      ),
-      admin_locks AS (
-        SELECT cal.subtopic_id, cal.is_locked
-        FROM cohort_admin_locks cal
-        CROSS JOIN new_student_profile nsp
-        WHERE cal.college_id = nsp.college_id
-          AND cal.year = nsp.year
-      )
-      INSERT INTO user_subtopic_progress (user_id, subtopic_id, is_unlocked)
-      SELECT $1, ss.subtopic_id,
-        CASE
-          WHEN al.is_locked = true THEN false   -- admin explicitly locked
-          ELSE true                             -- unlocked by default; locking mechanism TBD
-        END
-      FROM subject_subtopics ss
-      LEFT JOIN admin_locks al ON al.subtopic_id = ss.subtopic_id
-      ON CONFLICT (user_id, subtopic_id)
-        DO UPDATE SET is_unlocked = (user_subtopic_progress.is_unlocked OR EXCLUDED.is_unlocked)`,
-      [userId, subjectId],
-    );
-
-    await client.query('COMMIT');
-    res.json({ success: true, message: 'Enrolled successfully' });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error enrolling in subject:', error);
-    serverError(res, error);
-  } finally {
-    client.release();
+    serverError(res, err, 'student:enrollInSubject');
   }
 };
 
@@ -4785,5 +5017,35 @@ exports.getStudentActivityCalendar = async (req, res) => {
   }
 };
 
+/**
+ * Real-time URL permission pre-checker for frontend
+ * POST /api/students/assignments/verify-url-access
+ */
+exports.verifySubmissionUrl = async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a URL to verify',
+      });
+    }
+
+    const result = await probeUrlAccess(url.trim());
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error in verifySubmissionUrl:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify URL permissions',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = exports;
+
 

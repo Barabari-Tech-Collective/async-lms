@@ -4,7 +4,7 @@ const pool = require('../config/pg');
 // In-memory cache to prevent flooding the database with duplicate queries
 // when multiple dashboard widgets make concurrent requests on page load.
 const userAuthCache = new Map(); // userId -> { data, cachedAt }
-const CACHE_TTL_MS = 5000; // 5 seconds burst cache to reject revoked/banned users promptly
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds cache to prevent connection pool exhaustion on dashboard load
 
 // Self-cleaning timer to ensure zero memory leaks in long-running production environments
 setInterval(() => {
@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
   }
 
   try {
-    // 3. Check user status (cached for 5s to prevent connection pool exhaustion on dashboard load)
+    // 3. Check user status (cached to prevent connection pool exhaustion on dashboard load)
     let userDb = null;
     const now = Date.now();
     const cached = userAuthCache.get(verified.id);
@@ -59,12 +59,35 @@ const verifyToken = async (req, res, next) => {
           return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
         }
       } catch (dbErr) {
-        // If DB has a momentary connection timeout, only allow fallback if cached data is very fresh (<10s)
         console.warn(`[verifyToken] DB verification transient issue: ${dbErr.message}`);
-        if (cached && (now - cached.cachedAt < 10000)) {
+        // 1. If we have any cached record (up to 15 mins), use it
+        if (cached && (now - cached.cachedAt < 15 * 60 * 1000)) {
           userDb = cached.data;
         } else {
-          return res.status(503).json({ message: 'Service Temporarily Unavailable: Authentication service offline' });
+          // 2. Retry query once after short pause (absorbs Neon wake-up / transient timeout)
+          try {
+            await new Promise(r => setTimeout(r, 200));
+            const retryCheck = await pool.query(
+              'SELECT deleted_at, token_version, email, full_name FROM users WHERE id = $1',
+              [verified.id]
+            );
+            if (retryCheck.rowCount > 0) {
+              userDb = retryCheck.rows[0];
+              userAuthCache.set(verified.id, { data: userDb, cachedAt: now });
+            } else {
+              userAuthCache.delete(verified.id);
+              return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
+            }
+          } catch (retryErr) {
+            console.warn(`[verifyToken] DB retry also failed: ${retryErr.message}. Falling back to verified JWT claims.`);
+            // 3. Fallback to cryptographically verified JWT claims rather than throwing 503
+            userDb = {
+              deleted_at: null,
+              token_version: verified.token_version,
+              email: verified.email,
+              full_name: verified.name || verified.full_name || 'Authenticated User'
+            };
+          }
         }
       }
     }

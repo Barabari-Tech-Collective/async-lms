@@ -18,9 +18,14 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
-import type { CollegeAssignment, SubmissionType } from '@/utils/types';
+import type { CollegeAssignment, SubmissionType, StudentAssignmentOverviewItem } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 import { FormattedContent } from '@/utils/contentFormat';
+import { formatDateTime, isPastDate } from '@/utils/dateUtils';
+import { AssignmentEvaluationStatusCard } from '@/components/common/assignment/AssignmentEvaluationStatusCard';
+import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
+import { UrlPermissionStatusBanner } from '@/components/common/assignment/UrlPermissionStatusBanner';
+import { useUrlPermissionGuard } from '@/hooks/useUrlPermissionGuard';
 
 // URL Validation Regex Patterns
 const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
@@ -29,12 +34,16 @@ const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
     example: 'https://www.figma.com/design/... or https://www.figma.com/proto/...',
   },
   docs: {
-    pattern: /^https?:\/\/((docs\.google\.com\/document\/d\/)|([A-Za-z0-9-]+\.(sharepoint\.com|office\.com|1drv\.ms)))/i,
+    pattern: /^https?:\/\/((drive\.google\.com|docs\.google\.com\/document\/d\/)|([A-Za-z0-9-]+\.(sharepoint\.com|office\.com|1drv\.ms)))/i,
     example: 'https://docs.google.com/document/d/... or Word Online link',
   },
   excel: {
     pattern: /^https?:\/\/((docs\.google\.com\/spreadsheets\/d\/)|([A-Za-z0-9-]+\.(sharepoint\.com|office\.com|1drv\.ms)))/i,
     example: 'https://docs.google.com/spreadsheets/d/... or Excel Online link',
+  },
+  drive: {
+    pattern: /^https?:\/\/(drive\.google\.com|docs\.google\.com)/i,
+    example: 'https://drive.google.com/file/d/.../view',
   },
   github: {
     pattern: /^https?:\/\/(www\.)?(github\.com|gitlab\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/i,
@@ -59,6 +68,31 @@ export default function CollegeAssignmentView() {
   const [solutionUrl, setSolutionUrl] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+
+  const {
+    permissionStatus,
+    checkUrl,
+    recheck,
+  } = useUrlPermissionGuard(solutionUrl, activeType !== 'file');
+
+  const overviewItem: StudentAssignmentOverviewItem | null = useMemo(() => {
+    if (!assignment) return null;
+    const evalData = (assignment as any).evaluation;
+    if (!evalData) return null;
+    return {
+      id: assignment.id,
+      title: assignment.title,
+      type: 'COLLEGE',
+      course_name: assignment.course || 'College Assignment',
+      max_score: 100,
+      status: evalData.status === 'evaluated' ? 'evaluated' : 'pending_evaluation',
+      marks: evalData.marks,
+      submission_link: assignment.submission_link,
+      feedback: evalData.feedback,
+      navigation_url: window.location.pathname,
+    };
+  }, [assignment]);
 
   const parsedRubric = useMemo<any[] | null>(() => {
     if (!assignment?.rubric) return null;
@@ -103,8 +137,13 @@ export default function CollegeAssignmentView() {
 
       const allowed: SubmissionType[] =
         Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
-          ? data.allowed_submission_types
-          : ALL_SUBMISSION_TYPES;
+          ? [...data.allowed_submission_types]
+          : [...ALL_SUBMISSION_TYPES];
+
+      // Universal requirement: direct file uploading is accessible for every evaluator and assignment
+      if (!allowed.includes('file')) {
+        allowed.unshift('file');
+      }
 
       if (data.submission_type && allowed.includes(data.submission_type)) {
         setActiveType(data.submission_type);
@@ -202,6 +241,19 @@ export default function CollegeAssignmentView() {
         toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
         return;
       }
+
+      // Pre-submission URL Permission Guard
+      const guardResult = await checkUrl(solutionUrl, true);
+      if (guardResult.verdict === 'DEFINITE_RESTRICTED') {
+        toast.error(
+          guardResult.message || 'Access Denied: Your document is private. Please update sharing permissions before submitting.'
+        );
+        return;
+      }
+      if (guardResult.verdict === 'SSRF_BLOCKED' || guardResult.verdict === 'INVALID_URL') {
+        toast.error(guardResult.message || 'Invalid submission link.');
+        return;
+      }
     }
 
     try {
@@ -248,11 +300,17 @@ export default function CollegeAssignmentView() {
     );
   }
 
-  const allowedTypes: SubmissionType[] =
-    Array.isArray(assignment.allowed_submission_types) &&
-    assignment.allowed_submission_types.length > 0
-      ? assignment.allowed_submission_types
-      : ALL_SUBMISSION_TYPES;
+  const allowedTypes: SubmissionType[] = useMemo(() => {
+    const list =
+      Array.isArray(assignment.allowed_submission_types) &&
+      assignment.allowed_submission_types.length > 0
+        ? [...assignment.allowed_submission_types]
+        : [...ALL_SUBMISSION_TYPES];
+    if (!list.includes('file')) {
+      list.unshift('file');
+    }
+    return list;
+  }, [assignment.allowed_submission_types]);
 
   const isSubmitted = Boolean(
     assignment.submission_link || assignment.submission_file_url
@@ -287,11 +345,17 @@ export default function CollegeAssignmentView() {
                 className={`px-3 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1.5 ${
                   isSubmitted
                     ? 'bg-emerald-50 text-emerald-700'
+                    : isPastDate(assignment.due_date)
+                    ? 'bg-red-50 text-red-600'
                     : 'bg-orange-50 text-orange-600'
                 }`}
               >
                 {isSubmitted && <CheckCircle2 className='w-3 h-3' />}
-                {isSubmitted ? 'Completed' : 'Pending'}
+                {isSubmitted
+                  ? 'Completed'
+                  : isPastDate(assignment.due_date)
+                  ? 'Overdue'
+                  : 'Pending'}
               </span>
             </div>
             <h1 className='text-2xl sm:text-3xl font-bold text-[#1e293b] tracking-tight capitalize'>
@@ -302,11 +366,7 @@ export default function CollegeAssignmentView() {
               <span>
                 Due:{' '}
                 {assignment.due_date
-                  ? new Date(assignment.due_date).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })
+                  ? formatDateTime(assignment.due_date)
                   : 'No Deadline'}
               </span>
             </div>
@@ -505,6 +565,18 @@ export default function CollegeAssignmentView() {
 
           {/* Right: Submit Assignment */}
           <div className='lg:col-span-5 space-y-6 min-w-0'>
+            {/* Evaluation Results / Status Card */}
+            <AssignmentEvaluationStatusCard
+              evaluation={(assignment as any).evaluation}
+              submittedAt={assignment.submitted_at}
+              updatedAt={(assignment as any).updated_at}
+              submissionLink={assignment.submission_link}
+              submissionFileName={assignment.submission_file_name}
+              onOpenFeedbackModal={() => setFeedbackModalOpen(true)}
+              onRefresh={fetchAssignment}
+              isRefreshing={loading}
+            />
+
             <Card className='border border-slate-100 rounded-2xl sm:rounded-[2rem] p-5 sm:p-8 md:p-10 shadow-sm space-y-5 sm:space-y-6'>
               <div className='flex items-center justify-between'>
                 <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
@@ -545,13 +617,24 @@ export default function CollegeAssignmentView() {
                 </div>
               )}
 
+              {/* Late Submission Notice if Past Due Date */}
+              {isPastDate(assignment.due_date) && !isSubmitted && (
+                <div className='flex items-start gap-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs'>
+                  <AlertTriangle className='w-4 h-4 text-red-600 shrink-0 mt-0.5' />
+                  <div>
+                    <span className='font-semibold'>Deadline has passed:</span> Submitting now will be recorded as a <span className='font-semibold underline'>Late Submission</span>.
+                  </div>
+                </div>
+              )}
+
               {/* Cloud Sharing Permission Warning Alert */}
-              {currentTypeConfig.requiresPermissionsWarning && (
+              {(currentTypeConfig.requiresPermissionsWarning ||
+                /drive\.google\.com|docs\.google\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com/i.test(solutionUrl)) && (
                 <div className='flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs'>
                   <AlertTriangle className='w-4 h-4 text-amber-600 shrink-0 mt-0.5' />
                   <div>
-                    <span className='font-semibold'>Sharing Permission Notice:</span> Ensure your link is set to{' '}
-                    <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> so facilitators can grade your deliverable.
+                    <span className='font-semibold'>Sharing Permission Notice:</span> If submitting via Google Sheets, Google Drive, or OneDrive, ensure your link is set to{' '}
+                    <span className='font-semibold underline'>&quot;Anyone with the link can view&quot;</span> without requiring sign-in or access requests. You can also upload your file directly.
                   </div>
                 </div>
               )}
@@ -573,7 +656,7 @@ export default function CollegeAssignmentView() {
                     className='hidden'
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar'
+                    accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar,.sql,.py,.js'
                   />
                   <div
                     className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center mx-auto transition-transform group-hover:scale-110 ${
@@ -625,6 +708,10 @@ export default function CollegeAssignmentView() {
                       {currentTypeConfig.helperText}
                     </p>
                   )}
+                  <UrlPermissionStatusBanner
+                    status={permissionStatus}
+                    onRecheck={recheck}
+                  />
                 </div>
               )}
 
@@ -691,7 +778,8 @@ export default function CollegeAssignmentView() {
                   submitting ||
                   (activeType === 'file' && !selectedFile && !assignment.submission_file_url) ||
                   (activeType !== 'file' && !solutionUrl.trim()) ||
-                  Boolean(urlValidationError)
+                  Boolean(urlValidationError) ||
+                  (activeType !== 'file' && (permissionStatus.verdict === 'DEFINITE_RESTRICTED' || permissionStatus.isChecking))
                 }
                 className='w-full h-12 sm:h-14 rounded-xl sm:rounded-2xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 bg-[#333D7C] hover:bg-[#2a3268] text-white min-h-[44px]'
               >
@@ -741,6 +829,13 @@ export default function CollegeAssignmentView() {
           </div>
         </div>
       </div>
+
+      {/* Detailed Rubric & Breakdown Modal */}
+      <StudentAssignmentFeedbackModal
+        isOpen={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        assignment={overviewItem}
+      />
     </div>
   );
 }

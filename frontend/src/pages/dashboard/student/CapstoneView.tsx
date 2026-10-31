@@ -7,14 +7,15 @@ import {
   CheckCircle2,
   ArrowRight,
   PartyPopper,
-  Eye,
-  Sparkles,
   Upload,
   FileText,
   ExternalLink,
   AlertTriangle,
 } from 'lucide-react';
 import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
+import { AssignmentEvaluationStatusCard, type AssignmentEvaluationData } from '@/components/common/assignment/AssignmentEvaluationStatusCard';
+import { UrlPermissionStatusBanner } from '@/components/common/assignment/UrlPermissionStatusBanner';
+import { useUrlPermissionGuard } from '@/hooks/useUrlPermissionGuard';
 import type { StudentAssignmentOverviewItem, SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 import apiClient from '@/services/api';
@@ -36,7 +37,7 @@ const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: strin
     example: 'https://github.com/username/repository',
   },
   docs: {
-    pattern: /^https?:\/\/(docs\.google\.com\/(document|presentation)|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
+    pattern: /^https?:\/\/(drive\.google\.com|docs\.google\.com|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
     example: 'https://docs.google.com/document/d/...',
   },
   figma: {
@@ -46,6 +47,10 @@ const SUBMISSION_REGEX: Record<SubmissionType, { pattern: RegExp; example: strin
   excel: {
     pattern: /^https?:\/\/(docs\.google\.com\/spreadsheets|[A-Za-z0-9-]+\.sharepoint\.com|1drv\.ms)/i,
     example: 'https://docs.google.com/spreadsheets/d/...',
+  },
+  drive: {
+    pattern: /^https?:\/\/(drive\.google\.com|docs\.google\.com)/i,
+    example: 'https://drive.google.com/file/d/.../view',
   },
   url: {
     pattern: /^https?:\/\/.+/i,
@@ -85,7 +90,8 @@ function flattenCourseStructure(topics: any[]): FlatItem[] {
 }
 
 function buildItemUrl(slug: string, item: FlatItem): string {
-  const base = `/dashboard/student/courses/${slug}`;
+  const isFacilitator = typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard/facilitator');
+  const base = isFacilitator ? `/dashboard/facilitator/courses/${slug}` : `/dashboard/student/courses/${slug}`;
   if (item.type === 'subtopic') return `${base}/lesson/${item.slug}`;
   if (item.type === 'quiz') return `${base}/quiz/${item.id}`;
   if (item.type === 'capstone') return `${base}/capstone/${item.id}`;
@@ -112,6 +118,7 @@ interface CapstoneDetail {
   rubric_breakdown?: any;
   execution_logs?: string | null;
   evaluation_status?: string | null;
+  evaluation?: AssignmentEvaluationData | null;
 }
 
 export default function CapstoneView() {
@@ -130,8 +137,57 @@ export default function CapstoneView() {
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const {
+    permissionStatus,
+    checkUrl,
+    recheck,
+  } = useUrlPermissionGuard(link, activeType !== 'file');
+
+  const fetchCapstone = async () => {
+    if (!projectId) return;
+    try {
+      setLoading(true);
+      setError(false);
+      const res = await apiClient.get<{
+        success: boolean;
+        data: CapstoneDetail;
+      }>(`/students/capstone/${projectId}`);
+      const data = res.data.data;
+      setCapstone(data);
+      if (data.submission_type) {
+        setActiveType(data.submission_type);
+      }
+      if (data.submission_link) {
+        setLink(data.submission_link);
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCapstone();
+  }, [projectId]);
+
   const overviewItem: StudentAssignmentOverviewItem | null = useMemo(() => {
-    if (!capstone || capstone.score === null || capstone.score === undefined) return null;
+    if (!capstone) return null;
+    if (capstone.evaluation) {
+      return {
+        id: capstone.id,
+        title: capstone.title,
+        type: 'CAPSTONE',
+        course_name: slug ? slug.replace(/-/g, ' ').toUpperCase() : 'Capstone Course',
+        max_score: capstone.max_score || 100,
+        status: capstone.evaluation.status === 'evaluated' ? 'evaluated' : 'pending_evaluation',
+        marks: capstone.evaluation.marks,
+        submission_link: capstone.submission_link,
+        feedback: capstone.evaluation.feedback,
+        navigation_url: window.location.pathname,
+      };
+    }
+    if (capstone.score === null || capstone.score === undefined) return null;
     let parsedFeedback = null;
     if (typeof capstone.rubric_breakdown === 'object') {
       parsedFeedback = capstone.rubric_breakdown;
@@ -174,55 +230,34 @@ export default function CapstoneView() {
     return flat[currentIndex + 1] ?? null;
   }, [courseStructure, projectId]);
 
+  const isFacilitator = typeof window !== 'undefined' && window.location.pathname.startsWith('/dashboard/facilitator');
+  const baseCourseUrl = isFacilitator ? `/dashboard/facilitator/courses/${slug}` : `/dashboard/student/courses/${slug}`;
+
   const goToNext = () => {
     if (!slug) return;
     if (nextItem) {
       navigate(buildItemUrl(slug, nextItem));
     } else {
-      navigate(`/dashboard/student/courses/${slug}`);
+      navigate(baseCourseUrl);
     }
   };
 
-  useEffect(() => {
-    if (!projectId) return;
-
-    const fetchCapstone = async () => {
-      try {
-        setLoading(true);
-        setError(false);
-        const res = await apiClient.get<{
-          success: boolean;
-          data: CapstoneDetail;
-        }>(`/students/capstone/${projectId}`);
-        const data = res.data.data;
-        setCapstone(data);
-        if (data.submission_type) {
-          setActiveType(data.submission_type);
-        }
-        if (data.submission_link) {
-          setLink(data.submission_link);
-        }
-      } catch {
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchCapstone();
-  }, [projectId]);
-
   const allowedTypes: SubmissionType[] = useMemo(() => {
     const raw = capstone?.allowed_submission_types;
-    if (!raw) return ALL_SUBMISSION_TYPES;
-    if (Array.isArray(raw) && raw.length > 0) return raw as SubmissionType[];
-    if (typeof raw === 'string') {
+    let list: SubmissionType[] = [...ALL_SUBMISSION_TYPES];
+    if (Array.isArray(raw) && raw.length > 0) {
+      list = [...raw] as SubmissionType[];
+    } else if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed as SubmissionType[];
+        if (Array.isArray(parsed) && parsed.length > 0) list = [...parsed] as SubmissionType[];
       } catch {}
     }
-    return ALL_SUBMISSION_TYPES;
+    // Universal requirement: direct file uploading is accessible for every evaluator and assignment
+    if (!list.includes('file')) {
+      list.unshift('file');
+    }
+    return list;
   }, [capstone?.allowed_submission_types]);
 
   useEffect(() => {
@@ -294,6 +329,19 @@ export default function CapstoneView() {
       const validator = SUBMISSION_REGEX[activeType];
       if (validator && !validator.pattern.test(link.trim())) {
         toast.error(`Invalid URL format. Example: ${validator.example}`);
+        return;
+      }
+
+      // Pre-submission URL Permission Guard
+      const guardResult = await checkUrl(link, true);
+      if (guardResult.verdict === 'DEFINITE_RESTRICTED') {
+        toast.error(
+          guardResult.message || 'Access Denied: Your document is private. Please update sharing permissions before submitting.'
+        );
+        return;
+      }
+      if (guardResult.verdict === 'SSRF_BLOCKED' || guardResult.verdict === 'INVALID_URL') {
+        toast.error(guardResult.message || 'Invalid submission link.');
         return;
       }
     }
@@ -439,41 +487,17 @@ export default function CapstoneView() {
         />
       )}
 
-      {/* Evaluation Results Card (when project is scored/evaluated) */}
-      {overviewItem && (
-        <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-emerald-200/80 shadow-sm'>
-          <div className='bg-gradient-to-r from-emerald-500 to-teal-600 px-4 sm:px-6 py-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
-            <div className='flex items-center gap-3'>
-              <div className='p-2 bg-white/15 backdrop-blur-sm rounded-xl'>
-                <Sparkles className='w-5 h-5 text-yellow-300' />
-              </div>
-              <div>
-                <p className='text-xs font-bold uppercase tracking-wider text-emerald-100'>
-                  Evaluation Complete
-                </p>
-                <h3 className='text-lg font-extrabold text-white'>
-                  Score: {overviewItem.marks} / {overviewItem.max_score}
-                </h3>
-              </div>
-            </div>
-            <Button
-              size='sm'
-              onClick={() => setFeedbackModalOpen(true)}
-              className='bg-white text-emerald-800 hover:bg-emerald-50 font-bold rounded-xl text-xs h-9 px-4 shadow-sm cursor-pointer'
-            >
-              <Eye className='w-4 h-4 mr-1.5' /> View Detailed Rubric Results
-            </Button>
-          </div>
-          {overviewItem.feedback?.summary && (
-            <div className='p-4 sm:p-6 bg-emerald-50/40 text-xs sm:text-sm text-slate-700 leading-relaxed border-t border-emerald-100'>
-              <p className='font-bold text-slate-900 mb-1 text-xs uppercase tracking-wider'>
-                Evaluator Feedback:
-              </p>
-              <p>{overviewItem.feedback.summary}</p>
-            </div>
-          )}
-        </Card>
-      )}
+      {/* Evaluation Results / Status Card */}
+      <AssignmentEvaluationStatusCard
+        evaluation={capstone.evaluation}
+        submittedAt={capstone.submitted_at}
+        updatedAt={capstone.updated_at}
+        submissionLink={capstone.submission_link}
+        submissionFileName={capstone.submission_file_name}
+        onOpenFeedbackModal={() => setFeedbackModalOpen(true)}
+        onRefresh={fetchCapstone}
+        isRefreshing={loading}
+      />
 
       {/* Submission Card */}
       <Card className='overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm'>
@@ -545,7 +569,7 @@ export default function CapstoneView() {
                 className='hidden'
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar'
+                accept='.pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.zip,.rar,.sql,.py,.js'
               />
               <div
                 className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-transform group-hover:scale-110 ${
@@ -595,6 +619,10 @@ export default function CapstoneView() {
                   {currentTypeConfig.helperText}
                 </p>
               )}
+              <UrlPermissionStatusBanner
+                status={permissionStatus}
+                onRecheck={recheck}
+              />
             </div>
           )}
 
@@ -653,19 +681,27 @@ export default function CapstoneView() {
             </div>
           )}
 
-          <div className='flex justify-end pt-2'>
-            <Button
-              onClick={handleSubmit}
-              loading={submitting}
-              className='bg-amber-500 hover:bg-amber-600 text-white h-11 px-8 font-semibold w-full sm:w-auto shadow-sm cursor-pointer'
-            >
-              {isSubmitted ? 'Update Submission' : 'Submit Capstone Project'}
-            </Button>
-          </div>
+          {isFacilitator ? (
+            <div className='flex items-center justify-between p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-800 dark:text-amber-300 text-sm'>
+              <span className='font-semibold'>Instructor Preview: Capstone project submissions are disabled in preview mode.</span>
+              <Badge variant='outline' className='bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border-amber-300'>Preview Mode</Badge>
+            </div>
+          ) : (
+            <div className='flex justify-end pt-2'>
+              <Button
+                onClick={handleSubmit}
+                loading={submitting}
+                disabled={activeType !== 'file' && (permissionStatus.verdict === 'DEFINITE_RESTRICTED' || permissionStatus.isChecking)}
+                className='bg-amber-500 hover:bg-amber-600 text-white h-11 px-8 font-semibold w-full sm:w-auto shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+              >
+                {isSubmitted ? 'Update Submission' : 'Submit Capstone Project'}
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
 
-      {isSubmitted && nextItem !== undefined && (
+      {(isSubmitted || isFacilitator) && nextItem !== undefined && (
         <div className='flex justify-end'>
           <Button
             onClick={goToNext}
@@ -678,7 +714,7 @@ export default function CapstoneView() {
               </span>
             ) : (
               <>
-                Finish Course
+                {isFacilitator ? 'Back to Course' : 'Finish Course'}
                 <PartyPopper className='h-4 w-4 shrink-0' />
               </>
             )}

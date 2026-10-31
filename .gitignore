@@ -33,3 +33,7 @@ db_dump.json
 /modules
 
 *.postman_collection.json
+
+# Audit reports and audit scripts
+EXCEL_EVALUATION_AUDIT_REPORT.md
+backend/scripts/

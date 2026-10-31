@@ -45,6 +45,10 @@ const poolConfig = connectionString
 
 const pool = new Pool(poolConfig);
 
+pool.on('connect', (client) => {
+  client.query('SET search_path TO "$user", public;').catch(() => {});
+});
+
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
 });
@@ -53,6 +57,7 @@ pool.on('error', (err, client) => {
   let client;
   try {
     client = await pool.connect();
+    await client.query('SET search_path TO "$user", public;');
     // Accessing the host from the pool's own options
     const connectedHost = pool.options.host;
     const connectedDb = pool.options.database;
@@ -348,7 +353,10 @@ pool.on('error', (err, client) => {
     `);
     await client.query(
       `CREATE INDEX IF NOT EXISTS idx_college_assignments_college_id ON college_assignments(college_id);
-       CREATE INDEX IF NOT EXISTS idx_cas_submission_type ON college_assignment_submissions(submission_type);`,
+       CREATE INDEX IF NOT EXISTS idx_cas_submission_type ON college_assignment_submissions(submission_type);
+       ALTER TABLE evaluation_results ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ;
+       CREATE INDEX IF NOT EXISTS idx_eval_results_student_created ON evaluation_results (student_id, created_at DESC);
+       CREATE INDEX IF NOT EXISTS idx_eval_results_submission ON evaluation_results (submission_id);`,
     );
 
     await client.query(`
@@ -772,6 +780,63 @@ pool.on('error', (err, client) => {
         )
       ON CONFLICT DO NOTHING;
     `).catch((err) => console.warn('[Migration] Course update notification sync notice:', err.message));
+
+    // ── Student Course Enrollment Requests Table & Indexes ──────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enrollment_requests (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject_id       UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        status           VARCHAR(20) NOT NULL DEFAULT 'pending' 
+                         CHECK (status IN ('pending', 'approved', 'rejected')),
+        rejection_reason TEXT,
+        reviewed_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at      TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_enrollment_request 
+        ON enrollment_requests(user_id, subject_id) 
+        WHERE status = 'pending';
+
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_status ON enrollment_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_user ON enrollment_requests(user_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_subject ON enrollment_requests(subject_id);
+      CREATE INDEX IF NOT EXISTS idx_enrollment_requests_created_at ON enrollment_requests(created_at DESC);
+    `).catch((err) => console.warn('[Migration] enrollment_requests setup notice:', err.message));
+
+    // ── Student Resumes (Placement Assistance Resume Builder) ─────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS student_resumes (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title          VARCHAR(150) NOT NULL DEFAULT 'Primary Tech Resume',
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        document       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        version        INTEGER NOT NULL DEFAULT 1,
+        is_primary     BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT resume_document_is_object CHECK (jsonb_typeof(document) = 'object'),
+        CONSTRAINT resume_version_positive CHECK (version > 0)
+      );
+
+      ALTER TABLE student_resumes 
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL DEFAULT NULL;
+
+      DROP INDEX IF EXISTS uq_student_resumes_primary;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_student_resumes_primary
+        ON student_resumes(user_id)
+        WHERE is_primary = TRUE AND deleted_at IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_student_resumes_user_updated
+        ON student_resumes(user_id, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_resumes_user_deleted
+        ON student_resumes(user_id, deleted_at);
+    `).catch((err) => console.warn('[Migration] student_resumes setup notice:', err.message));
+    console.log('[Migration] student_resumes table, recycle bin support, and optimistic concurrency index verified.');
 
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useParams, useLocation } from 'react-router';
-import { ChevronLeft, GraduationCap, BookOpen } from 'lucide-react';
+import { ChevronLeft, GraduationCap, BookOpen, Eye } from 'lucide-react';
 import { SubjectSidebar } from '@/components/common/subject/SubjectSidebar';
 import { useAppSelector } from '@/app/hooks';
 import { selectLessonData } from '@/features/lesson/lessonSlice';
@@ -8,6 +8,11 @@ import { selectLessonData } from '@/features/lesson/lessonSlice';
 const CourseViewLayout = () => {
   const { slug } = useParams();
   const location = useLocation();
+  const isFacilitator = location.pathname.startsWith('/dashboard/facilitator');
+  const backUrl = isFacilitator
+    ? '/dashboard/facilitator/courses'
+    : '/dashboard/student/courses';
+
   const lessonData = useAppSelector(selectLessonData);
   const subtopic = lessonData?.subtopic;
   const [isCurriculumOpen, setIsCurriculumOpen] = useState(false);
@@ -16,6 +21,15 @@ const CourseViewLayout = () => {
   useEffect(() => {
     setIsCurriculumOpen(false);
   }, [location.pathname]);
+
+  const isLessonRoute =
+    location.pathname.includes('/lesson/') ||
+    location.pathname.includes('/assignment/') ||
+    location.pathname.includes('/quiz/') ||
+    location.pathname.includes('/capstone/');
+  const currentHeaderTitle = isLessonRoute
+    ? subtopic?.title || 'Lesson Content'
+    : 'Course Overview';
 
   return (
     <div className='flex h-screen bg-white overflow-hidden relative'>
@@ -49,9 +63,9 @@ const CourseViewLayout = () => {
         <header className='h-16 border-b flex items-center justify-between px-3 sm:px-6 bg-white shrink-0 gap-2 select-none'>
           <div className='flex items-center gap-2 sm:gap-4 min-w-0 flex-1'>
             <Link
-              to='/dashboard/student/courses'
+              to={backUrl}
               className='p-2 hover:bg-slate-100 rounded-full transition-colors shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center'
-              title='Back to Courses'
+              title={isFacilitator ? 'Back to Assigned Courses' : 'Back to Courses'}
             >
               <ChevronLeft className='w-5 h-5 text-slate-600' />
             </Link>
@@ -60,16 +74,22 @@ const CourseViewLayout = () => {
                 <GraduationCap className='w-4 h-4 text-white' />
               </div>
               <span className='font-bold text-xs sm:text-sm text-slate-800 uppercase tracking-tight truncate'>
-                {subtopic?.title || 'Course Overview'}
+                {currentHeaderTitle}
               </span>
             </div>
+            {isFacilitator && (
+              <div className='hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30'>
+                <Eye className='w-3.5 h-3.5' />
+                <span>Instructor Preview</span>
+              </div>
+            )}
           </div>
 
           <div className='flex items-center gap-2 sm:gap-4 shrink-0'>
             {/* Mobile Curriculum Drawer Toggle */}
             <button
               onClick={() => setIsCurriculumOpen((prev) => !prev)}
-              className='lg:hidden flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors min-h-[38px]'
+              className='lg:hidden flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors min-h-[44px] cursor-pointer shrink-0'
               aria-label='Toggle Curriculum'
             >
               <BookOpen className='w-4 h-4' />
