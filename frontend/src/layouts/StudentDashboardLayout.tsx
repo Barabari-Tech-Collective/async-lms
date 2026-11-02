@@ -18,6 +18,10 @@ const StudentDashboardLayout = () => {
   const [milestonesData, setMilestonesData] = useState<ActiveMilestonesData | null>(null);
   const [isMilestonesModalOpen, setIsMilestonesModalOpen] = useState(false);
   const [hasAutoOpened, setHasAutoOpened] = useState(false);
+  const [meetIdentityStatus, setMeetIdentityStatus] = useState<
+    'verified' | 'pending' | 'review_required' | 'revoked' | null
+  >(null);
+  const [meetIdentityLoaded, setMeetIdentityLoaded] = useState(false);
 
   // Automatically close mobile sidebar on route change
   useEffect(() => {
@@ -100,6 +104,27 @@ const StudentDashboardLayout = () => {
     };
   }, [location.pathname, hasAutoOpened]);
 
+  useEffect(() => {
+    let isMounted = true;
+    apiClient
+      .get<{ success: boolean; data: { linked: boolean; status: typeof meetIdentityStatus } }>(
+        '/me/google-identity',
+      )
+      .then((response) => {
+        if (isMounted) {
+          setMeetIdentityStatus(response.data.data.linked ? response.data.data.status : null);
+          setMeetIdentityLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setMeetIdentityLoaded(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const handleSnooze = () => {
     // Snooze for 24 hours
     localStorage.setItem(
@@ -157,6 +182,8 @@ const StudentDashboardLayout = () => {
           pendingMilestonesCount={milestonesData?.total_pending ?? 0}
           onOpenMilestonesModal={handleOpenMilestonesModal}
           mostUrgentMilestone={milestonesData?.milestones?.[0] ?? null}
+          meetIdentityStatus={meetIdentityStatus}
+          meetIdentityLoaded={meetIdentityLoaded}
         />
 
         <main className='flex-1 overflow-y-auto custom-scrollbar'>
@@ -178,5 +205,4 @@ const StudentDashboardLayout = () => {
 };
 
 export default StudentDashboardLayout;
-
 
