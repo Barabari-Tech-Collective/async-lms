@@ -5,8 +5,8 @@ const { createMeetJob } = require('../services/meetJob.service');
 const {
   createClass,
   updateClass,
-  createMeetJobInTransaction,
   getJoinState,
+  getFacilitatorJoinState,
   requireUuid,
 } = require('../services/class.service');
 
@@ -19,10 +19,6 @@ function sendError(res, error) {
 
 function isAdmin(req) {
   return req.user?.role === 'admin';
-}
-
-function isFacilitator(req) {
-  return req.user?.role === 'facilitator' || isAdmin(req);
 }
 
 function getPagination(req, defaultLimit = 20, maxLimit = 100) {
@@ -52,6 +48,7 @@ function safeClass(row) {
     plannedEndAt: row.planned_end_at,
     actualEndAt: row.actual_end_at,
     attendanceThresholdPercent: Number(row.attendance_threshold_percent),
+    gracePeriodMinutes: Number(row.grace_period_minutes || 0),
     status: row.status,
     hasMeetSpace: Boolean(row.meet_space_name && row.meet_uri),
     createdAt: row.created_at,
@@ -60,7 +57,6 @@ function safeClass(row) {
 }
 
 exports.create = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   const startedAt = Date.now();
   try {
     const result = await createClass({
@@ -87,7 +83,6 @@ exports.create = async (req, res) => {
 };
 
 exports.update = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   const startedAt = Date.now();
   try {
     const result = await updateClass({
@@ -126,10 +121,21 @@ exports.getOne = async (req, res) => {
     );
     if (!result.rowCount) return res.status(404).json({ message: 'Class was not found' });
     const row = result.rows[0];
-    if (req.user?.role === 'facilitator' && row.facilitator_id !== req.user.id) {
-      return res.status(403).json({ message: 'You do not own this class' });
+    const isAdminUser = req.user.role === 'admin';
+    const isOwnerFacilitator =
+      req.user.role === 'facilitator' && row.facilitator_id === req.user.id;
+    const isStudent = req.user.role === 'student';
+    if (req.user.role === 'facilitator' && !isOwnerFacilitator) {
+      return res.status(403).json({
+        message: 'You do not own this class',
+      });
     }
-    if (req.user?.role === 'student') {
+    if (!isAdminUser && !isOwnerFacilitator && !isStudent) {
+      return res.status(403).json({
+        message: 'You do not have access to this class',
+      });
+    }
+    if (isStudent) {
       const enrollment = await pool.query(
         `SELECT 1 FROM class_students
           WHERE class_id = $1 AND student_id = $2 AND roster_status = 'eligible'`,
@@ -138,7 +144,7 @@ exports.getOne = async (req, res) => {
       if (!enrollment.rowCount) return res.status(403).json({ message: 'You are not enrolled in this class' });
     }
     const data = { ...safeClass(row), subjectTitle: row.subject_title, rosterCount: row.roster_count };
-    if (isFacilitator(req)) {
+    if (req.user.role === 'admin' || req.user.role === 'facilitator') {
       const { page, limit, offset } = getPagination(req);
       const roster = await pool.query(
         `SELECT cs.student_id, u.full_name, u.email, cs.roster_status,
@@ -215,7 +221,6 @@ exports.listStudentClasses = async (req, res) => {
 };
 
 exports.listClasses = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   try {
     const { page, limit, offset } = getPagination(req, 15);
     const statusFilter = String(req.query.status || '').trim().toLowerCase();
@@ -229,7 +234,7 @@ exports.listClasses = async (req, res) => {
     if (statusFilter === 'upcoming') {
       statusClause = `AND c.status IN ('creating', 'scheduled', 'active', 'ending')`;
     } else if (statusFilter === 'past') {
-      statusClause = `AND c.status IN ('ended', 'sync_pending', 'processing', 'ready_for_review', 'finalised', 'cleanup_pending', 'end_unknown', 'cancelled', 'failed')`;
+      statusClause = `AND c.status IN ('ended', 'sync_pending', 'processing', 'cancelled', 'failed')`;
     } else if (statusFilter && statusFilter !== 'all') {
       return res.status(400).json({ message: 'status must be upcoming, past, or all' });
     }
@@ -263,7 +268,6 @@ exports.listClasses = async (req, res) => {
 };
 
 exports.listClassStudents = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   try {
     requireUuid(req.query.subjectId, 'subjectId');
     const { page, limit, offset } = getPagination(req, 50);
@@ -342,9 +346,9 @@ exports.join = async (req, res) => {
     );
     await pool.query(
       `INSERT INTO class_access_events
-         (class_id, student_id, ticket_id, event_type, request_id, ip_address, user_agent)
-       VALUES ($1, $2, $3, 'issued', $4, $5, $6)`,
-      [req.params.id, req.user.id, ticket.rows[0].id, req.id || null, req.ip || null, req.get('user-agent') || null],
+         (class_id, student_id, ticket_id, event_type, request_id)
+       VALUES ($1, $2, $3, 'issued', $4)`,
+      [req.params.id, req.user.id, ticket.rows[0].id, req.id || null],
     );
     const base = `${req.protocol}://${req.get('host')}`;
     return res.status(201).json({
@@ -357,11 +361,11 @@ exports.join = async (req, res) => {
 };
 
 exports.facilitatorAccess = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   try {
     requireUuid(req.params.id, 'classId');
     const result = await pool.query(
-      `SELECT facilitator_id, meet_uri, status
+      `SELECT facilitator_id, meet_space_name, meet_uri, status,
+              scheduled_start_at, actual_end_at
          FROM classes
         WHERE id = $1`,
       [req.params.id],
@@ -371,19 +375,83 @@ exports.facilitatorAccess = async (req, res) => {
     if (!isAdmin(req) && row.facilitator_id !== req.user.id) {
       return res.status(403).json({ message: 'You do not own this class' });
     }
+    if (!isAdmin(req) && getFacilitatorJoinState(row) !== 'joinable') {
+      return res.status(409).json({ message: 'Facilitator access is not currently available' });
+    }
     if (!row.meet_uri || ['cancelled', 'failed'].includes(row.status)) {
       return res.status(409).json({ message: 'Meet is not available for this class' });
     }
-    return res.redirect(303, row.meet_uri);
+    return res.json({ success: true, data: { url: row.meet_uri } });
   } catch (error) {
     return sendError(res, error);
   }
 };
 
+async function findAccessTicket(ticketValue) {
+  const hash = crypto.createHash('sha256').update(String(ticketValue || '')).digest('hex');
+  const result = await pool.query(
+    `SELECT t.*, c.meet_uri, c.status AS class_status
+       FROM class_access_tickets t
+       JOIN classes c ON c.id = t.class_id
+      WHERE t.ticket_hash = $1`,
+    [hash],
+  );
+  if (!result.rowCount) {
+    throw Object.assign(new Error('Access ticket is invalid'), { status: 404 });
+  }
+  return result.rows[0];
+}
+
+function validateAccessTicket(ticket, classId) {
+  if (String(ticket.class_id) !== String(classId) ||
+      ticket.state !== 'issued' || new Date(ticket.expires_at) <= new Date() ||
+      !['scheduled', 'active'].includes(ticket.class_status)) {
+    throw Object.assign(new Error('Access ticket is expired or no longer valid'), { status: 410 });
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 exports.access = async (req, res) => {
+  try {
+    const ticket = await findAccessTicket(req.params.ticket);
+    validateAccessTicket(ticket, req.params.id);
+    const action = `/api/v1/classes/${encodeURIComponent(req.params.id)}/access/${encodeURIComponent(req.params.ticket)}`;
+    return res.type('html').send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Join class</title>
+  </head>
+  <body style="min-height:100vh;margin:0;padding:16px;display:grid;place-items:center;background:#f4f7fb;color:#172033;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <main style="width:100%;max-width:460px;padding:clamp(28px,6vw,40px);box-sizing:border-box;text-align:center;background:#fff;border:1px solid #e3eaf3;border-radius:20px;box-shadow:0 18px 45px rgba(23,32,51,.1)">
+      <div aria-hidden="true" style="width:56px;height:56px;margin:0 auto 22px;display:grid;place-items:center;border-radius:16px;color:#2563eb;background:#eaf2ff;font-size:26px">↗</div>
+      <h1 style="margin:0;font-size:clamp(1.7rem,4vw,2rem);line-height:1.2;letter-spacing:-.02em">Join class</h1>
+      <p style="margin:14px 0 28px;color:#60708a;font-size:1rem;line-height:1.6">You're ready to join. Click the button below to enter the Google Meet class.</p>
+      <form method="post" action="${escapeHtml(action)}">
+        <button type="submit" style="width:100%;min-height:50px;padding:12px 20px;border:0;border-radius:10px;color:#fff;background:#2563eb;font:inherit;font-weight:700;cursor:pointer">Join Google Meet</button>
+      </form>
+    </main>
+  </body>
+</html>`);
+  } catch (error) {
+    return sendError(res, error);
+  }
+};
+
+exports.consumeAccess = async (req, res) => {
   try {
     const hash = crypto.createHash('sha256').update(String(req.params.ticket || '')).digest('hex');
     const client = await pool.connect();
+    let transactionFinished = false;
     try {
       await client.query('BEGIN');
       const result = await client.query(
@@ -396,13 +464,16 @@ exports.access = async (req, res) => {
       );
       if (!result.rowCount) throw Object.assign(new Error('Access ticket is invalid'), { status: 404 });
       const ticket = result.rows[0];
-      if (ticket.state !== 'issued' || new Date(ticket.expires_at) <= new Date() ||
-          !['scheduled', 'active'].includes(ticket.class_status)) {
+      try {
+        validateAccessTicket(ticket, req.params.id);
+      } catch (error) {
         await client.query(
           `UPDATE class_access_tickets SET state = 'rejected', rejection_reason = 'invalid_or_expired' WHERE id = $1`,
           [ticket.id],
         );
-        throw Object.assign(new Error('Access ticket is expired or no longer valid'), { status: 410 });
+        await client.query('COMMIT');
+        transactionFinished = true;
+        throw error;
       }
       await client.query(
         `UPDATE class_access_tickets
@@ -416,9 +487,10 @@ exports.access = async (req, res) => {
         [ticket.class_id, ticket.student_id, ticket.id],
       );
       await client.query('COMMIT');
+      transactionFinished = true;
       return res.redirect(303, ticket.meet_uri);
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (!transactionFinished) await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
@@ -429,7 +501,6 @@ exports.access = async (req, res) => {
 };
 
 exports.end = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   const startedAt = Date.now();
   try {
     requireUuid(req.params.id, 'classId');
@@ -455,7 +526,8 @@ exports.end = async (req, res) => {
       }
       if (!['scheduled', 'active', 'ending'].includes(row.status)) throw Object.assign(new Error('Class cannot be ended in its current state'), { status: 409 });
       await client.query(`UPDATE classes SET status = 'ending', updated_at = NOW() WHERE id = $1`, [req.params.id]);
-      job = await createMeetJobInTransaction(client, {
+      job = await createMeetJob({
+        client,
         classId: req.params.id,
         operation: 'end_meet_space',
         idempotencyKey: `class:${req.params.id}:end-meet-space`,
@@ -482,7 +554,6 @@ exports.end = async (req, res) => {
 };
 
 exports.sync = async (req, res) => {
-  if (!isFacilitator(req)) return res.status(403).json({ message: 'Facilitator access required' });
   const startedAt = Date.now();
   try {
     requireUuid(req.params.id, 'classId');
@@ -492,7 +563,7 @@ exports.sync = async (req, res) => {
     if (!isAdmin(req) && row.facilitator_id !== req.user.id) return res.status(403).json({ message: 'You do not own this class' });
     if (!['sync_pending', 'failed'].includes(row.status)) {
       return res.status(409).json({
-        message: row.status === 'ended' || row.status === 'finalised'
+        message: row.status === 'ended'
           ? 'Attendance is already completed and cannot be resynchronized'
           : 'Class is not ready for attendance synchronization',
       });
@@ -585,16 +656,8 @@ exports.attendance = async (req, res) => {
                  meet_user_id,
                  joined_at,
                  left_at,
-                 COALESCE(
-                   CASE
-                     WHEN participant_name ILIKE 'conferenceRecords/%' THEN NULL
-                     ELSE NULLIF(participant_name, participant_session_name)
-                   END,
-                   raw_participant_data->'signedinUser'->>'displayName',
-                   raw_participant_data->'anonymousUser'->>'displayName',
-                   raw_participant_data->'phoneUser'->>'displayName',
-                   'Anonymous participant'
-                 ) AS display_name
+                 COALESCE(NULLIF(participant_name, participant_session_name),
+                          'Anonymous participant') AS display_name
             FROM meet_sessions
            WHERE class_id = $1
              AND matched_student_id IS NULL

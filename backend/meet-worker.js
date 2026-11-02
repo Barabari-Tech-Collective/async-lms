@@ -4,18 +4,23 @@ const { Worker } = require('bullmq');
 const {
   MEET_QUEUE_NAME,
   redisConnection,
+  enqueueMeetJob,
 } = require('./services/meetQueue.service');
 const { GoogleMeetService, GoogleMeetError } = require('./services/googleMeet.service');
 const {
+  createMeetJob,
   getMeetJob,
   getMeetJobAvailability,
   claimMeetJob,
   markMeetJobSucceeded,
   markMeetJobRetrying,
   markMeetJobFailed,
+  getDueMeetJobs,
 } = require('./services/meetJob.service');
-const { createMeetJob } = require('./services/meetJob.service');
-const { enqueueMeetJob } = require('./services/meetQueue.service');
+const {
+  calculateAttendanceMetrics,
+  createConferenceNotReadyError,
+} = require('./services/attendance.service');
 const pool = require('./config/pg');
 const { normalizeMeetUserId } = require('./utils/meetIdentity');
 
@@ -25,7 +30,7 @@ const WORKER_CONCURRENCY = parseInt(
 );
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
 const ATTENDANCE_SYNC_DELAY_MS = 30 * 1000;
-const CONFERENCE_PRESTART_WINDOW_MS = 15 * 60 * 1000;
+const CONFERENCE_PRESTART_WINDOW_MS = 5 * 60 * 1000;
 const PARTICIPANT_SESSION_CONCURRENCY = 5;
 
 let googleMeetService;
@@ -187,10 +192,26 @@ async function createMeetSpace(meetJob, service) {
   }
 
   const cohostStartedAt = Date.now();
-  await service.addCohost(space.name, existing.facilitator_email);
-  logTiming('create_meet_space', meetJob.class_id, 'google_meet_cohost', cohostStartedAt, {
-    facilitatorEmail: existing.facilitator_email,
-  });
+  try {
+    await service.addCohost(space.name, existing.facilitator_email);
+    logTiming('create_meet_space', meetJob.class_id, 'google_meet_cohost', cohostStartedAt, {
+      facilitatorEmail: existing.facilitator_email,
+    });
+  } catch (error) {
+    const retryable =
+      (error instanceof GoogleMeetError && error.retryable) ||
+      isTransientInfrastructureError(error);
+    if (retryable) throw error;
+
+    console.warn(JSON.stringify({
+      component: 'meet-worker',
+      operation: 'create_meet_space',
+      classId: meetJob.class_id,
+      stage: 'google_meet_cohost_non_blocking_failure',
+      facilitatorEmail: existing.facilitator_email,
+      error: error.message,
+    }));
+  }
 
   const updateStartedAt = Date.now();
   const updateResult = await pool.query(
@@ -231,7 +252,10 @@ async function endMeetSpace(meetJob, service) {
     throw new Error(`Class ${meetJob.class_id} has no Meet space`);
   }
 
-  if (['ended', 'sync_pending', 'processing', 'ready_for_review', 'finalised'].includes(result.rows[0].status)) {
+  if (['ended', 'sync_pending', 'processing'].includes(result.rows[0].status)) {
+    if (result.rows[0].status === 'sync_pending') {
+      await ensureSessionSyncQueued(meetJob.class_id);
+    }
     console.info(JSON.stringify({
       component: 'meet-worker',
       operation: 'end_meet_space',
@@ -268,7 +292,7 @@ async function endMeetSpace(meetJob, service) {
             status = 'sync_pending',
             updated_at = NOW()
       WHERE id = $1
-        AND status NOT IN ('cancelled', 'finalised')
+        AND status <> 'cancelled'
       RETURNING actual_end_at`,
     [meetJob.class_id],
   );
@@ -299,15 +323,6 @@ async function syncMeetSessions(meetJob, service) {
     throw new Error(`Class ${meetJob.class_id} has no usable Meet code`);
   }
 
-  const processingResult = await pool.query(
-    `UPDATE classes SET status = 'processing', updated_at = NOW()
-      WHERE id = $1 AND status IN ('sync_pending', 'failed')`,
-    [meetJob.class_id],
-  );
-  if (!processingResult.rowCount) {
-    throw new Error(`Class ${meetJob.class_id} is no longer eligible for attendance synchronization`);
-  }
-
   const conferenceRecords = await service.listConferenceRecords({
     filter: `space.meeting_code = "${meetingCode}"`,
   });
@@ -316,10 +331,16 @@ async function syncMeetSessions(meetJob, service) {
   });
   const selected = selectConferenceRecord(conferenceRecords, result.rows[0]);
   if (!selected) {
-    throw new GoogleMeetError(
-      `No conference record matched class ${meetJob.class_id}; Google Meet data may not be ready`,
-      { retryable: true },
-    );
+    const error = createConferenceNotReadyError(meetJob.class_id);
+    throw new GoogleMeetError(error.message, { retryable: error.retryable });
+  }
+  const processingResult = await pool.query(
+    `UPDATE classes SET status = 'processing', updated_at = NOW()
+      WHERE id = $1 AND status IN ('sync_pending', 'failed')`,
+    [meetJob.class_id],
+  );
+  if (!processingResult.rowCount) {
+    throw new Error(`Class ${meetJob.class_id} is no longer eligible for attendance synchronization`);
   }
   if (conferenceRecords.length > 1) {
     console.warn(`[meet-worker] Multiple conference records matched class ${meetJob.class_id}; selected ${selected.name}`);
@@ -362,12 +383,12 @@ function selectConferenceRecord(records, classRow) {
   const scheduledStart = new Date(classRow.scheduled_start_at).getTime();
   const actualEnd = new Date(classRow.actual_end_at || Date.now()).getTime();
   const earliestStart = scheduledStart - CONFERENCE_PRESTART_WINDOW_MS;
-  return records
+  const candidates = records
     .map((record) => {
       const start = new Date(record.startTime || record.start_time || 0).getTime();
       const end = new Date(record.endTime || record.end_time || classRow.actual_end_at || 0).getTime();
       if (!record.name || !Number.isFinite(start) || !Number.isFinite(end) ||
-          end < earliestStart || start > actualEnd) {
+          end < scheduledStart || start > actualEnd) {
         return null;
       }
       const overlapStart = Math.max(start, scheduledStart);
@@ -375,9 +396,12 @@ function selectConferenceRecord(records, classRow) {
       return {
         record,
         overlap: Math.max(overlapEnd - overlapStart, 0),
+        startsAtOrAfterScheduled: start >= scheduledStart,
       };
     })
-    .filter(Boolean)
+    .filter(Boolean);
+  const scheduledCandidates = candidates.filter((candidate) => candidate.startsAtOrAfterScheduled);
+  return (scheduledCandidates.length ? scheduledCandidates : candidates)
     .sort((left, right) => right.overlap - left.overlap)[0]?.record || null;
 }
 
@@ -424,7 +448,7 @@ async function saveMeetSessions(classId, conferenceRecord, participant, sessions
     const offset = values.length;
     placeholders.push(
       `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, ` +
-      `$${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, NOW())`,
+      `$${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, NOW())`,
     );
     values.push(
       classId,
@@ -436,7 +460,6 @@ async function saveMeetSessions(classId, conferenceRecord, participant, sessions
       participantType,
       joinedAt,
       leftAt,
-      participant,
     );
   }
 
@@ -444,7 +467,7 @@ async function saveMeetSessions(classId, conferenceRecord, participant, sessions
     `INSERT INTO meet_sessions
        (class_id, conference_record_name, participant_name,
         participant_session_name, meet_user_id, matched_student_id,
-        participant_type, joined_at, left_at, raw_participant_data, synced_at)
+        participant_type, joined_at, left_at, synced_at)
      VALUES ${placeholders.join(', ')}
      ON CONFLICT (class_id, participant_session_name)
      DO UPDATE SET
@@ -455,7 +478,6 @@ async function saveMeetSessions(classId, conferenceRecord, participant, sessions
        participant_type = EXCLUDED.participant_type,
        joined_at = EXCLUDED.joined_at,
        left_at = EXCLUDED.left_at,
-       raw_participant_data = EXCLUDED.raw_participant_data,
        synced_at = NOW()`,
     values,
   );
@@ -471,24 +493,34 @@ async function enqueueSessionSync(classId) {
   await enqueueMeetJob(syncJob, { delay: ATTENDANCE_SYNC_DELAY_MS });
 }
 
+async function ensureSessionSyncQueued(classId) {
+  const idempotencyKey = `class:${classId}:sync-meet-sessions`;
+  const existing = await pool.query(
+    `SELECT state
+       FROM meet_jobs
+      WHERE idempotency_key = $1`,
+    [idempotencyKey],
+  );
+  const state = existing.rows[0]?.state;
+  if (state && ['pending', 'retrying', 'running', 'succeeded'].includes(state)) {
+    return;
+  }
+  await enqueueSessionSync(classId);
+}
+
 async function calculateAttendance(classId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const classResult = await client.query(
-      `SELECT scheduled_start_at, actual_end_at, attendance_threshold_percent
+      `SELECT scheduled_start_at, planned_end_at, actual_end_at,
+              grace_period_minutes, attendance_threshold_percent
          FROM classes WHERE id = $1 FOR UPDATE`,
       [classId],
     );
     if (!classResult.rowCount || !classResult.rows[0].actual_end_at) {
       throw new Error(`Class ${classId} has no actual end time for attendance calculation`);
     }
-    const classRow = classResult.rows[0];
-    const windowStart = new Date(classRow.scheduled_start_at).getTime();
-    const windowEnd = new Date(classRow.actual_end_at).getTime();
-    const durationMinutes = Math.max((windowEnd - windowStart) / 60000, 0);
-    if (!durationMinutes) throw new Error(`Class ${classId} has an invalid attendance window`);
-
     const [roster, sessions] = await Promise.all([
       client.query(
         `SELECT student_id FROM class_students
@@ -503,43 +535,11 @@ async function calculateAttendance(classId) {
         [classId],
       ),
     ]);
-    const grouped = new Map();
-    for (const session of sessions.rows) {
-      const start = Math.max(new Date(session.joined_at).getTime(), windowStart);
-      const end = Math.min(new Date(session.left_at || classRow.actual_end_at).getTime(), windowEnd);
-      if (end <= start) continue;
-      const intervals = grouped.get(session.matched_student_id) || [];
-      intervals.push([start, end]);
-      grouped.set(session.matched_student_id, intervals);
-    }
-    const studentIds = [];
-    const minutesValues = [];
-    const percentageValues = [];
-    const statusValues = [];
-    for (const student of roster.rows) {
-      const intervals = (grouped.get(student.student_id) || []).sort((a, b) => a[0] - b[0]);
-      let totalMs = 0;
-      let current = null;
-      for (const interval of intervals) {
-        if (!current) {
-          current = interval.slice();
-        } else if (interval[0] <= current[1]) {
-          current[1] = Math.max(current[1], interval[1]);
-        } else {
-          totalMs += current[1] - current[0];
-          current = interval.slice();
-        }
-      }
-      if (current) totalMs += current[1] - current[0];
-      const minutes = Number((totalMs / 60000).toFixed(2));
-      const percentage = Number(Math.min((minutes / durationMinutes) * 100, 100).toFixed(2));
-      studentIds.push(student.student_id);
-      minutesValues.push(minutes);
-      percentageValues.push(percentage);
-      statusValues.push(
-        percentage >= Number(classRow.attendance_threshold_percent) ? 'present' : 'absent',
-      );
-    }
+    const metrics = calculateAttendanceMetrics(classResult.rows[0], roster.rows, sessions.rows);
+    const studentIds = metrics.map((metric) => metric.studentId);
+    const minutesValues = metrics.map((metric) => metric.attendedMinutes);
+    const percentageValues = metrics.map((metric) => metric.attendancePercentage);
+    const statusValues = metrics.map((metric) => metric.attendanceStatus);
     if (studentIds.length) {
       await client.query(
         `INSERT INTO attendance
@@ -554,8 +554,7 @@ async function calculateAttendance(classId) {
          DO UPDATE SET attended_minutes = EXCLUDED.attended_minutes,
                        attendance_percentage = EXCLUDED.attendance_percentage,
                        attendance_status = EXCLUDED.attendance_status,
-                       calculated_at = NOW(), updated_at = NOW()
-         WHERE attendance.is_finalised = false`,
+                       calculated_at = NOW(), updated_at = NOW()`,
         [classId, studentIds, minutesValues, percentageValues, statusValues],
       );
     }
@@ -596,6 +595,26 @@ const worker = new Worker(MEET_QUEUE_NAME, processMeetJob, {
   concurrency: WORKER_CONCURRENCY,
 });
 
+async function recoverDueMeetJobs() {
+  try {
+    const jobs = await getDueMeetJobs();
+    for (const meetJob of jobs) {
+      try {
+        await enqueueMeetJob(meetJob);
+      } catch (error) {
+        console.error(
+          `[meet-worker] failed to recover meet job=${meetJob.id}: ${error.message}`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`[meet-worker] failed to scan due Meet jobs: ${error.message}`);
+  }
+}
+
+const recoveryInterval = setInterval(recoverDueMeetJobs, 10 * 1000);
+recoverDueMeetJobs();
+
 worker.on('completed', (job) => {
   console.log(`[meet-worker] completed job=${job.id} operation=${job.name}`);
 });
@@ -611,6 +630,7 @@ worker.on('error', (error) => {
 });
 
 process.on('SIGTERM', async () => {
+  clearInterval(recoveryInterval);
   await worker.close();
   await redisConnection.quit();
   await pool.end();

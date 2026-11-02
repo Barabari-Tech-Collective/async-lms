@@ -17,6 +17,11 @@ const requiredEnvironmentVariables = [
   'GOOGLE_MEET_REFRESH_TOKEN',
 ];
 
+// The current refresh token belongs to a temporary organization account.
+// Before final production handoff, replace it with the approved facilitator or
+// organization account token and update the worker's secret. Non-Testing OAuth
+// apps avoid the seven-day Testing-mode limit, but tokens can still be revoked. (vinay 1-nov-2026)
+
 function getGoogleMeetConfig() {
   const missing = requiredEnvironmentVariables.filter(
     (name) => !process.env[name]?.trim(),

@@ -1,5 +1,6 @@
 const { Queue } = require('bullmq');
 const Redis = require('ioredis');
+const crypto = require('crypto');
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const MEET_QUEUE_NAME = 'meet-queue';
@@ -25,7 +26,7 @@ async function enqueueMeetJob(meetJob, options = {}) {
     meetJob.operation,
     { meetJobId: meetJob.id },
     {
-      jobId: `meet-${meetJob.id}`,
+      jobId: `meet-${meetJob.id}-${crypto.randomUUID()}`,
       attempts: options.attempts || 3,
       backoff: options.backoff || { type: 'exponential', delay: 5000 },
       removeOnComplete: 1000,

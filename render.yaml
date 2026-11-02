@@ -63,14 +63,6 @@ services:
         sync: false
       - key: GOOGLE_IDENTITY_STATE_SECRET
         sync: false
-      - key: GOOGLE_MEET_CLIENT_ID
-        sync: false
-      - key: GOOGLE_MEET_CLIENT_SECRET
-        sync: false
-      - key: GOOGLE_MEET_REFRESH_TOKEN
-        sync: false
-      - key: GOOGLE_MEET_OAUTH_REDIRECT_URI
-        sync: false
       - key: MEET_WORKER_CONCURRENCY
         value: 2
       - key: JWT_SECRET
@@ -101,7 +93,9 @@ services:
         sync: false
 
   # ---------------------------------------------
-  # 2. Google Meet background worker
+  # 2. Google Meet background worker.
+  # Use this Render worker or the PM2 meet-worker process, not both against the
+  # same Redis queue.
   # ---------------------------------------------
   - type: worker
     name: async-lms-meet-worker

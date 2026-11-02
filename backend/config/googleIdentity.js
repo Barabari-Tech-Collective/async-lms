@@ -5,6 +5,7 @@ const requiredEnvironmentVariables = [
   'GOOGLE_IDENTITY_CLIENT_ID',
   'GOOGLE_IDENTITY_CLIENT_SECRET',
   'GOOGLE_IDENTITY_CALLBACK_URL',
+  'GOOGLE_IDENTITY_STATE_SECRET',
 ];
 
 function getGoogleIdentityConfig() {
@@ -22,11 +23,7 @@ function getGoogleIdentityConfig() {
     clientId: process.env.GOOGLE_IDENTITY_CLIENT_ID.trim(),
     clientSecret: process.env.GOOGLE_IDENTITY_CLIENT_SECRET.trim(),
     callbackUrl: process.env.GOOGLE_IDENTITY_CALLBACK_URL.trim(),
-    stateSecret: (
-      process.env.GOOGLE_IDENTITY_STATE_SECRET ||
-      process.env.JWT_SECRET ||
-      ''
-    ).trim(),
+    stateSecret: process.env.GOOGLE_IDENTITY_STATE_SECRET.trim(),
   };
 }
 

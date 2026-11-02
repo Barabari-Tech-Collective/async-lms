@@ -3,6 +3,7 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 const { Pool } = require('pg');
+const MIGRATION_ADVISORY_LOCK_KEY = 738491;
 
 let dbHost = (process.env.PGHOST || '').trim();
 // Use Neon's connection pooler endpoint if using Neon to prevent cold-start ETIMEDOUT
@@ -51,8 +52,11 @@ pool.on('error', (err, client) => {
 
 (async () => {
   let client;
+  let migrationLockAcquired = false;
   try {
     client = await pool.connect();
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+    migrationLockAcquired = true;
     // Accessing the host from the pool's own options
     const connectedHost = pool.options.host;
     const connectedDb = pool.options.database;
@@ -752,6 +756,8 @@ pool.on('error', (err, client) => {
 
     // ── Google Meet attendance schema ───────────────────────────────────────
     // This migration is additive and leaves the legacy attendance tables unchanged.
+    // The staging database contains 2 tables that are class_attendence and class_attendence_sessions.
+
     try {
       await client.query('BEGIN');
 
@@ -790,16 +796,12 @@ pool.on('error', (err, client) => {
           attendance_threshold_percent  NUMERIC(5, 2) NOT NULL DEFAULT 70
                                         CHECK (attendance_threshold_percent >= 0
                                                AND attendance_threshold_percent <= 100),
-          grace_period_minutes          INTEGER NOT NULL DEFAULT 0
-                                        CHECK (grace_period_minutes >= 0),
-          policy_version                INTEGER NOT NULL DEFAULT 1
-                                        CHECK (policy_version > 0),
+          grace_period_minutes          INTEGER NOT NULL DEFAULT 30
+                                        CHECK (grace_period_minutes >= 1),
           status                        TEXT NOT NULL DEFAULT 'creating'
                                         CHECK (status IN (
                                           'creating', 'scheduled', 'active', 'ending',
                                           'ended', 'sync_pending', 'processing',
-                                          'ready_for_review', 'finalised',
-                                          'cleanup_pending', 'end_unknown',
                                           'cancelled', 'failed'
                                         )),
           meet_space_name               TEXT,
@@ -820,6 +822,41 @@ pool.on('error', (err, client) => {
           ON classes(status);
         CREATE INDEX IF NOT EXISTS idx_classes_scheduled_start
           ON classes(scheduled_start_at);
+      `);
+
+      await client.query(`
+        ALTER TABLE classes
+          ADD COLUMN IF NOT EXISTS grace_period_minutes INTEGER NOT NULL DEFAULT 30;
+        ALTER TABLE classes
+          ALTER COLUMN grace_period_minutes SET DEFAULT 30;
+        UPDATE classes
+           SET grace_period_minutes = 30
+         WHERE grace_period_minutes < 1;
+        ALTER TABLE classes
+          DROP CONSTRAINT IF EXISTS classes_grace_period_minutes_check;
+        ALTER TABLE classes
+          ADD CONSTRAINT classes_grace_period_minutes_check
+          CHECK (grace_period_minutes >= 1);
+        ALTER TABLE classes
+          DROP COLUMN IF EXISTS policy_version;
+        UPDATE classes
+           SET status = CASE status
+             WHEN 'ready_for_review' THEN 'ended'
+             WHEN 'finalised' THEN 'ended'
+             WHEN 'cleanup_pending' THEN 'ended'
+             WHEN 'end_unknown' THEN 'failed'
+             ELSE status
+           END
+         WHERE status IN ('ready_for_review', 'finalised', 'cleanup_pending', 'end_unknown');
+        ALTER TABLE classes
+          DROP CONSTRAINT IF EXISTS classes_status_check;
+        ALTER TABLE classes
+          ADD CONSTRAINT classes_status_check
+          CHECK (status IN (
+            'creating', 'scheduled', 'active', 'ending',
+            'ended', 'sync_pending', 'processing',
+            'cancelled', 'failed'
+          ));
       `);
 
       await client.query(`
@@ -876,8 +913,6 @@ pool.on('error', (err, client) => {
           event_type        TEXT NOT NULL,
           reason            TEXT,
           request_id        TEXT,
-          ip_address        INET,
-          user_agent        TEXT,
           created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
@@ -885,6 +920,11 @@ pool.on('error', (err, client) => {
           ON class_access_events(class_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_class_access_events_student
           ON class_access_events(student_id, created_at);
+      `);
+      await client.query(`
+        ALTER TABLE class_access_events
+          DROP COLUMN IF EXISTS ip_address,
+          DROP COLUMN IF EXISTS user_agent;
       `);
 
       await client.query(`
@@ -899,7 +939,6 @@ pool.on('error', (err, client) => {
           participant_type           TEXT,
           joined_at                  TIMESTAMPTZ NOT NULL,
           left_at                    TIMESTAMPTZ,
-          raw_participant_data       JSONB,
           synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (class_id, participant_session_name),
@@ -914,6 +953,10 @@ pool.on('error', (err, client) => {
           ON meet_sessions(matched_student_id);
         CREATE INDEX IF NOT EXISTS idx_meet_sessions_class_student_joined
           ON meet_sessions(class_id, matched_student_id, joined_at);
+      `);
+      await client.query(`
+        ALTER TABLE meet_sessions
+          DROP COLUMN IF EXISTS raw_participant_data;
       `);
 
       await client.query(`
@@ -930,9 +973,6 @@ pool.on('error', (err, client) => {
           attendance_status     TEXT
                                 CHECK (attendance_status IS NULL
                                        OR attendance_status IN ('present', 'absent')),
-          is_finalised          BOOLEAN NOT NULL DEFAULT false,
-          review_required       BOOLEAN NOT NULL DEFAULT false,
-          review_reason         TEXT,
           calculated_at         TIMESTAMPTZ,
           created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -944,20 +984,12 @@ pool.on('error', (err, client) => {
         CREATE INDEX IF NOT EXISTS idx_attendance_student
           ON attendance(student_id);
       `);
-
       await client.query(`
-        CREATE TABLE IF NOT EXISTS attendance_overrides (
-          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          attendance_id         UUID NOT NULL REFERENCES attendance(id) ON DELETE RESTRICT,
-          previous_status       TEXT NOT NULL CHECK (previous_status IN ('present', 'absent')),
-          new_status            TEXT NOT NULL CHECK (new_status IN ('present', 'absent')),
-          reason                TEXT NOT NULL,
-          actor_id              UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_attendance_overrides_attendance
-          ON attendance_overrides(attendance_id, created_at);
+        ALTER TABLE attendance
+          DROP COLUMN IF EXISTS is_finalised,
+          DROP COLUMN IF EXISTS review_required,
+          DROP COLUMN IF EXISTS review_reason;
+        DROP TABLE IF EXISTS attendance_overrides;
       `);
 
       await client.query(`
@@ -1025,7 +1057,12 @@ pool.on('error', (err, client) => {
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {
-    if (client) client.release(); // Always release the client back to the pool
+    if (client) {
+      if (migrationLockAcquired) {
+        await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+      }
+      client.release();
+    }
   }
 })();
 

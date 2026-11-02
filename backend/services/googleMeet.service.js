@@ -34,6 +34,14 @@ function getErrorMessage(error) {
   return apiMessage || error.message || 'Google Meet request failed';
 }
 
+function isInvalidGrantError(error) {
+  const responseError = error.response?.data?.error;
+  return responseError === 'invalid_grant' ||
+    responseError?.error === 'invalid_grant' ||
+    error.code === 'invalid_grant' ||
+    error.message?.includes('invalid_grant');
+}
+
 class GoogleMeetService {
   constructor(config = getGoogleMeetConfig()) {
     this.config = config;
@@ -80,6 +88,15 @@ class GoogleMeetService {
       return token;
     } catch (error) {
       if (error instanceof GoogleMeetError) throw error;
+      if (isInvalidGrantError(error)) {
+        console.error(
+          '[google-meet] Refresh token rejected with invalid_grant; replace GOOGLE_MEET_REFRESH_TOKEN.',
+        );
+        throw new GoogleMeetError(
+          'Google Meet refresh token is invalid or revoked; operator action is required',
+          { retryable: false, status: getErrorStatus(error), cause: error },
+        );
+      }
       throw new GoogleMeetError(
         `Unable to obtain Google Meet access token: ${getErrorMessage(error)}`,
         { retryable: isRetryableError(error), status: getErrorStatus(error), cause: error },

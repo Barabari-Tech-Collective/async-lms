@@ -11,15 +11,46 @@ const { logAction } = require('../utils/auditLogger');
 const { normalizeMeetUserId } = require('../utils/meetIdentity');
 
 const STATE_TTL_SECONDS = 10 * 60;
+const STATE_NONCE_COOKIE = 'google_identity_state_nonce';
 const FRONTEND_URL = (
   process.env.FRONTEND_URL || 'http://localhost:5173'
 ).replace(/\/+$/, '');
 
+function getStateNonceCookie(req) {
+  const cookies = req.headers.cookie
+    ? req.headers.cookie.split(';').map((cookie) => cookie.trim())
+    : [];
+  const nonceCookie = cookies.find((cookie) =>
+    cookie.startsWith(`${STATE_NONCE_COOKIE}=`),
+  );
+  if (!nonceCookie) return null;
+
+  try {
+    return decodeURIComponent(
+      nonceCookie.slice(`${STATE_NONCE_COOKIE}=`.length),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function setStateNonceCookie(res, nonce) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader(
+    'Set-Cookie',
+    `${STATE_NONCE_COOKIE}=${encodeURIComponent(nonce)}; Max-Age=${STATE_TTL_SECONDS}; HttpOnly; Path=/api/v1/me/google-identity; SameSite=Lax${secure}`,
+  );
+}
+
+function clearStateNonceCookie(res) {
+  res.setHeader(
+    'Set-Cookie',
+    `${STATE_NONCE_COOKIE}=; Max-Age=0; HttpOnly; Path=/api/v1/me/google-identity; SameSite=Lax`,
+  );
+}
+
 function createState(userId, verifier, nonce) {
   const config = createGoogleIdentityConfig();
-  if (!config.stateSecret) {
-    throw new Error('GOOGLE_IDENTITY_STATE_SECRET or JWT_SECRET is required');
-  }
   return jwt.sign(
     { sub: userId, purpose: 'meet_identity_link', nonce, verifier },
     config.stateSecret,
@@ -79,6 +110,7 @@ exports.startLink = async (req, res) => {
     const verifier = createPkceVerifier();
     const nonce = crypto.randomBytes(24).toString('hex');
     const state = createState(student.id, verifier, nonce);
+    setStateNonceCookie(res, nonce);
     return res.json({
       success: true,
       authorizationUrl: client.generateAuthUrl({
@@ -101,12 +133,19 @@ exports.callback = async (req, res) => {
     res.redirect(
       `${FRONTEND_URL}/dashboard/student/settings?meet_link=${encodeURIComponent(reason)}`,
     );
+  const finishWithError = (reason) => {
+    clearStateNonceCookie(res);
+    return frontendError(reason);
+  };
 
   if (req.query.error === 'access_denied') {
-    return frontendError('cancelled');
+    return finishWithError('cancelled');
   }
-  if (!req.query.code || !req.query.state) {
-    return frontendError('failed');
+  if (
+    typeof req.query.code !== 'string' ||
+    typeof req.query.state !== 'string'
+  ) {
+    return finishWithError('failed');
   }
 
   try {
@@ -114,11 +153,17 @@ exports.callback = async (req, res) => {
     const client = createGoogleIdentityClient(config);
     const statePayload = jwt.verify(req.query.state, config.stateSecret);
     if (
+      typeof statePayload !== 'object' ||
       statePayload.purpose !== 'meet_identity_link' ||
+      typeof statePayload.sub !== 'string' ||
+      !statePayload.sub ||
+      typeof statePayload.nonce !== 'string' ||
+      !statePayload.nonce ||
       typeof statePayload.verifier !== 'string' ||
-      !statePayload.verifier
+      !statePayload.verifier ||
+      getStateNonceCookie(req) !== statePayload.nonce
     ) {
-      return frontendError('state_mismatch');
+      return finishWithError('state_mismatch');
     }
 
     const { tokens } = await client.getToken({
@@ -137,7 +182,7 @@ exports.callback = async (req, res) => {
       !email ||
       payload.email_verified !== true
     ) {
-      return frontendError('invalid_identity');
+      return finishWithError('invalid_identity');
     }
 
     const conflict = await pool.query(
@@ -156,7 +201,7 @@ exports.callback = async (req, res) => {
         entityId: statePayload.sub,
         details: { reason: 'meet_user_id_already_linked', google_email: email },
       });
-      return frontendError('conflict');
+      return finishWithError('conflict');
     }
 
     await pool.query(
@@ -183,8 +228,16 @@ exports.callback = async (req, res) => {
       entityId: statePayload.sub,
       details: { google_email: email, verification_method: 'google_identity_mapping' },
     });
+    clearStateNonceCookie(res);
     return res.redirect(`${FRONTEND_URL}/dashboard/student/settings?meet_link=success`);
   } catch (error) {
+    clearStateNonceCookie(res);
+    if (
+      error instanceof jwt.TokenExpiredError ||
+      error instanceof jwt.JsonWebTokenError
+    ) {
+      return frontendError('state_mismatch');
+    }
     console.error('[google-identity] Callback failed:', error);
     return frontendError('failed');
   }

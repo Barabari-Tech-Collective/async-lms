@@ -5,8 +5,9 @@ async function createMeetJob({
   operation,
   idempotencyKey,
   availableAt = new Date(),
+  client = pool,
 }) {
-  const result = await pool.query(
+  const result = await client.query(
     `INSERT INTO meet_jobs
        (class_id, operation, idempotency_key, available_at)
      VALUES ($1, $2, $3, $4)
@@ -41,6 +42,19 @@ async function createMeetJob({
     [classId, operation, idempotencyKey, availableAt],
   );
   return result.rows[0];
+}
+
+async function getDueMeetJobs(limit = 50) {
+  const result = await pool.query(
+    `SELECT *
+       FROM meet_jobs
+      WHERE state IN ('pending', 'retrying')
+        AND available_at <= NOW()
+      ORDER BY available_at, id
+      LIMIT $1`,
+    [limit],
+  );
+  return result.rows;
 }
 
 async function getMeetJob(id) {
@@ -114,6 +128,7 @@ function formatError(error) {
 
 module.exports = {
   createMeetJob,
+  getDueMeetJobs,
   getMeetJob,
   claimMeetJob,
   getMeetJobAvailability,

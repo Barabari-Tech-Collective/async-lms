@@ -4,6 +4,7 @@ const { createMeetJob } = require('./meetJob.service');
 const { enqueueMeetJob } = require('./meetQueue.service');
 
 const ONE_MINUTE_MS = 60 * 1000;
+const FACILITATOR_PRESTART_MINUTES = 5;
 
 function normalizeIds(values) {
   return [...new Set((Array.isArray(values) ? values : []).map(String))];
@@ -113,6 +114,7 @@ async function createClass({ facilitatorId, isAdmin, input }) {
   requireUuid(input.subjectId, 'subjectId');
   const { start, end } = validateSchedule(input.scheduledStartAt, input.plannedEndAt);
   const threshold = validateThreshold(input.attendanceThresholdPercent);
+  const gracePeriodMinutes = validateGracePeriod(input.gracePeriodMinutes);
   const idempotencyKey = String(input.idempotencyKey || crypto.randomUUID()).trim();
   if (!idempotencyKey || idempotencyKey.length > 200) {
     const error = new Error('idempotencyKey must be a non-empty value of at most 200 characters');
@@ -121,17 +123,32 @@ async function createClass({ facilitatorId, isAdmin, input }) {
   }
 
   const client = await pool.connect();
+  let transactionFinished = false;
   try {
     await client.query('BEGIN');
     const existing = await client.query(
-      `SELECT id, status, title
+      `SELECT id, status, title, grace_period_minutes
          FROM classes
         WHERE idempotency_key = $1
         FOR UPDATE`,
       [idempotencyKey],
     );
     if (existing.rowCount) {
+      let jobToEnqueue = null;
+      if (existing.rows[0].status === 'creating') {
+        jobToEnqueue = await createMeetJob({
+          client,
+          classId: existing.rows[0].id,
+          operation: 'create_meet_space',
+          idempotencyKey: `class:${existing.rows[0].id}:create-meet-space`,
+        });
+        if (['running', 'succeeded'].includes(jobToEnqueue.state)) {
+          jobToEnqueue = null;
+        }
+      }
       await client.query('COMMIT');
+      transactionFinished = true;
+      if (jobToEnqueue) await enqueueMeetJob(jobToEnqueue);
       return { class: existing.rows[0], existing: true };
     }
 
@@ -140,8 +157,9 @@ async function createClass({ facilitatorId, isAdmin, input }) {
     const classResult = await client.query(
       `INSERT INTO classes
          (subject_id, facilitator_id, title, scheduled_start_at,
-          planned_end_at, attendance_threshold_percent, idempotency_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+          planned_end_at, attendance_threshold_percent, grace_period_minutes,
+          idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         input.subjectId,
@@ -150,6 +168,7 @@ async function createClass({ facilitatorId, isAdmin, input }) {
         start,
         end,
         threshold,
+        gracePeriodMinutes,
         idempotencyKey,
       ],
     );
@@ -169,12 +188,14 @@ async function createClass({ facilitatorId, isAdmin, input }) {
        ON CONFLICT (class_id, student_id) DO NOTHING`,
       [classRow.id, studentIds],
     );
-    const job = await createMeetJobInTransaction(client, {
+    const job = await createMeetJob({
+      client,
       classId: classRow.id,
       operation: 'create_meet_space',
       idempotencyKey: `class:${classRow.id}:create-meet-space`,
     });
     await client.query('COMMIT');
+    transactionFinished = true;
     console.info(JSON.stringify({
       component: 'class-service',
       operation: 'create_class',
@@ -186,48 +207,11 @@ async function createClass({ facilitatorId, isAdmin, input }) {
     await enqueueMeetJob(job);
     return { class: classRow, subject, rosterCount: students.length, existing: false };
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (!transactionFinished) await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
   }
-}
-
-async function createMeetJobInTransaction(client, values) {
-  const result = await client.query(
-    `INSERT INTO meet_jobs (class_id, operation, idempotency_key, available_at)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (idempotency_key)
-     DO UPDATE SET
-       state = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN 'pending'
-         ELSE meet_jobs.state
-       END,
-       available_at = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN EXCLUDED.available_at
-         ELSE meet_jobs.available_at
-       END,
-       attempt_count = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN 0
-         ELSE meet_jobs.attempt_count
-       END,
-       started_at = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
-         ELSE meet_jobs.started_at
-       END,
-       completed_at = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
-         ELSE meet_jobs.completed_at
-       END,
-       error_summary = CASE
-         WHEN meet_jobs.state IN ('succeeded', 'failed') THEN NULL
-         ELSE meet_jobs.error_summary
-       END,
-       updated_at = NOW()
-     RETURNING *`,
-    [values.classId, values.operation, values.idempotencyKey, values.availableAt || new Date()],
-  );
-  return result.rows[0];
 }
 
 async function updateClass({ facilitatorId, isAdmin, classId, input }) {
@@ -266,6 +250,9 @@ async function updateClass({ facilitatorId, isAdmin, classId, input }) {
       input.attendanceThresholdPercent,
       Number(row.attendance_threshold_percent),
     );
+    const gracePeriodMinutes = input.gracePeriodMinutes === undefined
+      ? Number(row.grace_period_minutes)
+      : validateGracePeriod(input.gracePeriodMinutes);
     const selectedIds = input.studentIds === undefined
       ? null
       : normalizeIds(input.studentIds);
@@ -321,10 +308,11 @@ async function updateClass({ facilitatorId, isAdmin, classId, input }) {
               scheduled_start_at = $3,
               planned_end_at = $4,
               attendance_threshold_percent = $5,
+              grace_period_minutes = $6,
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [classId, input.title === undefined ? null : String(input.title).trim(), start, end, threshold],
+      [classId, input.title === undefined ? null : String(input.title).trim(), start, end, threshold, gracePeriodMinutes],
     );
     await client.query('COMMIT');
     console.info(JSON.stringify({
@@ -349,15 +337,41 @@ function getJoinState(row, now = new Date()) {
   if (['ended', 'cancelled', 'failed'].includes(row.status)) return 'ended';
   if (now < new Date(row.scheduled_start_at)) return 'too_early';
   if (row.actual_end_at && now >= new Date(row.actual_end_at)) return 'ended';
+  const graceEnd = new Date(row.planned_end_at).getTime() +
+    Number(row.grace_period_minutes || 30) * ONE_MINUTE_MS;
+  if (now.getTime() >= graceEnd) return 'ended';
   return 'joinable';
+}
+
+function getFacilitatorJoinState(row, now = new Date()) {
+  if (!row.meet_space_name || !row.meet_uri) return 'creating';
+  if (['ending', 'sync_pending', 'processing'].includes(row.status)) return row.status;
+  if (['ended', 'cancelled', 'failed'].includes(row.status)) return 'ended';
+  const earliestJoin = new Date(row.scheduled_start_at).getTime() -
+    FACILITATOR_PRESTART_MINUTES * ONE_MINUTE_MS;
+  if (now.getTime() < earliestJoin) return 'too_early';
+  if (row.actual_end_at && now >= new Date(row.actual_end_at)) return 'ended';
+  return 'joinable';
+}
+
+function validateGracePeriod(value, fallback = 30) {
+  const minutes = value === undefined ? fallback : Number(value);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
+    const error = new Error('gracePeriodMinutes must be a whole number between 1 and 1440');
+    error.status = 400;
+    throw error;
+  }
+  return minutes;
 }
 
 module.exports = {
   ONE_MINUTE_MS,
+  FACILITATOR_PRESTART_MINUTES,
   createClass,
   updateClass,
-  createMeetJobInTransaction,
+  validateGracePeriod,
   getJoinState,
+  getFacilitatorJoinState,
   normalizeIds,
   requireUuid,
 };

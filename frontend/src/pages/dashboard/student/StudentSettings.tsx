@@ -192,8 +192,9 @@ export default function StudentSettings() {
           <p className='text-xs sm:text-sm font-semibold text-slate-700'>Meet attendance account</p>
         </div>
         <div className='p-4 sm:p-6 space-y-4'>
-          {!meetIdentity?.linked ?(<p className='text-sm text-slate-600'>
-            Link the Google account you will use to join Google Meet classes.We recommend using {profile.email}.
+          {!meetIdentity?.linked ? (
+            <p className='text-sm text-slate-600'>
+            Link the Google account you will use to join Google Meet classes. We recommend using {profile.email}.
           </p>) : <p className='text-sm text-slate-600'>Your Google account is linked successfully.</p>}
           
           {meetIdentity?.linked && meetIdentity.status === 'verified' ? (
