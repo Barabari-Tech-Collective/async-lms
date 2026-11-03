@@ -253,11 +253,13 @@ export default function CapstoneView() {
         if (Array.isArray(parsed) && parsed.length > 0) list = [...parsed] as SubmissionType[];
       } catch {}
     }
+    const valid = list.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    const finalList: SubmissionType[] = valid.length > 0 ? [...valid] : [...ALL_SUBMISSION_TYPES];
     // Universal requirement: direct file uploading is accessible for every evaluator and assignment
-    if (!list.includes('file')) {
-      list.unshift('file');
+    if (!finalList.includes('file')) {
+      finalList.unshift('file');
     }
-    return list;
+    return finalList;
   }, [capstone?.allowed_submission_types]);
 
   useEffect(() => {
@@ -323,7 +325,7 @@ export default function CapstoneView() {
       }
     } else {
       if (!link.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
@@ -532,8 +534,8 @@ export default function CapstoneView() {
                           : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span>{cfg.emoji}</span>
-                      <span className='truncate'>{cfg.shortLabel}</span>
+                      <span>{cfg?.emoji || '📄'}</span>
+                      <span className='truncate'>{cfg?.shortLabel || type}</span>
                     </button>
                   );
                 })}

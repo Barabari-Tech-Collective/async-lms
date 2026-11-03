@@ -6,16 +6,13 @@ import {
   Check,
   Plus,
   BookOpen,
-  ExternalLink,
   Code2,
   Award,
-  Layers,
   GraduationCap,
   Loader2,
-  Filter,
 } from 'lucide-react';
 import type { ResumeProject, CourseCapstoneItem } from './types';
-import { detectRoleTrack, TRACK_METADATA, type RoleTrack } from './resumeRoleMatcher';
+import { detectRoleTrack, TRACK_METADATA } from './resumeRoleMatcher';
 import apiClient from '@/services/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'react-hot-toast';
