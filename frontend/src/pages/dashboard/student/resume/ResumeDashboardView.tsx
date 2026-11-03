@@ -11,11 +11,9 @@ import {
   Edit3,
   Eye,
   Archive,
-  Sparkles,
 } from 'lucide-react';
 import type { ResumeListItem, ResumeDocument as ResumeDocType } from './types';
 import { RESUME_TEMPLATES } from './templateRegistry';
-import { ResumeDocument } from './ResumeDocument';
 
 interface ResumeDashboardViewProps {
   resumesList: ResumeListItem[];
@@ -44,7 +42,6 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
   recycleBinCount,
   activeFilter,
   setActiveFilter,
-  activeResumeDoc,
 }) => {
   const carouselRef = useRef<HTMLDivElement>(null);
 

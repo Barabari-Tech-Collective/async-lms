@@ -6,10 +6,7 @@ import {
   Calendar,
   Sparkles,
   Camera,
-  ExternalLink,
-  ChevronDown,
   GraduationCap,
-  BookOpen,
 } from 'lucide-react';
 import type {
   ResumeDocument as ResumeDocType,
@@ -136,7 +133,6 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
   onBackToDashboard,
   onGoToPreview,
   sections,
-  user,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCapstoneModal, setShowCapstoneModal] = useState<boolean>(false);

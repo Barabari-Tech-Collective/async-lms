@@ -1014,9 +1014,9 @@ export default function ResumeBuilder() {
 
   const handleSaveCompleted = async () => {
     if (!resumeRecord?.id) return;
-    const updatedDoc = {
+    const updatedDoc: ResumeDocType = {
       ...resumeDoc,
-      status: 'completed',
+      status: 'completed' as const,
     };
     setResumeDoc(updatedDoc);
     resumeDocRef.current = updatedDoc;
@@ -1303,8 +1303,6 @@ export default function ResumeBuilder() {
 
   const localScore = calcLocalMatchAnalysis(resumeDoc);
   const currentTemplateMeta = getTemplateMeta(resumeDoc.templateId);
-
-  const hasResume = Boolean(resumeRecord?.id);
 
   if (initialLoading) {
     return (
@@ -2077,7 +2075,7 @@ export default function ResumeBuilder() {
             <AlertTriangle size={16} className='text-red-600 shrink-0' />
             <span>
               <strong>Autosave Conflict:</strong> This resume was edited in another tab or device (Server version: v
-              {conflictData.currentVersion}). How would you like to proceed?
+              {conflictData?.currentVersion}). How would you like to proceed?
             </span>
           </div>
           <div className='flex items-center gap-2'>
@@ -2168,15 +2166,15 @@ export default function ResumeBuilder() {
               <div className='p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2.5 text-xs animate-in fade-in-50'>
                 <div className='flex items-center justify-between font-bold text-indigo-950'>
                   <span>Keyword Match</span>
-                  <span>{matchResult.matchPercentage}%</span>
+                  <span>{matchResult?.matchPercentage}%</span>
                 </div>
-                {matchResult.matchedKeywords?.length > 0 && (
+                {(matchResult?.matchedKeywords?.length ?? 0) > 0 && (
                   <div>
                     <span className='font-semibold text-emerald-800 text-[11px] block mb-1'>
                       Matched Skills:
                     </span>
                     <div className='flex flex-wrap gap-1'>
-                      {matchResult.matchedKeywords.map((k, i) => (
+                      {matchResult?.matchedKeywords?.map((k, i) => (
                         <span
                           key={i}
                           className='px-1.5 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800 font-medium'
@@ -2187,13 +2185,13 @@ export default function ResumeBuilder() {
                     </div>
                   </div>
                 )}
-                {matchResult.missingKeywords?.length > 0 && (
+                {(matchResult?.missingKeywords?.length ?? 0) > 0 && (
                   <div>
                     <span className='font-semibold text-amber-800 text-[11px] block mb-1'>
                       Missing from JD:
                     </span>
                     <div className='flex flex-wrap gap-1'>
-                      {matchResult.missingKeywords.map((k, i) => (
+                      {matchResult?.missingKeywords?.map((k, i) => (
                         <span
                           key={i}
                           className='px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-medium'

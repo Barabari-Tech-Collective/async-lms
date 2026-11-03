@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -9,8 +9,6 @@ import {
   LayoutTemplate,
   Loader2,
   X,
-  CheckCircle2,
-  FileText,
   Search,
 } from 'lucide-react';
 import type { ResumeDocument as ResumeDocType, Section, ResumeMatchResult } from './types';
