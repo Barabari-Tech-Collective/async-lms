@@ -7,13 +7,22 @@ import BatchTable from '@/components/common/results/BatchTable';
 import StudentTable from '@/components/common/results/StudentTable';
 import apiClient from '@/services/api';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, CheckCircle2, AlertCircle, Award } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Award, Eye } from 'lucide-react';
+import AdminAssignmentPreviewModal, { type AssignmentPreviewData } from '@/components/common/admin/AdminAssignmentPreviewModal';
 
 type Evaluation = {
   id: string;
   assignment_id: string;
+  college_assignment_id?: string;
+  project_id?: string;
   assignment_name?: string;
+  instructions?: string;
+  max_score?: number;
   evaluator_type?: string;
+  test_cases?: any;
+  rubric?: any;
+  allowed_submission_types?: any;
+  unit_title?: string;
 };
 const ResultsPage = () => {
   const navigate = useNavigate();
@@ -22,6 +31,7 @@ const ResultsPage = () => {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [filters, setFilters] = useState({
     college: '',
     domain: '',
@@ -103,24 +113,60 @@ const ResultsPage = () => {
   const processedSubmissions = completedSubmissions + failedSubmissions;
   const progressPercent = totalSubmissions > 0 ? Math.round((processedSubmissions / totalSubmissions) * 100) : 0;
 
+  const previewData: AssignmentPreviewData | null = evaluation
+    ? {
+        id: evaluation.assignment_id || evaluation.college_assignment_id || evaluation.project_id || id,
+        title: evaluation.assignment_name || 'Assignment Preview',
+        instructions: evaluation.instructions || '',
+        max_score: Number(evaluation.max_score || 100),
+        evaluator_type: evaluation.evaluator_type || null,
+        test_cases: evaluation.test_cases || null,
+        rubric: evaluation.rubric || null,
+        allowed_submission_types: evaluation.allowed_submission_types,
+        unit_title: evaluation.unit_title,
+      }
+    : null;
+
+  const targetAssignmentId =
+    evaluation?.assignment_id ||
+    evaluation?.college_assignment_id ||
+    evaluation?.project_id ||
+    id;
+
   return (
     <div className='min-w-0'>
       <div className='px-1 sm:px-6 space-y-4 pb-12 min-w-0'>
-        {/* Back + Title */}
-        <div className='flex items-center gap-3 mt-2 sm:mt-4'>
-          <button
-            onClick={() => navigate(-1)}
-            className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold'
-          >
-            ← Back
-          </button>
+        {/* Back + Title + Preview Button */}
+        <div className='flex items-center justify-between gap-3 mt-2 sm:mt-4'>
+          <div className='flex items-center gap-3'>
+            <button
+              onClick={() => navigate(-1)}
+              className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold cursor-pointer'
+            >
+              ← Back
+            </button>
 
-          <h1 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Evaluation Results</h1>
+            <h1 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Evaluation Results</h1>
+          </div>
+
+          <button
+            type='button'
+            onClick={() => setPreviewModalOpen(true)}
+            className='inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200/80 text-slate-700 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50/50 shadow-2xs font-semibold text-xs sm:text-sm transition-all cursor-pointer shrink-0'
+            title='Preview assignment instructions, rubrics, and test cases'
+          >
+            <Eye className='w-4 h-4 text-indigo-600' />
+            <span>Preview Assignment</span>
+          </button>
         </div>
 
         <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
           {/* Assignment */}
-          <p className='text-xs sm:text-sm text-slate-500 font-medium truncate max-w-md'>{assignmentName}</p>
+          <div className='flex items-center gap-2 min-w-0'>
+            <p className='text-xs sm:text-sm text-slate-500 font-medium truncate max-w-md'>
+              Assignment: <span className='text-slate-800 font-semibold'>{assignmentName}</span>
+            </p>
+          </div>
           <TopHeader onFilterChange={setFilters} />
         </div>
 
@@ -268,6 +314,14 @@ const ResultsPage = () => {
           </div>
         )}
       </div>
+
+      <AdminAssignmentPreviewModal
+        isOpen={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        assignmentId={targetAssignmentId}
+        assignmentData={previewData}
+        unitTitle={evaluation?.unit_title}
+      />
     </div>
   );
 };

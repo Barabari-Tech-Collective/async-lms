@@ -56,29 +56,69 @@ export const AdminAssignmentPreviewModal: React.FC<AdminAssignmentPreviewModalPr
       return;
     }
 
-    // If an assignmentId is provided, always fetch complete and updated details from the backend
-    if (assignmentId) {
-      setLoading(true);
+    // If assignmentData is already provided, display it immediately
+    if (assignmentData && assignmentData.title) {
+      setData(assignmentData);
+      setLoading(false);
       setError(null);
-      apiClient
-        .get<{ success: boolean; data: any }>(`/admin/assignments/${assignmentId}`)
-        .then((res) => {
+      // If no assignmentId was given to refresh from server, return
+      if (!assignmentId) return;
+    }
+
+    // If an assignmentId is provided, attempt to fetch fresh and updated details from the backend
+    if (assignmentId) {
+      setLoading(!assignmentData);
+      setError(null);
+      
+      const fetchFromEndpoints = async () => {
+        try {
+          const res = await apiClient.get<{ success: boolean; data: any }>(`/admin/assignments/${assignmentId}`);
           if (res.data?.success && res.data.data) {
             setData({
               ...res.data.data,
               unit_title: res.data.data.unit_title || unitTitle || assignmentData?.unit_title,
             });
-          } else {
-            setError('Failed to load assignment details.');
+            return;
           }
-        })
-        .catch((err) => {
+        } catch (err: any) {
+          // If admin endpoint failed (e.g. college assignment or non-admin role), try college-assignments endpoint
+          try {
+            const colRes = await apiClient.get<{ success: boolean; data: any }>(`/college-assignments/${assignmentId}`);
+            if (colRes.data?.success && colRes.data.data) {
+              setData({
+                ...colRes.data.data,
+                unit_title: colRes.data.data.course || unitTitle || assignmentData?.unit_title,
+              });
+              return;
+            }
+          } catch {}
+          
+          // Try student endpoint fallback
+          try {
+            const stuRes = await apiClient.get<{ success: boolean; data: any }>(`/students/assignments/${assignmentId}`);
+            if (stuRes.data?.success && stuRes.data.data) {
+              setData({
+                ...stuRes.data.data,
+                unit_title: stuRes.data.data.unit_title || unitTitle || assignmentData?.unit_title,
+              });
+              return;
+            }
+          } catch {}
+
+          // If we already had assignmentData, fallback to it silently
+          if (assignmentData && assignmentData.title) {
+            setData(assignmentData);
+            return;
+          }
+
           console.error('[AdminAssignmentPreview] Fetch error:', err);
           setError(err?.response?.data?.message || 'Failed to load assignment details.');
-        })
-        .finally(() => {
+        } finally {
           setLoading(false);
-        });
+        }
+      };
+
+      fetchFromEndpoints();
       return;
     }
 

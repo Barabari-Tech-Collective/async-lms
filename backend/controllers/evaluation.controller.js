@@ -1390,10 +1390,15 @@ exports.getResultsByAssignment = async (req, res) => {
               COALESCE(NULLIF(c.evaluator_type, ''), NULLIF(a.evaluator_type, ''), NULLIF(p.evaluator_type, ''), e.evaluator_type) as assignment_evaluator_type,
               COALESCE(c.title, a.title, p.title) as assignment_name,
               COALESCE(c.rubric, a.rubric, p.rubric) as rubric,
-              COALESCE(c.test_cases, a.test_cases, p.test_cases) as test_cases
+              COALESCE(c.test_cases, a.test_cases, p.test_cases) as test_cases,
+              COALESCE(c.assignment_description, c.description, a.instructions, p.instructions, '') as instructions,
+              COALESCE(a.max_score, p.max_score, 100) as max_score,
+              COALESCE(c.allowed_submission_types, a.allowed_submission_types, p.allowed_submission_types) as allowed_submission_types,
+              COALESCE(u.title, '') as unit_title
        FROM evaluations e
        LEFT JOIN college_assignments c ON (e.college_assignment_id = c.id OR e.assignment_id = c.id)
        LEFT JOIN assignments a ON (e.assignment_id = a.id AND c.id IS NULL)
+       LEFT JOIN units u ON (a.unit_id = u.id)
        LEFT JOIN projects p ON (e.project_id = p.id OR (e.assignment_id = p.id AND c.id IS NULL))
        WHERE e.id::text = $1 OR e.assignment_id::text = $1 OR e.college_assignment_id::text = $1 OR e.project_id::text = $1
        ORDER BY e.created_at DESC LIMIT 1`,
@@ -1688,17 +1693,20 @@ exports.getResultsByAssignment = async (req, res) => {
     let assignmentInfo;
     if (isCollege) {
       assignmentInfo = await pool.query(
-        `SELECT title, evaluator_type, test_cases, rubric FROM college_assignments WHERE id::text = $1`,
+        `SELECT title, evaluator_type, test_cases, rubric, COALESCE(assignment_description, description, '') as instructions, 100 as max_score, allowed_submission_types FROM college_assignments WHERE id::text = $1`,
         [assignmentId]
       );
     } else if (isProject) {
       assignmentInfo = await pool.query(
-        `SELECT title, evaluator_type, test_cases, rubric FROM projects WHERE id::text = $1`,
+        `SELECT title, evaluator_type, test_cases, rubric, instructions, max_score, allowed_submission_types FROM projects WHERE id::text = $1`,
         [assignmentId]
       );
     } else {
       assignmentInfo = await pool.query(
-        `SELECT title, evaluator_type, test_cases, rubric FROM assignments WHERE id::text = $1`,
+        `SELECT a.title, a.evaluator_type, a.test_cases, a.rubric, a.instructions, a.max_score, a.allowed_submission_types, u.title as unit_title 
+         FROM assignments a 
+         LEFT JOIN units u ON a.unit_id = u.id 
+         WHERE a.id::text = $1`,
         [assignmentId]
       );
     }
@@ -1723,6 +1731,12 @@ exports.getResultsByAssignment = async (req, res) => {
         assignment_id: assignmentId,
         assignment_name: assignmentInfo.rows[0]?.title || 'Capstone Project',
         evaluator_type: resolvedFallbackType,
+        instructions: assignmentInfo.rows[0]?.instructions || '',
+        test_cases: assignmentInfo.rows[0]?.test_cases || null,
+        rubric: assignmentInfo.rows[0]?.rubric || null,
+        max_score: assignmentInfo.rows[0]?.max_score || 100,
+        allowed_submission_types: assignmentInfo.rows[0]?.allowed_submission_types || null,
+        unit_title: assignmentInfo.rows[0]?.unit_title || '',
         status: 'not_started',
         is_project: isProject,
       },
@@ -1745,6 +1759,10 @@ exports.getEvaluationResults = async (req, res) => {
               COALESCE(c.test_cases, a.test_cases, p.test_cases) AS test_cases,
               COALESCE(a.title, c.title, p.title) as assignment_name,
               COALESCE(a.rubric, c.rubric, p.rubric) as rubric,
+              COALESCE(c.assignment_description, c.description, a.instructions, p.instructions, '') as instructions,
+              COALESCE(a.max_score, p.max_score, 100) as max_score,
+              COALESCE(c.allowed_submission_types, a.allowed_submission_types, p.allowed_submission_types) as allowed_submission_types,
+              COALESCE(u.title, '') as unit_title,
               COALESCE(t.subject_id, pt.subject_id) as curriculum_subject_id,
               c.college_id as college_assignment_college_id,
               c.course as college_assignment_course,
