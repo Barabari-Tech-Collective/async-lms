@@ -464,7 +464,12 @@ export function AtlanticSidebarTemplate({
                         <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
                           <div>
                             <h3 className='font-bold text-[12.5px] text-slate-900'>{edu.degree}</h3>
-                            <p className='text-[11.5px] text-slate-600'>{edu.institution}</p>
+                            <p className='text-[11.5px] text-slate-600'>
+                              {edu.institution}
+                              {edu.fieldOfStudy && (
+                                <span className='text-slate-500 font-normal'> • {edu.fieldOfStudy}</span>
+                              )}
+                            </p>
                             {edu.score && (
                               <p className='text-[10.5px] font-medium text-slate-500'>
                                 Score: {edu.score}{' '}

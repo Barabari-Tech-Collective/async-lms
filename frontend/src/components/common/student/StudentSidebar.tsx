@@ -18,6 +18,8 @@ import { useAppSelector } from '@/app/hooks';
 import { selectUser } from '@/features/auth/authSelectors';
 import Logo from '../Logo';
 
+import SidebarToggleIcon from '@/components/common/icons/SidebarToggleIcon';
+
 interface StudentSidebarProps {
   isOpen: boolean;
   isMobile?: boolean;
@@ -64,6 +66,7 @@ const menuItems: MenuItem[] = [
 export default function StudentSidebar({
   isOpen,
   isMobile,
+  onToggle,
   onCloseMobile,
 }: StudentSidebarProps) {
   const { pathname } = useLocation();
@@ -83,15 +86,35 @@ export default function StudentSidebar({
       )}
     >
       {/* Brand Header */}
-      <div className='h-16 flex items-center justify-between px-4 sm:px-6 shrink-0 mt-2 border-b border-slate-100/80'>
-        <div className='flex items-center gap-3'>
-          <Logo className='h-10 w-10 sm:h-12 sm:w-12' iconOnly={!isOpen && !isMobile} />
+      <div
+        className={cn(
+          'h-16 flex items-center shrink-0 mt-2 border-b border-slate-100/80 transition-all',
+          isOpen || isMobile
+            ? 'justify-between px-4 sm:px-5'
+            : 'flex-col justify-center gap-1 px-1 py-1'
+        )}
+      >
+        <div className='flex items-center gap-2.5 min-w-0'>
+          <Logo className={isOpen || isMobile ? 'h-9 w-9 sm:h-10 sm:w-10 shrink-0' : 'h-8 w-8 shrink-0'} iconOnly={!isOpen && !isMobile} />
           {(isOpen || isMobile) && (
-            <span className='font-bold text-xl text-blue-800 tracking-tight'>
+            <span className='font-bold text-lg sm:text-xl text-blue-900 tracking-tight truncate'>
               CodeGuru
             </span>
           )}
         </div>
+
+        {/* Toggle inside sidebar for desktop */}
+        {!isMobile && (
+          <button
+            type='button'
+            onClick={onToggle}
+            className='p-1.5 rounded-lg text-slate-500 hover:text-blue-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0'
+            aria-label={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            <SidebarToggleIcon className='w-5 h-5' />
+          </button>
+        )}
 
         {/* Mobile Close Button */}
         {isMobile && onCloseMobile && (

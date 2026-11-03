@@ -18,6 +18,7 @@ const {
   destroyResumeById,
   emptyRecycleBin,
   getAchievements,
+  getCourseCapstones,
   generateResume,
   rewriteContent,
   optimizeWithJD,
@@ -31,6 +32,7 @@ router.get('/resumes/bin', verifyToken, getRecycleBinResumes);
 router.delete('/resumes/bin/empty', verifyToken, emptyRecycleBin);
 router.post('/resume/new', verifyToken, createResume);
 router.get('/resume/achievements', verifyToken, getAchievements);
+router.get('/resume/course-capstones', verifyToken, getCourseCapstones);
 router.post('/resume/generate', verifyToken, generateResume);
 router.post('/resume/rewrite', verifyToken, rewriteContent);
 router.post('/resume/optimize', verifyToken, optimizeWithJD);

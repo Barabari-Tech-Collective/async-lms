@@ -49,7 +49,7 @@ export default function AdminHeader({
       <div className='flex items-center gap-2.5 sm:gap-4 min-w-0 pr-2'>
         <button
           onClick={handleHamburgerClick}
-          className='p-1.5 sm:p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center shrink-0'
+          className='lg:hidden p-1.5 sm:p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center shrink-0'
           aria-label='Toggle navigation menu'
         >
           <Menu size={20} />

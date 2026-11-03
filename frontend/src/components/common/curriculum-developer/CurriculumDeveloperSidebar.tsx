@@ -13,8 +13,11 @@ const menuItems = [
   },
 ];
 
+import SidebarToggleIcon from '@/components/common/icons/SidebarToggleIcon';
+
 export default function CurriculumDeveloperSidebar({
   isOpen,
+  toggle,
   isMobile = false,
   onCloseMobile,
 }: {
@@ -40,15 +43,36 @@ export default function CurriculumDeveloperSidebar({
       )}
     >
       {/* Brand Header */}
-      <div className='h-16 flex items-center justify-between px-5 sm:px-6 shrink-0 mt-2 sm:mt-4'>
+      <div
+        className={cn(
+          'h-16 flex items-center shrink-0 mt-2 sm:mt-4 transition-all',
+          isOpen || isMobile
+            ? 'justify-between px-5 sm:px-6'
+            : 'flex-col justify-center gap-1 px-1 py-1'
+        )}
+      >
         <div className='flex items-center gap-3 min-w-0'>
-          <Logo className='h-10 w-10 sm:h-12 sm:w-12 shrink-0' iconOnly={!isOpen && !isMobile} />
+          <Logo className={isOpen || isMobile ? 'h-10 w-10 sm:h-12 sm:w-12 shrink-0' : 'h-8 w-8 shrink-0'} iconOnly={!isOpen && !isMobile} />
           {(isOpen || isMobile) && (
             <span className='font-bold text-lg sm:text-xl text-white tracking-tight truncate'>
               CodeGuru
             </span>
           )}
         </div>
+
+        {/* Toggle inside sidebar for desktop */}
+        {!isMobile && toggle && (
+          <button
+            type='button'
+            onClick={toggle}
+            className='p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0'
+            aria-label={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            <SidebarToggleIcon className='w-5 h-5 text-white' />
+          </button>
+        )}
+
         {isMobile && onCloseMobile && (
           <button
             onClick={onCloseMobile}

@@ -325,6 +325,8 @@ export interface Subject {
   progress_percent?: number;
   units_count?: number;
   topics_count?: number;
+  assignments_count?: number;
+  capstones_count?: number;
 }
 
 export interface SubjectDetailResponse {

@@ -18,6 +18,26 @@ export interface ResumeProject {
   bullets: string[];
   verificationStatus: VerificationStatus;
   lmsProjectId?: string;
+  isCourseCapstone?: boolean;
+  courseName?: string;
+  score?: number;
+}
+
+export interface CourseCapstoneItem {
+  id: string;
+  title: string;
+  course_name: string;
+  track: 'tech' | 'data' | 'business_finance' | 'sales_marketing' | 'design' | 'product_operations' | 'general';
+  techStack: string[];
+  description: string;
+  bullets: string[];
+  githubUrl?: string;
+  liveDemoUrl?: string;
+  isEnrolled?: boolean;
+  isSubmitted?: boolean;
+  score?: number | null;
+  userSubmissionLink?: string | null;
+  isApproved?: boolean;
 }
 
 export interface ResumeExperience {
@@ -44,6 +64,7 @@ export interface ResumeEducation {
   startYear?: number | string;
   endYear?: number | string;
   level?: EducationLevel;
+  fieldOfStudy?: string;
 }
 
 export interface ResumeCertification {
@@ -514,6 +535,7 @@ export interface ResumeDocument {
   category?: ResumeCategory;
   targetRole?: string;
   templateId?: string;
+  status?: 'draft' | 'completed';
   sectionOrder?: SectionKey[];
   personalInfo: ResumePersonalInfo;
   summary: string;
@@ -535,6 +557,8 @@ export interface ResumeListItem {
   template_id?: string;
   created_at: string;
   updated_at: string;
+  status?: 'draft' | 'completed';
+  is_completed?: boolean;
 }
 
 export interface ResumeRecord {

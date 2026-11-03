@@ -32,23 +32,20 @@ const publicTasks = (tasks) =>
       }))
     : tasks;
 
-const fetchTextFromUrl = (url) =>
-  new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http;
-    client
-      .get(url, (res) => {
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`Failed to fetch markdown: ${res.statusCode}`));
-          return;
-        }
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk.toString('utf8');
-        });
-        res.on('end', () => resolve(data));
-      })
-      .on('error', reject);
+const fetchTextFromUrl = async (url) => {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'User-Agent': 'CodeGuru-LMS/1.0',
+    },
+    redirect: 'follow',
   });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Failed to fetch markdown: ${response.status} ${response.statusText} - ${errorText.slice(0, 300)}`);
+  }
+  return await response.text();
+};
 
 // Minimum number of attempts a student must make on a quiz before answer
 // explanations are revealed — prevents leaking answers to a struggling student.
@@ -176,12 +173,31 @@ exports.getAllPublishedSubjects = async (req, res) => {
       SELECT
         s.id, s.name, s.slug, s.description, s.level,
         (
-          SELECT COUNT(st.id)
+          SELECT COUNT(u.id)::int
+          FROM units u
+          JOIN topics t ON u.topic_id = t.id
+          WHERE t.subject_id = s.id AND u.is_deleted = false
+        ) AS units_count,
+        (
+          SELECT COUNT(st.id)::int
           FROM subtopics st
           JOIN units u ON st.unit_id = u.id
           JOIN topics t ON u.topic_id = t.id
-          WHERE t.subject_id = s.id
-        ) AS total_lessons
+          WHERE t.subject_id = s.id AND st.is_deleted = false
+        ) AS total_lessons,
+        (
+          SELECT COUNT(a.id)::int
+          FROM assignments a
+          JOIN units u ON a.unit_id = u.id
+          JOIN topics t ON u.topic_id = t.id
+          WHERE t.subject_id = s.id AND a.is_deleted = false
+        ) AS assignments_count,
+        (
+          SELECT COUNT(p.id)::int
+          FROM projects p
+          JOIN topics t ON p.topic_id = t.id
+          WHERE t.subject_id = s.id AND p.is_deleted = false
+        ) AS capstones_count
       FROM subjects s
       WHERE s.is_published = true AND s.is_deleted = false
       ORDER BY s.order_index ASC
@@ -669,8 +685,18 @@ exports.getSubtopicContent = async (req, res) => {
         if (markdownRow.markdown_path.startsWith('ai-generated:')) {
           markdownContent = markdownRow.markdown_path.slice('ai-generated:'.length);
         } else if (markdownRow.markdown_path.startsWith('http')) {
-          const fetchUrl = await presignS3Url(markdownRow.markdown_path);
-          markdownContent = await fetchTextFromUrl(fetchUrl);
+          try {
+            // First attempt: direct fetch (instant, avoids invalid AWS access key errors on public buckets)
+            markdownContent = await fetchTextFromUrl(markdownRow.markdown_path);
+          } catch (directErr) {
+            // Second attempt: fallback to presigning with S3 if direct fetch was denied (private S3 objects)
+            try {
+              const fetchUrl = await presignS3Url(markdownRow.markdown_path);
+              markdownContent = await fetchTextFromUrl(fetchUrl);
+            } catch (presignErr) {
+              throw new Error(`Failed to load markdown: direct (${directErr.message}), presigned (${presignErr.message})`);
+            }
+          }
         } else {
           const relativePath = markdownRow.markdown_path.replace(/^\/+/, '');
           const filePath = path.join(__dirname, '..', 'data', relativePath);
@@ -1226,11 +1252,15 @@ exports.getMarkdownContent = async (req, res) => {
       content = markdownPathURL.slice('ai-generated:'.length);
     } else if (markdownPathURL.startsWith('http://') || markdownPathURL.startsWith('https://')) {
       try {
-        const fetchUrl = await presignS3Url(markdownPathURL);
-        content = await fetchTextFromUrl(fetchUrl);
-      } catch (fetchErr) {
-        console.warn('Could not fetch remote markdown from URL:', markdownPathURL, fetchErr.message);
-        content = `# Lesson Content\n\n> **Note:** The remote content file at \`${markdownPathURL.split('/').pop()}\` could not be fetched from remote storage (${fetchErr.message}).\n\nPlease check that AWS S3 credentials or internet connectivity are properly configured.`;
+        content = await fetchTextFromUrl(markdownPathURL);
+      } catch (directErr) {
+        try {
+          const fetchUrl = await presignS3Url(markdownPathURL);
+          content = await fetchTextFromUrl(fetchUrl);
+        } catch (fetchErr) {
+          console.warn('Could not fetch remote markdown from URL:', markdownPathURL, fetchErr.message);
+          content = `# Lesson Content\n\n> **Note:** The remote content file at \`${markdownPathURL.split('/').pop()}\` could not be fetched from remote storage (${fetchErr.message}).\n\nPlease check that AWS S3 credentials or internet connectivity are properly configured.`;
+        }
       }
     } else {
       const relativePath = markdownPathURL.replace(/^\/+/, '');

@@ -337,6 +337,9 @@ export function MercuryTemplate({
                           }
                           className='text-[12px] text-slate-600'
                         />
+                        {edu.fieldOfStudy && (
+                          <span className='text-slate-500 font-normal'> • {edu.fieldOfStudy}</span>
+                        )}
                       </p>
                       {edu.score && (
                         <p className='text-[11.5px] font-semibold text-slate-700 mt-0.5'>

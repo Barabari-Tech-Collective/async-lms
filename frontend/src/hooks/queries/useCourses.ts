@@ -89,8 +89,13 @@ export interface FacilitatorCourse {
   description: string | null;
   level: string | null;
   order_index: number;
-  topic_count: number;
-  lesson_count: number;
+  topic_count?: number;
+  total_topics?: number;
+  lesson_count?: number;
+  total_lessons?: number;
+  units_count?: number;
+  assignments_count?: number;
+  capstones_count?: number;
 }
 
 export function useFacilitatorCourses() {

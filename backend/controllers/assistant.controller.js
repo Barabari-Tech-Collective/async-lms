@@ -985,6 +985,256 @@ exports.getAchievements = async (req, res) => {
   }
 };
 
+// ── GET /api/assistant/resume/course-capstones (LMS Course Capstones with Track/Role Matching) ──
+exports.getCourseCapstones = async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    // 1. Get user enrolled subjects and submissions
+    const userEnrolled = await pool.query(
+      `SELECT s.id, s.name, s.slug, us.progress_percent, us.is_completed
+       FROM public.user_subjects us
+       JOIN public.subjects s ON s.id = us.subject_id
+       WHERE us.user_id = $1`,
+      [userId]
+    );
+    const enrolledSubjectNames = new Set(userEnrolled.rows.map((r) => r.name.toLowerCase()));
+
+    const submissionsResult = await pool.query(
+      `SELECT p.id as project_id, p.title, p.instructions, ps.score, ps.submission_link, s.name as subject_name,
+              ps.is_approved, ps.submitted_at
+       FROM public.project_submissions ps
+       JOIN public.projects p ON p.id = ps.project_id
+       JOIN public.topics t ON p.topic_id = t.id
+       JOIN public.subjects s ON t.subject_id = s.id
+       WHERE ps.user_id = $1`,
+      [userId]
+    );
+    const submissionsMap = new Map();
+    submissionsResult.rows.forEach((s) => {
+      submissionsMap.set(String(s.project_id), s);
+      submissionsMap.set(s.title.toLowerCase().trim(), s);
+    });
+
+    // 2. Query any existing database projects
+    let dbProjects = [];
+    try {
+      const dbProjRes = await pool.query(
+        `SELECT p.id, p.title, p.instructions, p.evaluator_type,
+                s.name as course_name, s.slug as subject_slug
+         FROM public.projects p
+         JOIN public.topics t ON p.topic_id = t.id
+         JOIN public.subjects s ON t.subject_id = s.id
+         WHERE (p.is_deleted = false OR p.is_deleted IS NULL)
+         ORDER BY s.order_index ASC, p.id ASC`
+      );
+      dbProjects = dbProjRes.rows || [];
+    } catch (err) {
+      console.error('Error querying db projects:', err);
+    }
+
+    // 3. Helper to determine track and tech stack from CodeGuru course name
+    const getTrackAndStack = (courseName = '', title = '') => {
+      const c = courseName.toLowerCase();
+      const t = title.toLowerCase();
+
+      if (c.includes('excel') || c.includes('data') || t.includes('excel')) {
+        return {
+          track: 'data',
+          techStack: ['Advanced Excel', 'Pivot Tables', 'Data Cleaning', 'VLOOKUP / XLOOKUP', 'KPI Dashboards'],
+        };
+      }
+      if (c.includes('java') || t.includes('java')) {
+        return {
+          track: 'tech',
+          techStack: ['Java', 'OOP', 'Data Structures', 'Collections Framework', 'JDBC'],
+        };
+      }
+      if (c.includes('frontend')) {
+        return {
+          track: 'tech',
+          techStack: ['React', 'TypeScript', 'Tailwind CSS', 'Component Architecture', 'Vite'],
+        };
+      }
+      if (c.includes('full stack') || c.includes('fullstack')) {
+        return {
+          track: 'tech',
+          techStack: ['React', 'Node.js', 'Express', 'PostgreSQL', 'REST APIs', 'Git'],
+        };
+      }
+      // General web dev
+      return {
+        track: 'tech',
+        techStack: ['HTML5', 'CSS3', 'JavaScript', 'Responsive UI', 'DOM Manipulation'],
+      };
+    };
+
+    // 4. CodeGuru Real DB Projects (Primary Source)
+    const allCapstones = [];
+    const addedTitles = new Set();
+
+    for (const dbP of dbProjects) {
+      const titleLower = dbP.title.trim().toLowerCase();
+      if (!addedTitles.has(titleLower)) {
+        addedTitles.add(titleLower);
+        const { track, techStack } = getTrackAndStack(dbP.course_name, dbP.title);
+
+        const cleanDesc = dbP.instructions
+          ? String(dbP.instructions).replace(/<[^>]*>?/gm, '').slice(0, 220)
+          : `Official verified capstone project for CodeGuru's ${dbP.course_name} curriculum.`;
+
+        allCapstones.push({
+          id: `db_proj_${dbP.id}`,
+          title: dbP.title,
+          course_name: dbP.course_name,
+          track,
+          techStack,
+          description: cleanDesc,
+          bullets: [
+            `Engineered complete solution for ${dbP.title} adhering to CodeGuru evaluation guidelines.`,
+            `Implemented core functionality utilizing ${techStack.slice(0, 3).join(', ')} with clean, modular code.`,
+            `Validated end-to-end user workflows and test cases to ensure robust error handling and performance.`,
+          ],
+          githubUrl: '',
+          liveDemoUrl: '',
+          isDbProject: true,
+        });
+      }
+    }
+
+    // 5. CodeGuru Standard Capstone Catalog (Exclusively for CodeGuru LMS Courses)
+    const codeguruStandardCapstones = [
+      {
+        id: 'capstone_fs_ecommerce',
+        title: 'Full-Stack E-Commerce & Inventory Management Platform',
+        course_name: 'Full Stack Web Development',
+        track: 'tech',
+        techStack: ['React', 'Node.js', 'Express', 'PostgreSQL', 'Stripe', 'Git'],
+        description: 'Engineered an end-to-end full-stack e-commerce web application featuring dynamic catalog filtering, secure user authentication with JWT, Stripe checkout integration, and inventory management.',
+        bullets: [
+          'Engineered full-stack responsive web platform using React and Node.js with secure JWT auth and Stripe checkout integration.',
+          'Built optimized PostgreSQL queries with indexing, reducing search latency by 40% across 10,000+ SKU records.',
+          'Developed modular RESTful API endpoints with structured request validation and error handling.',
+        ],
+        githubUrl: 'https://github.com/barabari-tech/ecommerce-capstone',
+        liveDemoUrl: 'https://ecommerce.codeguru.app',
+      },
+      {
+        id: 'capstone_digital_clock_dom',
+        title: 'Digital Clock & Interactive DOM Application',
+        course_name: 'Full Stack Web Development',
+        track: 'tech',
+        techStack: ['JavaScript', 'HTML5', 'CSS3', 'DOM APIs', 'Event Loop'],
+        description: 'Built a real-time responsive digital clock and timezone converter utilizing vanilla JavaScript, CSS animations, and precise interval-driven DOM synchronization.',
+        bullets: [
+          'Implemented real-time digital clock engine utilizing JavaScript Date APIs and requestAnimationFrame for smooth UI rendering.',
+          'Designed responsive glassmorphism interface with dark/light mode toggle and custom sound alarms.',
+          'Optimized DOM update cycles to eliminate layout reflows and minimize memory consumption.',
+        ],
+        githubUrl: 'https://github.com/barabari-tech/digital-clock-project',
+        liveDemoUrl: 'https://clock.codeguru.app',
+      },
+      {
+        id: 'capstone_frontend_spa',
+        title: 'Modern Single-Page Application & Component System',
+        course_name: 'Frontend Development',
+        track: 'tech',
+        techStack: ['React', 'TypeScript', 'Tailwind CSS', 'Zustand', 'Vite'],
+        description: 'Architected a modular single-page dashboard featuring reusable component design systems, client-side routing, and global state management.',
+        bullets: [
+          'Designed 20+ reusable React UI components with TypeScript type safety and accessible ARIA attributes.',
+          'Integrated Zustand for centralized state management, eliminating prop drilling across nested component trees.',
+          'Configured Vite build optimizations and code splitting, achieving 98+ Google Lighthouse performance score.',
+        ],
+        githubUrl: 'https://github.com/barabari-tech/frontend-component-system',
+        liveDemoUrl: 'https://frontend-showcase.codeguru.app',
+      },
+      {
+        id: 'capstone_web_responsive',
+        title: 'Responsive Multi-Page Web Platform & Portfolio Engine',
+        course_name: 'Web Development',
+        track: 'tech',
+        techStack: ['HTML5', 'CSS3', 'JavaScript', 'Flexbox & CSS Grid', 'Mobile-First'],
+        description: 'Developed an accessible, mobile-first responsive web portal with custom CSS layout grids, interactive navigation drawers, and cross-browser compatibility.',
+        bullets: [
+          'Constructed semantic HTML5 layout with mobile-first CSS Flexbox and Grid layouts ensuring 100% responsiveness.',
+          'Implemented smooth scroll animations and dynamic modal overlays using vanilla JavaScript event listeners.',
+          'Tested and validated cross-browser rendering fidelity across Chrome, Firefox, Safari, and Edge.',
+        ],
+        githubUrl: 'https://github.com/barabari-tech/responsive-web-capstone',
+        liveDemoUrl: 'https://web-showcase.codeguru.app',
+      },
+      {
+        id: 'capstone_java_oop',
+        title: 'Core Java Enterprise Banking & Account Management System',
+        course_name: 'Java Programing',
+        track: 'tech',
+        techStack: ['Java', 'OOP Principles', 'Collections Framework', 'Exception Handling', 'File I/O'],
+        description: 'Implemented a robust Java console and transaction processing system applying core Object-Oriented Programming (encapsulation, inheritance, polymorphism, abstraction) and thread-safe operations.',
+        bullets: [
+          'Designed modular domain architecture leveraging OOP design patterns and custom exception hierarchies.',
+          'Utilized Java Collections Framework (ArrayList, HashMap) to manage in-memory user ledgers with O(1) account lookups.',
+          'Implemented persistent file I/O serialization to guarantee transactional data durability across application sessions.',
+        ],
+        githubUrl: 'https://github.com/barabari-tech/java-banking-capstone',
+        liveDemoUrl: 'https://github.com/barabari-tech/java-banking-capstone',
+      },
+      {
+        id: 'capstone_excel_analytics',
+        title: 'Business Sales Analytics & Executive KPI Dashboard',
+        course_name: 'Excel For Data Analysis',
+        track: 'data',
+        techStack: ['Advanced Excel', 'Pivot Tables & Slicers', 'Power Query', 'XLOOKUP / VLOOKUP', 'Data Visualization'],
+        description: 'Built a dynamic commercial sales and operations dashboard in Microsoft Excel, processing multi-year transaction tables, automated data cleaning pipelines, and interactive executive reporting.',
+        bullets: [
+          'Engineered automated ETL workflows using Excel Power Query to ingest, clean, and merge 50,000+ transactional records.',
+          'Constructed dynamic KPI summary cards and cross-filtering Pivot Tables using advanced formulas (XLOOKUP, SUMIFS, INDEX/MATCH).',
+          'Designed executive presentation dashboard with interactive timeline slicers and trend charts for operational insights.',
+        ],
+        githubUrl: '',
+        liveDemoUrl: 'https://docs.google.com/spreadsheets/d/codeguru-excel-dashboard',
+      },
+    ];
+
+    // Append standard CodeGuru capstones only if not already present from DB
+    for (const std of codeguruStandardCapstones) {
+      if (!addedTitles.has(std.title.trim().toLowerCase())) {
+        addedTitles.add(std.title.trim().toLowerCase());
+        allCapstones.push(std);
+      }
+    }
+
+    // 6. Enrich with student's genuine enrollment and submission statuses
+    const enriched = allCapstones.map((cap) => {
+      const match =
+        submissionsMap.get(String(cap.id)) ||
+        submissionsMap.get(cap.title.toLowerCase().trim()) ||
+        submissionsMap.get(String(cap.id).replace('db_proj_', ''));
+
+      const isEnrolled =
+        enrolledSubjectNames.has(cap.course_name.toLowerCase()) ||
+        enrolledSubjectNames.has(String(cap.track).toLowerCase());
+
+      return {
+        ...cap,
+        isEnrolled,
+        isSubmitted: Boolean(match),
+        score: match?.score !== null && match?.score !== undefined ? Number(match.score) : null,
+        userSubmissionLink: match?.submission_link || null,
+        isApproved: match?.is_approved || false,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: enriched,
+    });
+  } catch (err) {
+    console.error('Error fetching course capstones:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch course capstones.' });
+  }
+};
+
 // ── POST /api/assistant/resume/generate (Grounded AI Initial Generation) ──────
 exports.generateResume = async (req, res) => {
   const userId = req.user.id;

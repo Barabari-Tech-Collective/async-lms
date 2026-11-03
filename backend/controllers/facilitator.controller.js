@@ -99,12 +99,28 @@ exports.getFacilitatorCourses = async (req, res) => {
 
     const query = `
       SELECT s.id, s.name, s.slug, s.description, s.level, s.order_index,
+             (SELECT COUNT(u.id)::int
+              FROM units u
+              JOIN topics t ON u.topic_id = t.id
+              WHERE t.subject_id = s.id AND u.is_deleted = false AND t.is_deleted = false
+             ) AS units_count,
              (SELECT COUNT(st.id)::int
               FROM subtopics st
               JOIN units u ON st.unit_id = u.id
               JOIN topics t ON u.topic_id = t.id
               WHERE t.subject_id = s.id AND st.is_deleted = false AND u.is_deleted = false AND t.is_deleted = false
              ) AS total_lessons,
+             (SELECT COUNT(a.id)::int
+              FROM assignments a
+              JOIN units u ON a.unit_id = u.id
+              JOIN topics t ON u.topic_id = t.id
+              WHERE t.subject_id = s.id AND a.is_deleted = false AND u.is_deleted = false AND t.is_deleted = false
+             ) AS assignments_count,
+             (SELECT COUNT(p.id)::int
+              FROM projects p
+              JOIN topics t ON p.topic_id = t.id
+              WHERE t.subject_id = s.id AND p.is_deleted = false AND t.is_deleted = false
+             ) AS capstones_count,
              (SELECT COUNT(DISTINCT t.id)::int
               FROM topics t
               WHERE t.subject_id = s.id AND t.is_deleted = false

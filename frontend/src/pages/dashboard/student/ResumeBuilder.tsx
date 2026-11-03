@@ -57,6 +57,9 @@ import { TemplateModal } from './resume/templates/TemplateModal';
 import { getTemplateMeta, RESUME_TEMPLATES } from './resume/templateRegistry';
 import ResumeRecycleBinModal from './resume/ResumeRecycleBinModal';
 import type { RecycledResumeItem } from './resume/ResumeRecycleBinModal';
+import { ResumeDashboardView } from './resume/ResumeDashboardView';
+import { ResumeStepperEditor } from './resume/ResumeStepperEditor';
+import { ResumePreviewView } from './resume/ResumePreviewView';
 
 // ── Match Score Bar ───────────────────────────────────────────────────────────
 function ScoreBar({
@@ -214,6 +217,10 @@ export default function ResumeBuilder() {
   // Multi-Resume Management State
   const [showResumeDropdown, setShowResumeDropdown] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [viewMode, setViewMode] = useState<'dashboard' | 'editor' | 'preview'>('dashboard');
+  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [activeFilter, setActiveFilter] = useState<'drafted' | 'completed'>('drafted');
+
   const [titleInput, setTitleInput] = useState('');
   const [showNewResumeModal, setShowNewResumeModal] = useState(false);
   const [newResumeTitle, setNewResumeTitle] = useState('');
@@ -946,6 +953,97 @@ export default function ResumeBuilder() {
     }
   };
 
+  const handleCreateFromTemplate = async (templateId: string = 'modern-mercury') => {
+    const chosenCat = 'general';
+    const catCfg = getCategoryConfig(chosenCat);
+    const fresh = createEmptyResume(user, chosenCat, catCfg.defaultRole);
+    if (templateId !== 'blank') {
+      fresh.templateId = templateId;
+    }
+    (fresh as any).status = 'draft';
+
+    setResumeDoc(fresh);
+    resumeDocRef.current = fresh;
+    setCurrentStep(1);
+    setViewMode('editor');
+
+    try {
+      setSaveStatus('saving');
+      const titleToUse =
+        resumesList.length === 0 ? 'Primary Resume' : `Resume ${resumesList.length + 1}`;
+      const res = await apiClient.post('/assistant/resume/new', {
+        title: titleToUse,
+        document: fresh,
+        is_primary: resumesList.length === 0,
+      });
+      if (res.data?.success && res.data.data) {
+        const rec = res.data.data as ResumeRecord;
+        const newListItem: ResumeListItem = {
+          id: rec.id,
+          title: rec.title,
+          category: rec.document?.category || chosenCat,
+          target_role: rec.document?.targetRole,
+          version: rec.version,
+          is_primary: rec.is_primary || false,
+          template_id: rec.document?.templateId,
+          created_at: rec.created_at || new Date().toISOString(),
+          updated_at: rec.updated_at,
+        };
+        setResumesList((prev) => [newListItem, ...prev]);
+        setResumeRecord(rec);
+        resumeRecordRef.current = rec;
+        setTitleInput(rec.title);
+        setSaveStatus('saved');
+        setLastSavedAt(new Date(rec.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
+    } catch (err) {
+      console.error('Error creating new draft resume:', err);
+    }
+  };
+
+  const handleSelectResumeFromDashboard = async (
+    id: string,
+    mode: 'preview' | 'editor' = 'preview'
+  ) => {
+    await handleSelectResume(id);
+    setViewMode(mode);
+    if (mode === 'editor') {
+      setCurrentStep(1);
+    }
+  };
+
+  const handleSaveCompleted = async () => {
+    if (!resumeRecord?.id) return;
+    const updatedDoc = {
+      ...resumeDoc,
+      status: 'completed',
+    };
+    setResumeDoc(updatedDoc);
+    resumeDocRef.current = updatedDoc;
+
+    setResumesList((prev) =>
+      prev.map((r) =>
+        r.id === resumeRecord.id
+          ? ({ ...r, status: 'completed', is_completed: true } as any)
+          : r
+      )
+    );
+
+    try {
+      setSaveStatus('saving');
+      await apiClient.put(`/assistant/resume/${resumeRecord.id}`, {
+        title: resumeRecord.title,
+        document: updatedDoc,
+        expectedVersion: resumeRecord.version,
+      });
+      setSaveStatus('saved');
+      toast.success('Resume saved as Completed!');
+      setViewMode('dashboard');
+    } catch (err) {
+      toast.error('Failed to update resume status.');
+    }
+  };
+
   // Job Match Analysis
   const handleAnalyzeJD = async () => {
     if (!jdText.trim()) return toast.error('Paste a job description first.');
@@ -974,7 +1072,10 @@ export default function ResumeBuilder() {
   }, [resumeDoc.personalInfo?.fullName, resumeDoc.targetRole, resumeRecord?.title, user?.full_name]);
 
   const handlePrintPDF = useCallback(() => {
-    if (!previewRef.current) return;
+    const targetElement =
+      previewRef.current ||
+      (document.querySelector('[data-resume-print-root]') as HTMLElement);
+    if (!targetElement) return;
 
     const style = document.createElement('style');
     style.id = 'resume-print-style';
@@ -1070,7 +1171,7 @@ export default function ResumeBuilder() {
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-resume-print-root', '');
     wrapper.style.cssText = 'display:none';
-    const clone = previewRef.current.cloneNode(true) as HTMLElement;
+    const clone = targetElement.cloneNode(true) as HTMLElement;
 
     // Strip interactive buttons, wands, and title attributes
     clone.querySelectorAll('.print\\:hidden, button, [title="Change profile photo"]').forEach((el) => {
@@ -1094,7 +1195,9 @@ export default function ResumeBuilder() {
 
   // Direct File Download as .pdf
   const handleDownloadPDF = useCallback(async () => {
-    const previewEl = previewRef.current;
+    const previewEl =
+      previewRef.current ||
+      (document.querySelector('[data-resume-print-root]') as HTMLElement);
     if (!previewEl || exporting) return;
     setExporting(true);
     const toastId = toast.loading('Preparing downloadable PDF...');
@@ -1212,8 +1315,64 @@ export default function ResumeBuilder() {
     );
   }
 
-  // ── EMPTY STATE: When a student has not yet created any resume ───────────────
-  if (!hasResume) {
+  return (
+    <div className='w-full min-h-screen bg-[#F1F4F9] text-slate-900'>
+      {viewMode === 'dashboard' && (
+        <ResumeDashboardView
+          resumesList={resumesList}
+          activeResumeRecordId={resumeRecord?.id}
+          onSelectResume={handleSelectResumeFromDashboard}
+          onCreateNew={handleCreateFromTemplate}
+          onDeleteResume={(id, e) => handleDeleteResume(id, e)}
+          onDuplicateResume={(id, e) => handleDuplicateResume(id, e)}
+          onSetPrimary={(id, e) => handleSetPrimary(id, e)}
+          openRecycleBin={() => setShowRecycleBinModal(true)}
+          recycleBinCount={recycleBinCount}
+          activeFilter={activeFilter}
+          setActiveFilter={setActiveFilter}
+          activeResumeDoc={resumeDoc}
+        />
+      )}
+
+      {viewMode === 'editor' && (
+        <ResumeStepperEditor
+          resumeDoc={resumeDoc}
+          onUpdate={handleUpdateDocument}
+          currentStep={currentStep}
+          setCurrentStep={setCurrentStep}
+          onBackToDashboard={() => setViewMode('dashboard')}
+          onGoToPreview={() => setViewMode('preview')}
+          sections={sections}
+          user={user}
+        />
+      )}
+
+      {viewMode === 'preview' && (
+        <ResumePreviewView
+          resumeDoc={resumeDoc}
+          onUpdate={handleUpdateDocument}
+          onBackToEditor={() => setViewMode('editor')}
+          onSaveCompleted={handleSaveCompleted}
+          onDownloadPdf={handleDownloadPDF}
+          onPolishWithAI={handlePolishCurrentResumeWithAI}
+          polishingWithAI={polishingWithAI}
+          downloadingPdf={exporting}
+          sections={sections}
+        />
+      )}
+
+      {/* Resume Recycle Bin Modal */}
+      <ResumeRecycleBinModal
+        open={showRecycleBinModal}
+        onClose={() => setShowRecycleBinModal(false)}
+        onRestored={handleRestoredFromModal}
+        onListUpdated={handleBinListUpdated}
+      />
+    </div>
+  );
+
+  // ── LEGACY WORKSPACE (Preserved below) ──────────────────────────────────────
+  if (Boolean(false)) {
     const emptyCatConfig = getCategoryConfig(selectedCategory);
 
     return (
