@@ -368,7 +368,7 @@ exports.runEvaluation = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Assignment or Project ID is required' });
   }
 
-  const client = await pool.connect();
+  let client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -3114,7 +3114,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     return res.status(400).json({ success: false, message: 'an array of submissionIds is required' });
   }
 
-  const client = await pool.connect();
+  let client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -3816,7 +3816,7 @@ exports.stopEvaluation = async (req, res) => {
   const { evaluationId, assignmentId } = req.body;
   const id = req.params.id || evaluationId;
 
-  const client = await pool.connect();
+  let client = await pool.connect();
   try {
     await client.query('BEGIN');
 
