@@ -178,6 +178,93 @@ async function getSqlDownloadUrl(sub) {
   return link;
 }
 
+function isAllowedVisualUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const trimmed = urlStr.trim();
+    if (!trimmed) return false;
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('drive.google.com') || host.includes('docs.google.com')) return true;
+    if (['onedrive.live.com', '1drv.ms', 'sharepoint.com', 'dropbox.com'].some(h => host === h || host.endsWith('.' + h))) return true;
+    if (isAllowedGitUrl(trimmed)) return true;
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.endsWith('.zip') || pathLower.endsWith('.tar.gz') || pathLower.endsWith('.html') || pathLower.endsWith('.htm')) return true;
+    if (host.includes('amazonaws.com') || host.includes('s3') || host.includes('storage.googleapis.com') || host.includes('blob.core.windows.net')) return true;
+    if (host.includes('vercel.app') || host.includes('netlify.app') || host.includes('onrender.com') || host.includes('github.io')) return true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getVisualDownloadUrl(sub) {
+  if (sub?.submission_file_url) {
+    return await presignS3Url(sub.submission_file_url);
+  }
+  const link = (sub?.submission_link || '').trim();
+  if (!link) return null;
+  if (link.includes('.amazonaws.com/')) {
+    return await presignS3Url(link);
+  }
+  if (link.includes('drive.google.com') || link.includes('docs.google.com')) {
+    const match = link.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                  link.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+                  link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
+  }
+  if (link.includes('github.com') && !link.includes('/raw/') && link.includes('/blob/')) {
+    return link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  }
+  return link;
+}
+
+function isAllowedPythonUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const trimmed = urlStr.trim();
+    if (!trimmed) return false;
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('drive.google.com') || host.includes('docs.google.com')) return true;
+    if (['onedrive.live.com', '1drv.ms', 'sharepoint.com', 'dropbox.com'].some(h => host === h || host.endsWith('.' + h))) return true;
+    if (isAllowedGitUrl(trimmed)) return true;
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.endsWith('.py') || pathLower.endsWith('.zip') || pathLower.endsWith('.tar.gz') || pathLower.endsWith('.txt')) return true;
+    if (host.includes('amazonaws.com') || host.includes('s3') || host.includes('storage.googleapis.com') || host.includes('blob.core.windows.net')) return true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getPythonDownloadUrl(sub) {
+  if (sub?.submission_file_url) {
+    return await presignS3Url(sub.submission_file_url);
+  }
+  const link = (sub?.submission_link || '').trim();
+  if (!link) return null;
+  if (link.includes('.amazonaws.com/')) {
+    return await presignS3Url(link);
+  }
+  if (link.includes('drive.google.com') || link.includes('docs.google.com')) {
+    const match = link.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                  link.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+                  link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
+  }
+  if (link.includes('github.com') && !link.includes('/raw/') && link.includes('/blob/')) {
+    return link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  }
+  return link;
+}
+
 function resolveEvaluatorType(evaluation, assignment = null) {
   let type = (
     assignment?.evaluator_type ||
@@ -539,6 +626,8 @@ exports.runEvaluation = async (req, res) => {
     try {
       const isExcelEvaluation = (evaluatorType === 'EXCEL' || evaluatorType === 'excel');
       const isSqlEvaluation = (evaluatorType === 'SQL' || evaluatorType === 'sql');
+      const isVisualEvaluation = (evaluatorType === 'VISUAL' || evaluatorType === 'visual');
+      const isPythonEvaluation = (evaluatorType === 'PYTHON' || evaluatorType === 'python');
 
       // Filter submissions based on evaluator requirements
       let validSubmissions = [];
@@ -558,6 +647,20 @@ exports.runEvaluation = async (req, res) => {
         );
         invalidSubmissions = submissions.filter(
           (s) => !(s.sql_text || s.sqlText || s.submission_file_url || (s.submission_link && isAllowedSqlUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        );
+      } else if (isVisualEvaluation) {
+        validSubmissions = submissions.filter(
+          (s) => !!(s.submission_file_url || (s.submission_link && isAllowedVisualUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        );
+        invalidSubmissions = submissions.filter(
+          (s) => !(s.submission_file_url || (s.submission_link && isAllowedVisualUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        );
+      } else if (isPythonEvaluation) {
+        validSubmissions = submissions.filter(
+          (s) => !!(s.code || s.python_text || s.submission_file_url || (s.submission_link && isAllowedPythonUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        );
+        invalidSubmissions = submissions.filter(
+          (s) => !(s.code || s.python_text || s.submission_file_url || (s.submission_link && isAllowedPythonUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
         );
       } else {
         validSubmissions = submissions.filter(
@@ -617,6 +720,10 @@ exports.runEvaluation = async (req, res) => {
             ? 'No spreadsheet URL or file provided by student.'
             : isSqlEvaluation
             ? 'No SQL query, file, Google Drive link, or repository provided by student.'
+            : isVisualEvaluation
+            ? 'No HTML/CSS/JS file, Google Drive link, or repository provided by student.'
+            : isPythonEvaluation
+            ? 'No Python script, file, Google Drive link, or repository provided by student.'
             : 'No repository URL provided by student.';
           if (invalid.submission_link) {
             try {
@@ -625,12 +732,20 @@ exports.runEvaluation = async (req, res) => {
                 ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
                 : isSqlEvaluation
                 ? `Invalid SQL submission source (${h}). Submissions must be a .sql file, Google Drive share link, or git repository.`
+                : isVisualEvaluation
+                ? `Invalid visual submission source (${h}). Submissions must be a zip archive, Google Drive share link, or git repository.`
+                : isPythonEvaluation
+                ? `Invalid Python submission source (${h}). Submissions must be a .py file, Google Drive share link, or git repository.`
                 : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
             } catch {
               reason = isExcelEvaluation
                 ? 'Invalid spreadsheet URL format.'
                 : isSqlEvaluation
                 ? 'Invalid SQL URL format.'
+                : isVisualEvaluation
+                ? 'Invalid visual submission URL format.'
+                : isPythonEvaluation
+                ? 'Invalid Python submission URL format.'
                 : 'Invalid repository URL format. Must be a valid HTTP/HTTPS git repository URL.';
             }
           }
@@ -676,6 +791,28 @@ exports.runEvaluation = async (req, res) => {
           'No valid submissions with repository links found to evaluate.',
         );
       }
+
+      // Pre-insert validSubmissions with pending status so they are visible immediately
+      for (const valid of validSubmissions) {
+        await client.query(
+          `INSERT INTO evaluation_results
+           (evaluation_id, submission_id, student_id, student_name, status, marks, feedback)
+           VALUES ($1, $2, $3, $4, 'pending', 0, '{}'::jsonb)
+           ON CONFLICT (evaluation_id, submission_id) DO UPDATE
+           SET status = 'pending', marks = 0`,
+          [
+            evaluation.id,
+            valid.submission_id || valid.id,
+            valid.user_id || valid.student_id,
+            valid.student_name,
+          ],
+        );
+      }
+
+      // COMMIT database transaction and release connection BEFORE making external network calls!
+      await client.query('COMMIT');
+      client.release();
+      client = null;
 
       // Create payloads based on evaluator type capabilities
       // visual, javascript, and excel accept batch arrays. backend and react accept singles.
@@ -842,12 +979,25 @@ exports.runEvaluation = async (req, res) => {
         const payload = {
           type: payloadType,
           submissions: await Promise.all(
-            validSubmissions.map(async (s) => ({
-              submissionId: s.submission_id || s.id,
-              repoUrl: s.submission_file_url ? await presignS3Url(s.submission_file_url) : (s.submission_link ? await presignS3Url(s.submission_link) : null),
-              studentName: s.student_name,
-              studentId: s.user_id || s.student_id,
-            }))
+            validSubmissions.map(async (s) => {
+              let targetUrl = null;
+              if (isVisualEvaluation) {
+                targetUrl = await getVisualDownloadUrl(s);
+              } else if (isPythonEvaluation) {
+                targetUrl = await getPythonDownloadUrl(s);
+              } else {
+                targetUrl = s.submission_file_url ? await presignS3Url(s.submission_file_url) : (s.submission_link ? await presignS3Url(s.submission_link) : null);
+              }
+              return {
+                submissionId: s.submission_id || s.id,
+                repoUrl: targetUrl,
+                fileUrl: targetUrl,
+                code: s.code || s.python_text || (s.ideFiles && s.ideFiles.find((f) => (f.name || '').endsWith('.py') || (f.name || '').endsWith('.js'))?.content),
+                ideFiles: s.ideFiles,
+                studentName: s.student_name,
+                studentId: s.user_id || s.student_id,
+              };
+            })
           ),
           ...jsConfig,
           rubricText: assignment.rubric
@@ -946,9 +1096,9 @@ exports.runEvaluation = async (req, res) => {
 
       console.log(`Queued ${jobIdsAndLinks.length} jobs via API`);
 
-      // Save pending jobs in database
+      // Save pending jobs in database (using pool directly — no transaction locks held!)
       for (const j of jobIdsAndLinks) {
-        await client.query(
+        await pool.query(
           `INSERT INTO evaluation_results
            (evaluation_id, submission_id, student_id, student_name, job_id, status, status_url)
            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
@@ -965,6 +1115,12 @@ exports.runEvaluation = async (req, res) => {
         );
       }
     } catch (apiError) {
+      if (evaluation?.id) {
+        await pool.query(
+          `UPDATE evaluations SET status = 'failed' WHERE id = $1`,
+          [evaluation.id]
+        ).catch(() => {});
+      }
       if (apiError.response) {
         const errorMsg =
           apiError.response.data?.error || apiError.response.statusText;
@@ -981,20 +1137,22 @@ exports.runEvaluation = async (req, res) => {
       }
     }
 
-    await client.query('COMMIT');
-
     return res.json({
       success: true,
       evaluationId: evaluation.id,
       isMock,
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     console.log('Evaluation Error:', error);
     // Explicitly return the error message so the frontend doesn't mask it
     return res.status(500).json({ success: false, message: error.message });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 };
 
@@ -2160,6 +2318,20 @@ H. "macro_check" (VBA Macros):
    If the instructions only ask students to enter data and format it with NO calculations requested, DO NOT generate "formula_range_check". Use "data_check" and "format_check".
 
 Output ONLY the raw JSON array starting with [ and ending with ].`;
+    } else if (evaluatorType?.toLowerCase() === 'visual') {
+      systemPrompt += `\n8. For Visual (HTML/CSS/JavaScript DOM) assignments, generate clean, professional criteria reflecting core web development milestones:
+- "Semantic HTML Structure & Elements" (Weight: 25) (Proper HTML5 semantics, layout containers, forms, inputs, buttons, tables, navigation)
+- "CSS Layout & Responsive Design" (Weight: 25) (Flexbox, CSS Grid, media queries, margins, padding, alignment, card layouts)
+- "JavaScript DOM Manipulation & Events" (Weight: 30) (Dynamic event listeners, click handlers, DOM element creation, innerHTML/textContent updates)
+- "State Persistence & Form Handling" (Weight: 20) (LocalStorage, input validation, form submission, preventDefault, dynamic list state)
+Ensure the weights sum to exactly 100 with clean numbers (e.g. 25, 25, 30, 20).`;
+    } else if (evaluatorType?.toLowerCase() === 'python') {
+      systemPrompt += `\n8. For Python assignments, generate clean, professional criteria reflecting core programming competencies:
+- "Function Correctness & Standard Inputs" (Weight: 35) (Core algorithm logic, expected return values on standard inputs)
+- "Boundary & Edge Case Handling" (Weight: 25) (Zero, empty collections/strings, negative values, type boundaries)
+- "Algorithm Efficiency & Data Structures" (Weight: 20) (Optimal loops, dictionary/list comprehensions, proper time complexity)
+- "Code Structure & Pythonic Conventions" (Weight: 20) (Clean naming, docstrings, PEP 8 conventions, modular structure)
+Ensure the weights sum to exactly 100 (35, 25, 20, 20).`;
     } else if (evaluatorType?.toLowerCase() === 'sql') {
       systemPrompt = `You are the world's foremost expert Database Architect and SQL instructor. Your task is to generate flawless, production-grade JSON test case configurations for an automated PostgreSQL database grading system.
 
@@ -2356,6 +2528,16 @@ ${normalizedRubric ? JSON.stringify(normalizedRubric, null, 2) : 'No rubric prov
 The following are the EXACT allowed criteria names. Every test case's "criterion" property MUST be one of these exact strings (copy verbatim):
 ${rubricNames.map((n) => `- "${n}"`).join('\n')}
 Do NOT alter spelling, casing, punctuation, or add parentheticals. Every criterion above must have at least one test case.`;
+    } else if (evaluatorType?.toLowerCase() === 'visual' && rubricNames.length > 0) {
+      userPrompt += `\n\nCRITICAL BINDING CONTRACT FOR VISUAL EVALUATOR:
+The following are the EXACT allowed criteria names from the Evaluation Rubric:
+${rubricList.map((r) => `- "${typeof r === 'string' ? r : r.name}"`).join('\n')}
+Every generated test case object MUST contain a "criterion" property whose value is an exact, verbatim copy of one of these criteria names.`;
+    } else if (evaluatorType?.toLowerCase() === 'python' && rubricNames.length > 0) {
+      userPrompt += `\n\nCRITICAL BINDING CONTRACT FOR PYTHON EVALUATOR:
+The following are the EXACT allowed criteria names and weights from the Evaluation Rubric:
+${rubricList.map((r) => `- "${typeof r === 'string' ? r : r.name}" (weight: ${typeof r === 'object' && Number(r.weight) > 0 ? r.weight : 25})`).join('\n')}
+In your generated "testCases" array, every test case's "criterion" MUST be an exact verbatim copy of one of these criteria names, and weights must sum to 100.`;
     } else if (evaluatorType?.toLowerCase() === 'sql' && rubricNames.length > 0) {
       userPrompt += `\n\nCRITICAL BINDING CONTRACT FOR SQL EVALUATOR:
 The following are the EXACT allowed criteria names and weights from the Evaluation Rubric:
@@ -3141,6 +3323,8 @@ exports.reEvaluateSubmission = async (req, res) => {
 
     const isExcelEvaluation = (effectiveType === 'EXCEL' || effectiveType === 'excel');
     const isSqlEvaluation = (effectiveType === 'SQL' || effectiveType === 'sql');
+    const isVisualEvaluation = (effectiveType === 'VISUAL' || effectiveType === 'visual');
+    const isPythonEvaluation = (effectiveType === 'PYTHON' || effectiveType === 'python');
 
     // Ensure evaluation_results rows exist for all submissions being re-evaluated
     for (const s of submissions) {
@@ -3159,6 +3343,10 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? !!(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
         : isSqlEvaluation
         ? !!(s.sql_text || s.sqlText || s.submission_file_url || (s.submission_link && isAllowedSqlUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        : isVisualEvaluation
+        ? !!(s.submission_file_url || (s.submission_link && isAllowedVisualUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        : isPythonEvaluation
+        ? !!(s.code || s.python_text || s.submission_file_url || (s.submission_link && isAllowedPythonUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
         : (isAllowedGitUrl(s.submission_link) || !!s.submission_file_url || (s.submission_type === 'file' && !!s.submission_file_url))
     );
     const invalidSubmissions = submissions.filter((s) =>
@@ -3166,6 +3354,10 @@ exports.reEvaluateSubmission = async (req, res) => {
         ? !(s.submission_file_url || (s.submission_link && isAllowedSpreadsheetUrl(s.submission_link)))
         : isSqlEvaluation
         ? !(s.sql_text || s.sqlText || s.submission_file_url || (s.submission_link && isAllowedSqlUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        : isVisualEvaluation
+        ? !(s.submission_file_url || (s.submission_link && isAllowedVisualUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
+        : isPythonEvaluation
+        ? !(s.code || s.python_text || s.submission_file_url || (s.submission_link && isAllowedPythonUrl(s.submission_link)) || (s.ideFiles && s.ideFiles.length > 0))
         : !(isAllowedGitUrl(s.submission_link) || !!s.submission_file_url || (s.submission_type === 'file' && !!s.submission_file_url))
     );
 
@@ -3209,8 +3401,19 @@ exports.reEvaluateSubmission = async (req, res) => {
 
     if (validSubmissions.length === 0) {
       await client.query('COMMIT');
+      client.release();
+      client = null;
       return res.json({ success: true, message: "Only invalid submissions found, marked as failed." });
     }
+
+    // Reset status to running and commit database transaction BEFORE external network calls!
+    await client.query(
+      `UPDATE evaluations SET status = 'running' WHERE id = $1`,
+      [evaluationId]
+    );
+    await client.query('COMMIT');
+    client.release();
+    client = null;
 
     // Now send to central evaluator
     const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
@@ -3243,12 +3446,24 @@ exports.reEvaluateSubmission = async (req, res) => {
 
         const payload = {
           type: payloadType,
-          submissions: validSubmissions.map((s) => ({
-            submissionId: s.submission_id || s.id,
-            repoUrl: s.submission_link,
-            studentName: s.student_name,
-            studentId: s.user_id || s.student_id,
-          })),
+          submissions: await Promise.all(
+            validSubmissions.map(async (s) => ({
+              submissionId: s.submission_id || s.id,
+              repoUrl: isVisualEvaluation 
+                ? await getVisualDownloadUrl(s)
+                : isPythonEvaluation 
+                ? await getPythonDownloadUrl(s)
+                : (s.submission_file_url ? await presignS3Url(s.submission_file_url) : s.submission_link),
+              fileUrl: isVisualEvaluation 
+                ? await getVisualDownloadUrl(s)
+                : isPythonEvaluation 
+                ? await getPythonDownloadUrl(s)
+                : (s.submission_file_url ? await presignS3Url(s.submission_file_url) : null),
+              code: s.code || s.python_text,
+              studentName: s.student_name,
+              studentId: s.user_id || s.student_id,
+            }))
+          ),
           ...jsConfig,
           rubricText: assignment.rubric ? JSON.stringify(assignment.rubric) : 'Standard evaluation',
           expectedUrl: assignment.expected_url || 'https://example.com',
@@ -3547,9 +3762,9 @@ exports.reEvaluateSubmission = async (req, res) => {
         }
     }
 
-    // Update the rows with job info (now guaranteed to exist)
+    // Update the rows with job info (using pool directly — no transaction locks held!)
     for (const j of jobIdsAndLinks) {
-      await client.query(
+      await pool.query(
         `UPDATE evaluation_results
          SET job_id = $1, status = 'pending', status_url = $2
          WHERE evaluation_id = $3 AND submission_id = $4`,
@@ -3559,7 +3774,7 @@ exports.reEvaluateSubmission = async (req, res) => {
 
     // Recalculate total_submissions to account for newly added students,
     // then reset status to 'running' so the sync doesn't prematurely finish
-    await client.query(
+    await pool.query(
       `UPDATE evaluations
        SET status = 'running',
            total_submissions = (SELECT COUNT(*) FROM evaluation_results WHERE evaluation_id = $1)
@@ -3567,11 +3782,11 @@ exports.reEvaluateSubmission = async (req, res) => {
       [evaluationId]
     );
 
-    await client.query('COMMIT');
-
     return res.json({ success: true, message: "Re-evaluation started" });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     const evaluatorData = error.response?.data;
     const evaluatorMsg = (evaluatorData && typeof evaluatorData === 'object')
       ? (evaluatorData.error || evaluatorData.message)
