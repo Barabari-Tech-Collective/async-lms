@@ -520,6 +520,7 @@ async function probeOneDrive(rawUrl) {
       accessible: true,
       verdict: 'TRANSIENT_FAIL_OPEN',
       platform: 'onedrive',
+      message: `Network error (${err.message}). Allowed under deadline fail-open policy.`,
     };
   } finally {
     clearTimeout(timer);
