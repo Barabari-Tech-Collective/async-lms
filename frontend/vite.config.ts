@@ -24,6 +24,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@radix-ui/react-slot': path.resolve(__dirname, './src/components/ui/slot.tsx'),
       'react-hot-toast': resolvePkg('react-hot-toast'),
+      'redux': path.resolve(__dirname, './node_modules/redux/dist/redux.mjs'),
           },
   },
   optimizeDeps: {
