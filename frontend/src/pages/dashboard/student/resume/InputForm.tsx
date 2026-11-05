@@ -22,6 +22,7 @@ import type { ResumeDocument, ResumeCategory, EducationLevel } from './types';
 import { CATEGORY_CONFIGS, getCategoryConfig } from './types';
 import { RESUME_TEMPLATES } from './templateRegistry';
 import { compressAvatarImage, calculateExperienceDuration } from './resumeUtils';
+import { CommaSeparatedInput } from './ResumeCommon';
 import apiClient from '@/services/api';
 import { toast } from 'react-hot-toast';
 
@@ -990,15 +991,14 @@ export function InputForm({
                   <label className='text-[11px] font-semibold text-slate-700 mb-1 block'>
                     {categoryConfig.skillLabels.languages}
                   </label>
-                  <input
-                    type='text'
-                    value={doc.skills.languages.join(', ')}
-                    onChange={(e) =>
+                  <CommaSeparatedInput
+                    value={doc.skills.languages}
+                    onChange={(arr) =>
                       setDoc({
                         ...doc,
                         skills: {
                           ...doc.skills,
-                          languages: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                          languages: arr,
                         },
                       })
                     }
@@ -1011,15 +1011,14 @@ export function InputForm({
                   <label className='text-[11px] font-semibold text-slate-700 mb-1 block'>
                     {categoryConfig.skillLabels.frameworks}
                   </label>
-                  <input
-                    type='text'
-                    value={doc.skills.frameworks.join(', ')}
-                    onChange={(e) =>
+                  <CommaSeparatedInput
+                    value={doc.skills.frameworks}
+                    onChange={(arr) =>
                       setDoc({
                         ...doc,
                         skills: {
                           ...doc.skills,
-                          frameworks: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                          frameworks: arr,
                         },
                       })
                     }
@@ -1032,15 +1031,14 @@ export function InputForm({
                   <label className='text-[11px] font-semibold text-slate-700 mb-1 block'>
                     {categoryConfig.skillLabels.databases}
                   </label>
-                  <input
-                    type='text'
-                    value={doc.skills.databases.join(', ')}
-                    onChange={(e) =>
+                  <CommaSeparatedInput
+                    value={doc.skills.databases}
+                    onChange={(arr) =>
                       setDoc({
                         ...doc,
                         skills: {
                           ...doc.skills,
-                          databases: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                          databases: arr,
                         },
                       })
                     }
@@ -1053,15 +1051,14 @@ export function InputForm({
                   <label className='text-[11px] font-semibold text-slate-700 mb-1 block'>
                     {categoryConfig.skillLabels.tools}
                   </label>
-                  <input
-                    type='text'
-                    value={doc.skills.tools.join(', ')}
-                    onChange={(e) =>
+                  <CommaSeparatedInput
+                    value={doc.skills.tools}
+                    onChange={(arr) =>
                       setDoc({
                         ...doc,
                         skills: {
                           ...doc.skills,
-                          tools: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                          tools: arr,
                         },
                       })
                     }

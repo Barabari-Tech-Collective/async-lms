@@ -19,6 +19,7 @@ import { ResumeDocument } from './ResumeDocument';
 import { CourseCapstonesModal } from './CourseCapstonesModal';
 import { detectRoleTrack, TRACK_METADATA } from './resumeRoleMatcher';
 import { compressAvatarImage } from './resumeUtils';
+import { CommaSeparatedInput } from './ResumeCommon';
 import { toast } from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 
@@ -1571,11 +1572,9 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                     <label className='block text-xs font-semibold text-[#374151] mb-1.5'>
                       Technical Skills
                     </label>
-                    <input
-                      type='text'
-                      value={(resumeDoc.skills?.languages || []).join(', ')}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                    <CommaSeparatedInput
+                      value={resumeDoc.skills?.languages || []}
+                      onChange={(arr) => {
                         onUpdate({
                           ...resumeDoc,
                           skills: {
@@ -1594,11 +1593,9 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                     <label className='block text-xs font-semibold text-[#374151] mb-1.5'>
                       Communication & Collaboration Skills
                     </label>
-                    <input
-                      type='text'
-                      value={(resumeDoc.skills?.frameworks || []).join(', ')}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                    <CommaSeparatedInput
+                      value={resumeDoc.skills?.frameworks || []}
+                      onChange={(arr) => {
                         onUpdate({
                           ...resumeDoc,
                           skills: {
@@ -1617,14 +1614,12 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                     <label className='block text-xs font-semibold text-[#374151] mb-1.5'>
                       Tools & Technologies
                     </label>
-                    <input
-                      type='text'
+                    <CommaSeparatedInput
                       value={[
                         ...(resumeDoc.skills?.databases || []),
                         ...(resumeDoc.skills?.tools || []),
-                      ].join(', ')}
-                      onChange={(e) => {
-                        const arr = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                      ]}
+                      onChange={(arr) => {
                         onUpdate({
                           ...resumeDoc,
                           skills: {

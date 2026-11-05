@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent } from 'react';
+import { useState, useRef, useEffect, type ChangeEvent } from 'react';
 import {
   Mail,
   Phone,
@@ -653,5 +653,55 @@ export function ContactPhotoModal({
         </div>
       </div>
     </div>
+  );
+}
+
+
+// ── Comma-Separated Skills & Tags Input (Allows free typing of commas & spaces) ──
+export interface CommaSeparatedInputProps {
+  value: string[];
+  onChange: (items: string[]) => void;
+  placeholder?: string;
+  className?: string;
+}
+
+export function CommaSeparatedInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+}: CommaSeparatedInputProps) {
+  const [text, setText] = useState(() => (value || []).join(', '));
+  const isTypingRef = useRef(false);
+
+  useEffect(() => {
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      return;
+    }
+    const joined = (value || []).join(', ');
+    const currentParsed = text.split(',').map((s) => s.trim()).filter(Boolean);
+    if ((value || []).join('|') !== currentParsed.join('|')) {
+      setText(joined);
+    }
+  }, [value]);
+
+  return (
+    <input
+      type='text'
+      value={text}
+      onChange={(e) => {
+        const val = e.target.value;
+        isTypingRef.current = true;
+        setText(val);
+        const arr = val.split(',').map((s) => s.trim()).filter(Boolean);
+        onChange(arr);
+      }}
+      onBlur={() => {
+        setText((value || []).join(', '));
+      }}
+      placeholder={placeholder}
+      className={className}
+    />
   );
 }
