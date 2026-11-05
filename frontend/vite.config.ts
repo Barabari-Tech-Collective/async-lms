@@ -99,7 +99,11 @@ export default defineConfig({
   ],
   build: {
     target: 'esnext',
+    commonjsOptions: {
+      exclude: ['lucide-react'],
+    },
     rollupOptions: {
+      maxParallelFileOps: 50,
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
