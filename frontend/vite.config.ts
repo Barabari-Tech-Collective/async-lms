@@ -12,7 +12,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-    },
+      '@radix-ui/react-slot': path.resolve(__dirname, './src/components/ui/slot.tsx'),
+          },
   },
   optimizeDeps: {
     // Pre-bundle these with esbuild on cold start so the browser gets single
