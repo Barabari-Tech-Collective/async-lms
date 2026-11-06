@@ -127,7 +127,7 @@ export function CleanSlateTemplate({
                     <VerificationBadge status={proj.verificationStatus} />
                   </div>
                   <div className='flex items-center gap-3 text-[11px] font-medium text-slate-500'>
-                    {proj.repositoryUrl && (
+                    {formatHref(proj.repositoryUrl, 'web') && (
                       <a
                         href={formatHref(proj.repositoryUrl, 'web')}
                         target='_blank'
@@ -137,7 +137,7 @@ export function CleanSlateTemplate({
                         GitHub ↗
                       </a>
                     )}
-                    {proj.liveDemoUrl && (
+                    {formatHref(proj.liveDemoUrl, 'web') && (
                       <a
                         href={formatHref(proj.liveDemoUrl, 'web')}
                         target='_blank'
@@ -265,7 +265,7 @@ export function CleanSlateTemplate({
                   </div>
                   <div className='flex items-center gap-2'>
                     {evt.date && <span className='text-[11px] text-slate-400'>{evt.date}</span>}
-                    {evt.credentialUrl && (
+                    {formatHref(evt.credentialUrl, 'web') && (
                       <a
                         href={formatHref(evt.credentialUrl, 'web')}
                         target='_blank'

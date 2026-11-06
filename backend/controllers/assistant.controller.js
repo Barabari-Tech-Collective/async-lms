@@ -479,6 +479,29 @@ exports.getAllResumes = async (req, res) => {
 };
 
 // ── GET /api/assistant/resume/:id (Get Specific Resume) ───────────────────────
+// -- GET /api/assistant/public/resume/:id (Public Resume View for Recruiters) --
+exports.getPublicResumeById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT sr.id, sr.title, sr.schema_version, sr.version, sr.document, sr.updated_at,
+              u.full_name as author_name, u.email as author_email
+       FROM public.student_resumes sr
+       LEFT JOIN public.users u ON u.id = sr.user_id
+       WHERE sr.id = $1 AND sr.deleted_at IS NULL
+       LIMIT 1`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
+    }
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('GET PUBLIC RESUME ERROR:', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve public resume.' });
+  }
+};
+
 exports.getResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;

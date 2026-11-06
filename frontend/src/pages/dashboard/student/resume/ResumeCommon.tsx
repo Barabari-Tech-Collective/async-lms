@@ -373,7 +373,7 @@ export function ContactLinksRow({
         </span>
       )}
 
-      {linkedinLink && linkedinLink.url && (
+      {linkedinLink && formatHref(linkedinLink.url, 'web') && (
         <a
           href={formatHref(linkedinLink.url, 'web')}
           target='_blank'
@@ -388,7 +388,7 @@ export function ContactLinksRow({
         </a>
       )}
 
-      {githubLink && githubLink.url && (
+      {githubLink && formatHref(githubLink.url, 'web') && (
         <a
           href={formatHref(githubLink.url, 'web')}
           target='_blank'
@@ -403,7 +403,7 @@ export function ContactLinksRow({
         </a>
       )}
 
-      {customLinks.map((link, idx) => (
+      {customLinks.filter((link) => Boolean(formatHref(link.url, 'web'))).map((link, idx) => (
         <a
           key={idx}
           href={formatHref(link.url, 'web')}

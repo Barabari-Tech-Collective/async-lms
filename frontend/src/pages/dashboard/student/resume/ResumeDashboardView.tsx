@@ -101,8 +101,8 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
             )}
             <button
               type='button'
-              onClick={() => onCreateNew('modern-mercury')}
-              className='inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#040000] hover:bg-black/85 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all cursor-pointer'
+              onClick={() => onCreateNew('ivy-standard')}
+              className='inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1e2653] hover:bg-[#252d5e] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all cursor-pointer'
             >
               <Plus size={16} strokeWidth={2.5} />
               <span>Create New Resume</span>
@@ -123,7 +123,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
             </div>
             <button
               type='button'
-              onClick={() => onCreateNew('modern-mercury')}
+              onClick={() => onCreateNew('ivy-standard')}
               className='inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#344499] hover:underline cursor-pointer shrink-0 mt-1'
             >
               <span>See All</span>
@@ -286,7 +286,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
               <button
                 type='button'
                 onClick={() => onCreateNew('modern-mercury')}
-                className='mt-4 inline-flex items-center gap-2 px-4 py-2 bg-[#040000] text-white text-xs font-semibold rounded-lg shadow-sm hover:bg-black/85 cursor-pointer'
+                className='mt-4 inline-flex items-center gap-2 px-4 py-2 bg-[#1e2653] hover:bg-[#252d5e] text-white text-xs font-semibold rounded-lg shadow-sm transition-all cursor-pointer'
               >
                 <Plus size={14} />
                 <span>Create New Resume</span>

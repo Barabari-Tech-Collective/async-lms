@@ -174,7 +174,7 @@ export function ClassicCorporateTemplate({
                         <VerificationBadge status={proj.verificationStatus} />
                       </div>
                       <div className='flex items-center gap-3 text-[10.5px] font-medium'>
-                        {proj.repositoryUrl && (
+                        {formatHref(proj.repositoryUrl, 'web') && (
                           <a
                             href={formatHref(proj.repositoryUrl, 'web')}
                             target='_blank'
@@ -184,7 +184,7 @@ export function ClassicCorporateTemplate({
                             [Repository]
                           </a>
                         )}
-                        {proj.liveDemoUrl && (
+                        {formatHref(proj.liveDemoUrl, 'web') && (
                           <a
                             href={formatHref(proj.liveDemoUrl, 'web')}
                             target='_blank'
@@ -312,7 +312,7 @@ export function ClassicCorporateTemplate({
                       <span className='font-bold text-slate-900 block'>{cert.title}</span>
                       <span className='text-[10.5px] text-slate-600'>{cert.issuer}</span>
                     </div>
-                    {cert.credentialUrl && (
+                    {formatHref(cert.credentialUrl, 'web') && (
                       <a
                         href={formatHref(cert.credentialUrl, 'web')}
                         target='_blank'
@@ -357,7 +357,7 @@ export function ClassicCorporateTemplate({
                       </div>
                       <div className='flex items-center gap-2'>
                         {evt.date && <span className='text-[10.5px] text-slate-500'>{evt.date}</span>}
-                        {evt.credentialUrl && (
+                        {formatHref(evt.credentialUrl, 'web') && (
                           <a
                             href={formatHref(evt.credentialUrl, 'web')}
                             target='_blank'

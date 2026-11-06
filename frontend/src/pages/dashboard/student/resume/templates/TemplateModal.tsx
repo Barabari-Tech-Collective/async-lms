@@ -78,7 +78,7 @@ export function TemplateModal({
                   Select Resume Template (FlowCV Collection)
                 </h2>
                 <p className='text-xs text-slate-500'>
-                  10 curated, course-specific templates. Switch anytime without losing any content or progress.
+                  11 curated, placement-proven templates. Switch anytime without losing any content or progress.
                 </p>
               </div>
             </div>

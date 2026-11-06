@@ -297,7 +297,7 @@ export function AtlanticSidebarTemplate({
                         <div key={cert.id || cIdx} className='text-[11px] leading-snug'>
                           <span className='font-semibold text-white block'>{cert.title}</span>
                           <span className='text-slate-300 text-[10px]'>{cert.issuer}</span>
-                          {cert.credentialUrl && (
+                          {formatHref(cert.credentialUrl, 'web') && (
                             <a
                               href={formatHref(cert.credentialUrl, 'web')}
                               target='_blank'
@@ -390,7 +390,7 @@ export function AtlanticSidebarTemplate({
                             </div>
 
                             <div className='flex items-center gap-2 text-[10.5px] font-medium'>
-                              {proj.repositoryUrl && (
+                              {formatHref(proj.repositoryUrl, 'web') && (
                                 <a
                                   href={formatHref(proj.repositoryUrl, 'web')}
                                   target='_blank'
@@ -401,7 +401,7 @@ export function AtlanticSidebarTemplate({
                                   <span>Code</span>
                                 </a>
                               )}
-                              {proj.liveDemoUrl && (
+                              {formatHref(proj.liveDemoUrl, 'web') && (
                                 <a
                                   href={formatHref(proj.liveDemoUrl, 'web')}
                                   target='_blank'
@@ -555,7 +555,7 @@ export function AtlanticSidebarTemplate({
                               {evt.date && (
                                 <span className='text-[10.5px] text-slate-500 font-medium'>{evt.date}</span>
                               )}
-                              {evt.credentialUrl && (
+                              {formatHref(evt.credentialUrl, 'web') && (
                                 <a
                                   href={formatHref(evt.credentialUrl, 'web')}
                                   target='_blank'

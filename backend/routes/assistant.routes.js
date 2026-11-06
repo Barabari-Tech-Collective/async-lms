@@ -7,6 +7,7 @@ const {
   deleteResume,
   getAllResumes,
   getResumeById,
+  getPublicResumeById,
   createResume,
   updateResumeById,
   renameResume,
@@ -23,6 +24,9 @@ const {
   rewriteContent,
   optimizeWithJD,
 } = require('../controllers/assistant.controller');
+
+// ── Public Unauthenticated Resume Access for Recruiters ───────────────────────
+router.get('/public/resume/:id', getPublicResumeById);
 
 router.post('/chat', verifyToken, chat);
 

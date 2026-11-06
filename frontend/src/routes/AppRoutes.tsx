@@ -23,6 +23,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 // ---------- Lazy Imports ----------
 
 // Public
+const PublicResumeView = lazyWithRetry(() => import('@/pages/public/PublicResumeView'));
 const Home = lazyWithRetry(() => import('@/pages/Home'));
 const Login = lazyWithRetry(() => import('@/pages/Login'));
 const Signup = lazyWithRetry(() => import('@/pages/Signup'));
@@ -195,6 +196,8 @@ const router = createBrowserRouter([
       { path: 'college-under-verification', element: <CollegeUnderVerification /> },
       { path: 'verify-email', element: <VerifyEmail /> },
       { path: 'forgot-password', element: <ForgotPassword /> },
+      { path: 'r/:id', element: <PublicResumeView /> },
+      { path: 'resume/:id', element: <PublicResumeView /> },
 
       {
         element: <PrivateRoute />,

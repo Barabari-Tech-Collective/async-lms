@@ -2,6 +2,20 @@ import type { ResumeTemplateMeta } from './types';
 
 export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
   {
+    id: 'ivy-standard',
+    name: 'Ivy Standard',
+    flowcvName: 'Ivy Standard',
+    headline: 'Standard Ivy League ATS Single-Page Layout',
+    recommendedFor: 'Campus Fresher & Internships',
+    description:
+      'Prestigious, ATS-optimized single-page layout inspired by Ivy League placement standards. Features centered classical serif typography, compact section rules, and maximized content density that fits perfectly without overflowing.',
+    layoutType: 'single-column',
+    fontFamily: 'serif',
+    accentColor: '#111827',
+    badgeText: 'Default • Best 1-Page Fit',
+    popular: true,
+  },
+  {
     id: 'modern-mercury',
     name: 'Mercury Flow',
     flowcvName: 'Mercury Flow',
@@ -138,5 +152,5 @@ export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
 
 export function getTemplateMeta(id?: string): ResumeTemplateMeta {
   const match = RESUME_TEMPLATES.find((t) => t.id === id);
-  return match || RESUME_TEMPLATES[0]; // fallback to Mercury Flow
+  return match || RESUME_TEMPLATES[0]; // fallback to Ivy Standard
 }

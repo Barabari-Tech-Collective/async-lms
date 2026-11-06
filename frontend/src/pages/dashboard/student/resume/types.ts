@@ -192,7 +192,7 @@ export const CATEGORY_CONFIGS: Record<ResumeCategory, CategoryConfig> = {
       'Administrative Executive',
       'General Management Trainee',
     ],
-    recommendedTemplate: 'first-job-fresh',
+    recommendedTemplate: 'ivy-standard',
     accentColor: '#475569',
     badgeBg: 'bg-slate-100',
     badgeText: 'text-slate-800',

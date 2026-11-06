@@ -1,4 +1,5 @@
 import type { TemplateProps } from './AtlanticSidebarTemplate';
+import { IvyStandardTemplate } from './IvyStandardTemplate';
 import { MercuryTemplate } from './MercuryTemplate';
 import { AtlanticSidebarTemplate } from './AtlanticSidebarTemplate';
 import { ClassicCorporateTemplate } from './ClassicCorporateTemplate';
@@ -11,9 +12,11 @@ import { EditorialRuleTemplate } from './EditorialRuleTemplate';
 import { FirstJobFresherTemplate } from './FirstJobFresherTemplate';
 
 export function TemplateRenderer(props: TemplateProps) {
-  const templateId = props.data.templateId || 'modern-mercury';
+  const templateId = props.data.templateId || 'ivy-standard';
 
   switch (templateId) {
+    case 'ivy-standard':
+      return <IvyStandardTemplate {...props} />;
     case 'atlantic-sidebar':
       return <AtlanticSidebarTemplate {...props} />;
     case 'classic-corporate':
@@ -33,7 +36,8 @@ export function TemplateRenderer(props: TemplateProps) {
     case 'first-job-fresh':
       return <FirstJobFresherTemplate {...props} />;
     case 'modern-mercury':
-    default:
       return <MercuryTemplate {...props} />;
+    default:
+      return <IvyStandardTemplate {...props} />;
   }
 }

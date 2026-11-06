@@ -160,7 +160,7 @@ export function FirstJobFresherTemplate({
                         <VerificationBadge status={proj.verificationStatus} />
                       </div>
                       <div className='flex items-center gap-3 text-[11px] font-medium'>
-                        {proj.repositoryUrl && (
+                        {formatHref(proj.repositoryUrl, 'web') && (
                           <a
                             href={formatHref(proj.repositoryUrl, 'web')}
                             target='_blank'
@@ -171,7 +171,7 @@ export function FirstJobFresherTemplate({
                             <span>Source Code</span>
                           </a>
                         )}
-                        {proj.liveDemoUrl && (
+                        {formatHref(proj.liveDemoUrl, 'web') && (
                           <a
                             href={formatHref(proj.liveDemoUrl, 'web')}
                             target='_blank'
@@ -368,7 +368,7 @@ export function FirstJobFresherTemplate({
                       <span className='text-slate-500'>— {cert.issuer}</span>
                       <VerificationBadge status={cert.verificationStatus} />
                     </div>
-                    {cert.credentialUrl && (
+                    {formatHref(cert.credentialUrl, 'web') && (
                       <a
                         href={formatHref(cert.credentialUrl, 'web')}
                         target='_blank'
@@ -418,7 +418,7 @@ export function FirstJobFresherTemplate({
                         {evt.date && (
                           <span className='text-[11px] text-slate-500 font-medium'>{evt.date}</span>
                         )}
-                        {evt.credentialUrl && (
+                        {formatHref(evt.credentialUrl, 'web') && (
                           <a
                             href={formatHref(evt.credentialUrl, 'web')}
                             target='_blank'

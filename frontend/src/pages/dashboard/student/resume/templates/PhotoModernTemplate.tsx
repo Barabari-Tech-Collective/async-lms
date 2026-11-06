@@ -135,7 +135,7 @@ export function PhotoModernTemplate({
                     <VerificationBadge status={proj.verificationStatus} />
                   </div>
                   <div className='flex items-center gap-2 text-[11px] font-medium'>
-                    {proj.repositoryUrl && (
+                    {formatHref(proj.repositoryUrl, 'web') && (
                       <a
                         href={formatHref(proj.repositoryUrl, 'web')}
                         target='_blank'
@@ -146,7 +146,7 @@ export function PhotoModernTemplate({
                         <span>Code</span>
                       </a>
                     )}
-                    {proj.liveDemoUrl && (
+                    {formatHref(proj.liveDemoUrl, 'web') && (
                       <a
                         href={formatHref(proj.liveDemoUrl, 'web')}
                         target='_blank'
@@ -263,7 +263,7 @@ export function PhotoModernTemplate({
                   </div>
                   <div className='flex items-center gap-2'>
                     {evt.date && <span className='text-[11px] text-slate-500 font-medium'>{evt.date}</span>}
-                    {evt.credentialUrl && (
+                    {formatHref(evt.credentialUrl, 'web') && (
                       <a
                         href={formatHref(evt.credentialUrl, 'web')}
                         target='_blank'
@@ -298,7 +298,7 @@ export function PhotoModernTemplate({
               <div key={cert.id || cIdx} className='text-[11.5px] page-break-inside-avoid'>
                 <span className='font-bold text-slate-900 block'>{cert.title || cert.name}</span>
                 <span className='text-[10.5px] text-slate-600'>{cert.issuer}</span>
-                {cert.credentialUrl && (
+                {formatHref(cert.credentialUrl, 'web') && (
                   <a
                     href={formatHref(cert.credentialUrl, 'web')}
                     target='_blank'

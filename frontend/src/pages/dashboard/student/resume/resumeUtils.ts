@@ -24,7 +24,7 @@ export function createEmptyResume(
     schemaVersion: 1,
     category,
     targetRole: selectedRole,
-    templateId: config.recommendedTemplate || 'first-job-fresh',
+    templateId: config.recommendedTemplate || 'ivy-standard',
     personalInfo: {
       fullName: user?.full_name || '',
       headline: selectedRole,
@@ -52,15 +52,114 @@ export function createEmptyResume(
   };
 }
 
-export function formatHref(url: string, type: 'email' | 'phone' | 'whatsapp' | 'web' = 'web'): string {
+export interface UrlValidationResult {
+  isValid: boolean;
+  error?: string;
+}
+
+const DOMAIN_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+
+export function validateUrl(
+  url: string | undefined | null,
+  platform?: 'LinkedIn' | 'GitHub' | 'LeetCode' | 'Portfolio' | 'Repository' | 'LiveDemo' | 'Certificate' | string
+): UrlValidationResult {
+  if (!url) return { isValid: true };
+  const trimmed = url.trim();
+  if (!trimmed) return { isValid: true };
+
+  // Disallow any whitespace within URLs
+  if (/\s/.test(trimmed)) {
+    return {
+      isValid: false,
+      error: 'URL cannot contain spaces. Please enter a valid web link.',
+    };
+  }
+
+  // Prepend https:// if protocol is missing so native URL parser succeeds on naked domains
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return {
+      isValid: false,
+      error: 'Invalid URL structure. Please enter a valid link.',
+    };
+  }
+
+  // Must have a valid hostname with at least 1 dot and recognized domain syntax
+  const hostname = parsed.hostname.toLowerCase();
+  if (!DOMAIN_REGEX.test(hostname)) {
+    return {
+      isValid: false,
+      error: 'Please enter a valid domain (e.g. example.com).',
+    };
+  }
+
+  const normPlatform = (platform || '').toLowerCase().trim();
+
+  if (normPlatform.includes('linkedin')) {
+    if (!hostname.includes('linkedin.com')) {
+      return {
+        isValid: false,
+        error: 'Must be a valid LinkedIn URL (e.g. linkedin.com/in/username)',
+      };
+    }
+  } else if (normPlatform.includes('github')) {
+    if (!hostname.includes('github.com') && !hostname.includes('gitlab.com')) {
+      return {
+        isValid: false,
+        error: 'Must be a valid GitHub or GitLab URL (e.g. github.com/username)',
+      };
+    }
+  } else if (normPlatform.includes('leetcode') || normPlatform.includes('coding')) {
+    const validCodingHosts = [
+      'leetcode.com',
+      'hackerrank.com',
+      'codeforces.com',
+      'codechef.com',
+      'geeksforgeeks.org',
+      'github.com',
+    ];
+    if (!validCodingHosts.some((h) => hostname.includes(h))) {
+      return {
+        isValid: false,
+        error: 'Must be a valid coding profile URL (e.g. leetcode.com/u/username)',
+      };
+    }
+  } else if (normPlatform.includes('repository')) {
+    const validRepoHosts = ['github.com', 'gitlab.com', 'bitbucket.org'];
+    if (!validRepoHosts.some((h) => hostname.includes(h))) {
+      return {
+        isValid: false,
+        error: 'Repository URL should be on GitHub, GitLab, or Bitbucket.',
+      };
+    }
+  }
+
+  return { isValid: true };
+}
+
+export function isValidWebUrl(url: string | undefined | null): boolean {
+  if (!url || !url.trim()) return false;
+  return validateUrl(url.trim()).isValid;
+}
+
+export function formatHref(url: string | undefined | null, type: 'email' | 'phone' | 'whatsapp' | 'web' = 'web'): string {
   if (!url) return '';
   const trimmed = url.trim();
+  if (!trimmed) return '';
   if (type === 'email') return `mailto:${trimmed}`;
   if (type === 'phone') return `tel:${trimmed.replace(/[^\d+]/g, '')}`;
   if (type === 'whatsapp') {
     const cleanNum = trimmed.replace(/[^\d]/g, '');
     return `https://wa.me/${cleanNum}`;
   }
+  // For web URLs, only format if it passes validateUrl
+  const val = validateUrl(trimmed);
+  if (!val.isValid) return '';
+
   if (!/^https?:\/\//i.test(trimmed)) {
     return `https://${trimmed}`;
   }

@@ -3,7 +3,7 @@ import { Sparkles, Loader2 } from 'lucide-react';
 import { formatHref, getResolvedSectionOrder } from '../resumeUtils';
 import type { SectionKey } from '../types';
 import { InlineText, InlineTextarea } from '../InlineEdit';
-import { VerificationBadge, ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
+import { ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
 export function ExecutiveSerifTemplate({
@@ -35,28 +35,30 @@ export function ExecutiveSerifTemplate({
   const activeOrder = getResolvedSectionOrder(sections, data.sectionOrder);
 
   return (
-    <div className='font-serif text-slate-900 text-[13px] leading-relaxed max-w-[820px] mx-auto bg-[#fafafa] p-6 sm:p-11 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-stone-200 shadow-xs'>
-      {/* ── HEADER (Centered Classical) ──────────────────────────────────── */}
-      <header className='text-center pb-5 mb-5 border-b border-stone-400'>
+    <div className='font-serif text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-stone-200 shadow-xs'>
+      {/* ── HEADER (Centered Classical Academic / Harvard Format) ────────── */}
+      <header className='text-center pb-4 mb-4 border-b border-stone-300'>
         <OrganizationLogoBadge variant='executive-seal' />
-        <h1 className='text-2xl sm:text-3xl font-normal tracking-wide text-stone-950 uppercase'>
+        <h1 className='text-2xl sm:text-3xl font-bold tracking-wide text-stone-950 uppercase'>
           <InlineText
             value={pi.fullName || 'YOUR NAME'}
             onChange={onUpdate && !readOnly ? (v) => upPI({ fullName: v }) : undefined}
             placeholder='Full Name'
-            className='font-normal tracking-wide text-stone-950 uppercase'
+            className='font-bold tracking-wide text-stone-950 uppercase'
           />
         </h1>
-        <p className='text-xs sm:text-[13px] italic text-stone-700 mt-1 font-serif'>
-          <InlineText
-            value={pi.headline || 'Senior Software Engineer & Technical Lead'}
-            onChange={onUpdate && !readOnly ? (v) => upPI({ headline: v }) : undefined}
-            placeholder='Executive Headline'
-            className='italic text-stone-700'
-          />
-        </p>
+        {pi.headline && (
+          <p className='text-xs sm:text-[13px] italic text-stone-700 mt-0.5 font-serif'>
+            <InlineText
+              value={pi.headline}
+              onChange={onUpdate && !readOnly ? (v) => upPI({ headline: v }) : undefined}
+              placeholder='Target Role / Headline'
+              className='italic text-stone-700'
+            />
+          </p>
+        )}
 
-        <div className='mt-3 flex justify-center'>
+        <div className='mt-2.5 flex justify-center'>
           <ContactLinksRow
             personalInfo={pi}
             variant='centered'
@@ -71,11 +73,10 @@ export function ExecutiveSerifTemplate({
         const renderSummary = () => {
           if (!data.summary) return null;
           return (
-            <section key='summary' className='mb-6 page-break-inside-avoid'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Executive Profile
+            <section key='summary' className='mb-5 page-break-inside-avoid'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Profile
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
               <div className='group relative text-stone-800 text-[12.5px] leading-relaxed text-justify'>
                 <InlineTextarea
                   value={data.summary}
@@ -84,11 +85,11 @@ export function ExecutiveSerifTemplate({
                   }
                   className='text-stone-800 text-[12.5px] text-justify font-serif'
                 />
-                {!readOnly && (
+                {!readOnly && onTriggerRewrite && (
                   <button
                     onClick={() => onTriggerRewrite('summary', 'summary', data.summary)}
                     disabled={rewritingKey === 'summary'}
-                    className='opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 right-0 p-1 text-stone-700 hover:text-black rounded bg-stone-100 border border-stone-300 print:hidden text-[10px] flex items-center gap-1'
+                    className='opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 right-0 p-1 text-stone-700 hover:text-black rounded bg-stone-100 border border-stone-300 print:hidden text-[10px] flex items-center gap-1 cursor-pointer'
                   >
                     {rewritingKey === 'summary' ? (
                       <Loader2 size={11} className='animate-spin' />
@@ -103,48 +104,36 @@ export function ExecutiveSerifTemplate({
           );
         };
 
-        const renderSkills = () => {
-          if (
-            !(
-              data.skills?.languages?.length ||
-              data.skills?.frameworks?.length ||
-              data.skills?.databases?.length ||
-              data.skills?.tools?.length
-            )
-          ) {
-            return null;
-          }
+        const renderEducation = () => {
+          if (!data.education?.length) return null;
           return (
-            <section key='skills' className='mb-6 page-break-inside-avoid'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Areas of Expertise & Technical Mastery
+            <section key='education' className='mb-5'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Education
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
-              <div className='space-y-1.5 text-[12px] text-stone-800 font-sans'>
-                {data.skills?.languages?.length > 0 && (
-                  <div className='flex items-baseline'>
-                    <span className='font-semibold text-stone-900 w-36 shrink-0'>Languages:</span>
-                    <span className='text-stone-700'>{data.skills.languages.join(', ')}</span>
+              <div className='space-y-3'>
+                {data.education.map((edu, eIdx) => (
+                  <div key={edu.id || eIdx} className='page-break-inside-avoid'>
+                    <div className='flex justify-between items-baseline'>
+                      <h3 className='font-bold text-[13px] text-stone-950'>{edu.institution}</h3>
+                      <span className='text-[11.5px] text-stone-700 font-sans italic'>
+                        {edu.startYear ? `${edu.startYear} – ` : ''}
+                        {edu.endYear || 'Present'}
+                      </span>
+                    </div>
+                    <div className='flex justify-between items-baseline text-[12px] text-stone-800'>
+                      <p className='italic'>
+                        {edu.degree}
+                        {edu.fieldOfStudy ? ` in ${edu.fieldOfStudy}` : ''}
+                      </p>
+                      {edu.score && (
+                        <span className='font-semibold text-stone-900 font-sans text-[11px]'>
+                          Score: {edu.score}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                )}
-                {data.skills?.frameworks?.length > 0 && (
-                  <div className='flex items-baseline'>
-                    <span className='font-semibold text-stone-900 w-36 shrink-0'>Frameworks:</span>
-                    <span className='text-stone-700'>{data.skills.frameworks.join(', ')}</span>
-                  </div>
-                )}
-                {data.skills?.databases?.length > 0 && (
-                  <div className='flex items-baseline'>
-                    <span className='font-semibold text-stone-900 w-36 shrink-0'>Databases:</span>
-                    <span className='text-stone-700'>{data.skills.databases.join(', ')}</span>
-                  </div>
-                )}
-                {data.skills?.tools?.length > 0 && (
-                  <div className='flex items-baseline'>
-                    <span className='font-semibold text-stone-900 w-36 shrink-0'>Tools & Systems:</span>
-                    <span className='text-stone-700'>{data.skills.tools.join(', ')}</span>
-                  </div>
-                )}
+                ))}
               </div>
             </section>
           );
@@ -153,53 +142,50 @@ export function ExecutiveSerifTemplate({
         const renderProjects = () => {
           if (!data.projects?.length) return null;
           return (
-            <section key='projects' className='mb-6'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Selected Projects & Technical Initiatives
+            <section key='projects' className='mb-5'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2.5 border-b border-stone-800 font-serif'>
+                Projects
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-4' />
-              <div className='space-y-4'>
+              <div className='space-y-3.5'>
                 {data.projects.map((proj, pIdx) => (
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>
-                    <div className='flex justify-between items-baseline border-b border-stone-200 pb-1 mb-1'>
-                      <div className='flex items-center gap-2'>
-                        <span className='font-bold text-[13.5px] text-stone-900'>{proj.title}</span>
-                        <VerificationBadge status={proj.verificationStatus} />
+                    <div className='flex justify-between items-baseline'>
+                      <div className='flex items-baseline gap-1.5 flex-wrap'>
+                        <span className='font-bold text-[13px] text-stone-950'>{proj.title}</span>
+                        {proj.techStack?.length > 0 && (
+                          <span className='text-[11.5px] text-stone-700 italic'>
+                            | {proj.techStack.join(', ')}
+                          </span>
+                        )}
                       </div>
-                      <div className='flex items-center gap-3 text-[11px] font-sans font-medium text-stone-700'>
-                        {proj.repositoryUrl && (
+                      <div className='flex items-center gap-2 text-[11px] font-sans font-semibold shrink-0 ml-2'>
+                        {formatHref(proj.repositoryUrl, 'web') && (
                           <a
                             href={formatHref(proj.repositoryUrl, 'web')}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='hover:underline'
+                            className='text-blue-700 hover:underline'
                           >
-                            Source Code ↗
+                            GitHub Link ↗
                           </a>
                         )}
-                        {proj.liveDemoUrl && (
+                        {formatHref(proj.liveDemoUrl, 'web') && (
                           <a
                             href={formatHref(proj.liveDemoUrl, 'web')}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='hover:underline font-bold text-stone-900'
+                            className='text-blue-700 hover:underline'
                           >
-                            Live Demonstration ↗
+                            Live Demo ↗
                           </a>
                         )}
                       </div>
                     </div>
 
-                    {proj.techStack?.length > 0 && (
-                      <p className='text-[11px] text-stone-600 font-sans italic mb-1.5'>
-                        Technologies: {proj.techStack.join(', ')}
-                      </p>
-                    )}
-
                     {proj.bullets?.length > 0 && (
-                      <ul className='space-y-1 text-[12px] text-stone-800 list-disc list-inside font-serif'>
+                      <ul className='mt-1 space-y-1 text-[12px] text-stone-800 list-disc list-inside font-serif'>
                         {proj.bullets.map((b, bIdx) => (
-                          <li key={bIdx} className='group'>
+                          <li key={bIdx} className='group leading-relaxed'>
                             <span className='relative'>
                               <InlineText
                                 value={b}
@@ -226,63 +212,29 @@ export function ExecutiveSerifTemplate({
           );
         };
 
-        const renderEducation = () => {
-          if (!data.education?.length) return null;
-          return (
-            <section key='education' className='mb-6'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Academic Background
-              </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
-              <div className='space-y-2'>
-                {data.education.map((edu, eIdx) => (
-                  <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
-                    <div>
-                      <h3 className='font-bold text-[13px] text-stone-900'>{edu.degree}</h3>
-                      <p className='text-[12px] text-stone-700 italic'>{edu.institution}</p>
-                    </div>
-                    <div className='text-right text-[11.5px] text-stone-600 font-sans'>
-                      {edu.score && (
-                        <span className='font-semibold text-stone-800 mr-2'>
-                          Score: {edu.score}
-                        </span>
-                      )}
-                      <span>
-                        {edu.startYear ? `${edu.startYear} - ` : ''}
-                        {edu.endYear || 'Present'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        };
-
         const renderExperience = () => {
           if (!data.experience?.length) return null;
           return (
-            <section key='experience' className='mb-6'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Executive Experience
+            <section key='experience' className='mb-5'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Experience
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
               <div className='space-y-3'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
-                      <div>
-                        <h3 className='font-bold text-[13px] text-stone-900'>{exp.role}</h3>
-                        <p className='text-[12px] text-stone-700 italic'>{exp.organization}</p>
-                      </div>
-                      <span className='text-[11px] text-stone-600 font-sans'>
-                        {exp.startDate} - {exp.endDate || 'Present'}
+                      <h3 className='font-bold text-[13px] text-stone-950'>{exp.role}</h3>
+                      <span className='text-[11.5px] text-stone-700 font-sans italic'>
+                        {exp.startDate} – {exp.endDate || 'Present'}
                       </span>
                     </div>
+                    {exp.organization && (
+                      <p className='text-[12px] text-stone-700 italic'>{exp.organization}</p>
+                    )}
                     {exp.bullets && exp.bullets.length > 0 && (
                       <ul className='mt-1 space-y-1 text-[12px] text-stone-800 list-disc list-inside font-serif'>
                         {exp.bullets.map((b, bIdx) => (
-                          <li key={bIdx}>{b}</li>
+                          <li key={bIdx} className='leading-relaxed'>{b}</li>
                         ))}
                       </ul>
                     )}
@@ -293,29 +245,75 @@ export function ExecutiveSerifTemplate({
           );
         };
 
+        const renderSkills = () => {
+          if (
+            !(
+              data.skills?.languages?.length ||
+              data.skills?.frameworks?.length ||
+              data.skills?.databases?.length ||
+              data.skills?.tools?.length
+            )
+          ) {
+            return null;
+          }
+          return (
+            <section key='skills' className='mb-5 page-break-inside-avoid'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Technical Skills
+              </h2>
+              <div className='space-y-1.5 text-[12px] text-stone-800 font-serif'>
+                {data.skills?.languages?.length > 0 && (
+                  <div>
+                    <span className='font-bold text-stone-950'>Languages: </span>
+                    <span className='text-stone-800'>{data.skills.languages.join(', ')}</span>
+                  </div>
+                )}
+                {data.skills?.frameworks?.length > 0 && (
+                  <div>
+                    <span className='font-bold text-stone-950'>Frameworks & Libraries: </span>
+                    <span className='text-stone-800'>{data.skills.frameworks.join(', ')}</span>
+                  </div>
+                )}
+                {data.skills?.databases?.length > 0 && (
+                  <div>
+                    <span className='font-bold text-stone-950'>Databases: </span>
+                    <span className='text-stone-800'>{data.skills.databases.join(', ')}</span>
+                  </div>
+                )}
+                {data.skills?.tools?.length > 0 && (
+                  <div>
+                    <span className='font-bold text-stone-950'>Tools & Systems: </span>
+                    <span className='text-stone-800'>{data.skills.tools.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        };
+
         const renderCertifications = () => {
           if (!data.certifications?.length) return null;
           return (
-            <section key='certifications' className='mb-6'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Professional Accreditations
+            <section key='certifications' className='mb-5'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Certifications
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
               <div className='space-y-1.5 text-[12px]'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
-                    <div>
-                      <span className='font-semibold text-stone-900'>{cert.title}</span>
-                      <span className='text-stone-600'> — {cert.issuer}</span>
+                    <div className='flex items-baseline gap-1.5 flex-wrap'>
+                      <span className='font-bold text-stone-950'>{cert.title || cert.name}</span>
+                      {cert.issuer && <span className='text-stone-700'>— {cert.issuer}</span>}
+                      {cert.issueDate && <span className='text-stone-600 font-sans text-[11px]'>({cert.issueDate})</span>}
                     </div>
-                    {cert.credentialUrl && (
+                    {formatHref(cert.credentialUrl, 'web') && (
                       <a
                         href={formatHref(cert.credentialUrl, 'web')}
                         target='_blank'
                         rel='noopener noreferrer'
-                        className='text-[11px] text-stone-700 hover:underline font-sans'
+                        className='text-[11px] text-blue-700 hover:underline font-sans font-semibold shrink-0 ml-2'
                       >
-                        View Credential ↗
+                        [Credential]
                       </a>
                     )}
                   </div>
@@ -328,48 +326,35 @@ export function ExecutiveSerifTemplate({
         const renderEvents = () => {
           if (!data.events?.length) return null;
           return (
-            <section key='events' className='mb-6'>
-              <h2 className='text-center text-[12px] font-bold tracking-[0.2em] text-stone-900 uppercase mb-2 font-serif'>
-                Workshops & Professional Events
+            <section key='events' className='mb-5'>
+              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
+                Extracurricular Activities & Events
               </h2>
-              <div className='w-12 h-0.5 bg-stone-400 mx-auto mb-3' />
-              <div className='space-y-3 text-[12px]'>
-                {data.events.map((evt, eIdx) => (
-                  <div key={evt.id || eIdx} className='page-break-inside-avoid'>
+              <div className='space-y-2 text-[12px]'>
+                {data.events.map((evt, vIdx) => (
+                  <div key={evt.id || vIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
-                      <div>
-                        <div className='flex items-center gap-2'>
-                          <span className='font-bold text-stone-900 font-serif'>{evt.title}</span>
-                          {evt.eventType && (
-                            <span className='text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-800 border border-stone-300 font-sans'>
-                              {evt.eventType}
-                            </span>
-                          )}
-                        </div>
-                        {(evt.organizer || evt.location) && (
-                          <span className='text-[11.5px] text-stone-600 block mt-0.5'>
-                            {[evt.organizer, evt.location].filter(Boolean).join(' • ')}
-                          </span>
-                        )}
+                      <div className='flex items-baseline gap-1.5'>
+                        <span className='font-bold text-stone-950'>{evt.title}</span>
+                        {evt.organizer && <span className='text-stone-700 italic'>— {evt.organizer}</span>}
                       </div>
                       <div className='flex items-center gap-2 font-sans'>
-                        {evt.date && <span className='text-[11px] text-stone-500'>{evt.date}</span>}
-                        {evt.credentialUrl && (
+                        {evt.date && <span className='text-[11px] text-stone-600 italic'>{evt.date}</span>}
+                        {formatHref(evt.credentialUrl, 'web') && (
                           <a
                             href={formatHref(evt.credentialUrl, 'web')}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='text-[11px] text-stone-700 hover:underline'
+                            className='text-[11px] text-blue-700 hover:underline font-semibold'
                           >
-                            Proof ↗
+                            [Credential]
                           </a>
                         )}
                       </div>
                     </div>
                     {evt.learnings && (
-                      <p className='mt-1 text-[11.5px] text-stone-700 leading-relaxed'>
-                        <span className='font-semibold text-stone-900'>Key Learnings: </span>
-                        {evt.learnings}
+                      <p className='text-[11.5px] text-stone-700 mt-0.5 font-serif leading-relaxed'>
+                        • {evt.learnings}
                       </p>
                     )}
                   </div>

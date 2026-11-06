@@ -219,7 +219,7 @@ export function CobaltEdgeTemplate({
                       </div>
 
                       <div className='flex items-center gap-2 text-[11px] font-semibold'>
-                        {proj.liveDemoUrl && (
+                        {formatHref(proj.liveDemoUrl, 'web') && (
                           <a
                             href={formatHref(proj.liveDemoUrl, 'web')}
                             target='_blank'
@@ -230,7 +230,7 @@ export function CobaltEdgeTemplate({
                             <span>Live App</span>
                           </a>
                         )}
-                        {proj.repositoryUrl && (
+                        {formatHref(proj.repositoryUrl, 'web') && (
                           <a
                             href={formatHref(proj.repositoryUrl, 'web')}
                             target='_blank'
@@ -358,7 +358,7 @@ export function CobaltEdgeTemplate({
                       <span className='font-semibold text-slate-900'>{cert.title}</span>
                       <span className='text-[10.5px] text-slate-500 block'>{cert.issuer}</span>
                     </div>
-                    {cert.credentialUrl && (
+                    {formatHref(cert.credentialUrl, 'web') && (
                       <a
                         href={formatHref(cert.credentialUrl, 'web')}
                         target='_blank'
@@ -406,7 +406,7 @@ export function CobaltEdgeTemplate({
                       </div>
                       <div className='flex items-center gap-2'>
                         {evt.date && <span className='text-[10.5px] text-slate-500 font-medium'>{evt.date}</span>}
-                        {evt.credentialUrl && (
+                        {formatHref(evt.credentialUrl, 'web') && (
                           <a
                             href={formatHref(evt.credentialUrl, 'web')}
                             target='_blank'
