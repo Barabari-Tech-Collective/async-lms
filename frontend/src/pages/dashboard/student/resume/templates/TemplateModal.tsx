@@ -75,7 +75,7 @@ export function TemplateModal({
               </div>
               <div>
                 <h2 className='font-bold text-[#1e2653] text-base sm:text-lg'>
-                  Select Resume Template (FlowCV Collection)
+                  Select Resume Template (CodeGuru Collection)
                 </h2>
                 <p className='text-xs text-slate-500'>
                   11 curated, placement-proven templates. Switch anytime without losing any content or progress.
@@ -143,7 +143,7 @@ export function TemplateModal({
                     {/* Top bar indicators */}
                     <div className='flex items-center justify-between'>
                       <span className='px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white/90 text-slate-700 shadow-2xs'>
-                        {tpl.flowcvName}
+                        {tpl.name}
                       </span>
                       {isSelected ? (
                         <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#333d7c] text-white shadow-2xs'>

@@ -7,6 +7,41 @@ import { InlineText, InlineTextarea } from '../InlineEdit';
 import { VerificationBadge, ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title, icon }: { title: string; icon?: React.ReactNode }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b border-slate-400 pb-1 mb-2'
+      style={{
+        borderBottom: '1px solid #334155',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans flex items-center gap-1.5'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+        }}
+      >
+        {icon}
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function ClassicCorporateTemplate({
   data,
   sections,
@@ -37,9 +72,9 @@ export function ClassicCorporateTemplate({
   const activeOrder = getResolvedSectionOrder(sections, data.sectionOrder);
 
   return (
-    <div className='font-sans text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-slate-300 shadow-xs'>
+    <div className='font-sans text-slate-900 text-[12px] leading-normal max-w-[800px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-6 print:border-none print:shadow-none select-text border border-slate-300 shadow-xs'>
       {/* ── HEADER ────────────────────────────────────────────────────────── */}
-      <header className='pb-4 border-b-2 border-slate-900 mb-5 text-center'>
+      <header className='pb-2.5 border-b-2 border-slate-900 mb-3 text-center'>
         <OrganizationLogoBadge variant='corporate-center' />
         <h1 className='text-2xl sm:text-3xl font-black tracking-tight text-slate-950 uppercase'>
           <InlineText
@@ -73,7 +108,7 @@ export function ClassicCorporateTemplate({
         const renderSummary = () => {
           if (!data.summary) return null;
           return (
-            <section key='summary' className='mb-5 page-break-inside-avoid'>
+            <section key='summary' className='mb-3 page-break-inside-avoid'>
               <div className='border-l-4 border-slate-800 bg-slate-50 p-3 rounded-r-md'>
                 <div className='group relative text-slate-800 text-[12px] leading-relaxed'>
                   <InlineTextarea
@@ -115,11 +150,8 @@ export function ClassicCorporateTemplate({
             return null;
           }
           return (
-            <section key='skills' className='mb-5 page-break-inside-avoid'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono flex items-center gap-1.5'>
-                <Table size={12} className='text-slate-600' />
-                CORE COMPETENCIES & TECHNICAL TOOLS
-              </h2>
+            <section key='skills' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='CORE COMPETENCIES & TECHNICAL TOOLS' icon={<Table size={12} className='text-slate-600' />} />
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px] bg-slate-50/60 p-3 rounded-md border border-slate-200'>
                 {data.skills.languages?.length > 0 && (
                   <div>
@@ -161,11 +193,9 @@ export function ClassicCorporateTemplate({
         const renderProjects = () => {
           if (!data.projects?.length) return null;
           return (
-            <section key='projects' className='mb-5'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                {catCfg.projectLabels.sectionTitle.toUpperCase()}
-              </h2>
-              <div className='space-y-3.5'>
+            <section key='projects' className='mb-3'>
+              <SectionHeading title={catCfg.projectLabels.sectionTitle.toUpperCase()} />
+              <div className='space-y-2'>
                 {data.projects.map((proj, pIdx) => (
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
@@ -236,10 +266,8 @@ export function ClassicCorporateTemplate({
         const renderEducation = () => {
           if (!data.education?.length) return null;
           return (
-            <section key='education' className='mb-5'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                EDUCATION & CREDENTIALS
-              </h2>
+            <section key='education' className='mb-3'>
+              <SectionHeading title='EDUCATION & CREDENTIALS' />
               <div className='space-y-2'>
                 {data.education.map((edu, eIdx) => (
                   <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
@@ -268,11 +296,9 @@ export function ClassicCorporateTemplate({
         const renderExperience = () => {
           if (!data.experience?.length) return null;
           return (
-            <section key='experience' className='mb-5'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                WORK EXPERIENCE
-              </h2>
-              <div className='space-y-3.5'>
+            <section key='experience' className='mb-3'>
+              <SectionHeading title='WORK EXPERIENCE' />
+              <div className='space-y-2'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
@@ -301,10 +327,8 @@ export function ClassicCorporateTemplate({
         const renderCertifications = () => {
           if (!data.certifications?.length) return null;
           return (
-            <section key='certifications' className='mb-5'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                PROFESSIONAL CERTIFICATIONS
-              </h2>
+            <section key='certifications' className='mb-3'>
+              <SectionHeading title='PROFESSIONAL CERTIFICATIONS' />
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11.5px]'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200 page-break-inside-avoid'>
@@ -332,10 +356,8 @@ export function ClassicCorporateTemplate({
         const renderEvents = () => {
           if (!data.events?.length) return null;
           return (
-            <section key='events' className='mb-5'>
-              <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-1 mb-2 font-mono'>
-                WORKSHOPS, HACKATHONS & EVENTS
-              </h2>
+            <section key='events' className='mb-3'>
+              <SectionHeading title='WORKSHOPS, HACKATHONS & EVENTS' />
               <div className='space-y-2 text-[11.5px]'>
                 {data.events.map((evt, eIdx) => (
                   <div key={evt.id || eIdx} className='p-2.5 rounded bg-slate-50 border border-slate-200 page-break-inside-avoid'>

@@ -101,6 +101,10 @@ export default function PublicResumeView() {
         .exporting-pdf button {
           display: none !important;
         }
+        .exporting-pdf [data-section-heading] {
+          padding-bottom: 3.5mm !important;
+          margin-bottom: 6px !important;
+        }
       `;
       document.head.appendChild(exportStyle);
       el.classList.add('exporting-pdf');
@@ -131,7 +135,6 @@ export default function PublicResumeView() {
           onclone: (clonedDoc: Document) => {
             clonedDoc.querySelectorAll('[data-section-heading]').forEach((el) => {
               const htmlEl = el as HTMLElement;
-              htmlEl.style.borderBottom = '1px solid #000000';
               htmlEl.style.paddingBottom = '3.5mm';
               htmlEl.style.marginBottom = '6px';
             });

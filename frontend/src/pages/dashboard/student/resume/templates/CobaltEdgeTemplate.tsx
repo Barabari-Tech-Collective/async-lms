@@ -6,6 +6,40 @@ import { InlineText, InlineTextarea } from '../InlineEdit';
 import { VerificationBadge, ContactLinksRow, AvatarPhoto, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='flex items-center gap-2 mb-2 pb-1 border-b border-blue-200'
+      style={{
+        borderBottom: '1px solid #bfdbfe',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'flex',
+        alignItems: 'center',
+        width: '100%',
+      }}
+    >
+      <div className='w-1.5 h-3.5 bg-blue-600 rounded-full' />
+      <h2
+        className='text-[11px] font-bold tracking-wider text-slate-900 uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function CobaltEdgeTemplate({
   data,
   sections,
@@ -35,7 +69,7 @@ export function CobaltEdgeTemplate({
   const activeOrder = getResolvedSectionOrder(sections, data.sectionOrder);
 
   return (
-    <div className='font-sans text-slate-800 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-blue-100 shadow-xs'>
+    <div className='font-sans text-slate-800 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-blue-100 shadow-xs'>
       {/* ── HEADER (Vibrant Cobalt Strip) ─────────────────────────────────── */}
       <header className='pb-4 border-b-2 border-blue-600 mb-5'>
         <div className='flex flex-row items-start justify-between gap-4'>
@@ -88,13 +122,9 @@ export function CobaltEdgeTemplate({
         const renderSummary = () => {
           if (!data.summary) return null;
           return (
-            <section key='summary' className='mb-5 page-break-inside-avoid'>
-              <div className='flex items-center gap-2 mb-2'>
-                <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
-                <h2 className='text-[11.5px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  ABOUT & CREATIVE FOCUS
-                </h2>
-              </div>
+            <section key='summary' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='ABOUT & CREATIVE FOCUS
+                ' />
               <div className='group relative text-slate-700 text-[12.5px] leading-relaxed pl-3.5'>
                 <InlineTextarea
                   value={data.summary}
@@ -134,13 +164,9 @@ export function CobaltEdgeTemplate({
             return null;
           }
           return (
-            <section key='skills' className='mb-5 page-break-inside-avoid'>
-              <div className='flex items-center gap-2 mb-2'>
-                <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
-                <h2 className='text-[11.5px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  TECH STACK & DESIGN SYSTEMS
-                </h2>
-              </div>
+            <section key='skills' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='TECH STACK & DESIGN SYSTEMS
+                ' />
               <div className='space-y-2 pl-3.5'>
                 {data.skills?.frameworks?.length > 0 && (
                   <div>
@@ -199,13 +225,9 @@ export function CobaltEdgeTemplate({
         const renderProjects = () => {
           if (!data.projects?.length) return null;
           return (
-            <section key='projects' className='mb-5'>
-              <div className='flex items-center gap-2 mb-2'>
-                <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
-                <h2 className='text-[11.5px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  FEATURED PROJECTS & LIVE APPS
-                </h2>
-              </div>
+            <section key='projects' className='mb-3'>
+              <SectionHeading title='FEATURED PROJECTS & LIVE APPS
+                ' />
               <div className='space-y-3.5 pl-3.5'>
                 {data.projects.map((proj, pIdx) => (
                   <div
@@ -284,7 +306,7 @@ export function CobaltEdgeTemplate({
         const renderEducation = () => {
           if (!data.education?.length) return null;
           return (
-            <section key='education' className='mb-5'>
+            <section key='education' className='mb-3'>
               <div className='flex items-center gap-2 mb-2'>
                 <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
                 <h2 className='text-[11px] font-black tracking-wider text-slate-900 uppercase font-mono'>
@@ -311,7 +333,7 @@ export function CobaltEdgeTemplate({
         const renderExperience = () => {
           if (!data.experience?.length) return null;
           return (
-            <section key='experience' className='mb-5'>
+            <section key='experience' className='mb-3'>
               <div className='flex items-center gap-2 mb-2'>
                 <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
                 <h2 className='text-[11px] font-black tracking-wider text-slate-900 uppercase font-mono'>
@@ -344,7 +366,7 @@ export function CobaltEdgeTemplate({
         const renderCertifications = () => {
           if (!data.certifications?.length) return null;
           return (
-            <section key='certifications' className='mb-5'>
+            <section key='certifications' className='mb-3'>
               <div className='flex items-center gap-2 mb-2'>
                 <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
                 <h2 className='text-[11px] font-black tracking-wider text-slate-900 uppercase font-mono'>
@@ -378,7 +400,7 @@ export function CobaltEdgeTemplate({
         const renderEvents = () => {
           if (!data.events?.length) return null;
           return (
-            <section key='events' className='mb-5'>
+            <section key='events' className='mb-3'>
               <div className='flex items-center gap-2 mb-2'>
                 <div className='w-1.5 h-4 bg-blue-600 rounded-full' />
                 <h2 className='text-[11px] font-black tracking-wider text-slate-900 uppercase font-mono'>

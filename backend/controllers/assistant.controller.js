@@ -93,6 +93,11 @@ exports.chat = async (req, res) => {
   }
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(id) {
+  return typeof id === 'string' && UUID_REGEX.test(id.trim());
+}
+
 // ── URL & Field Validation Helpers (Issue 4) ──────────────────────────────────
 function sanitizeUrl(urlString, type = 'web') {
   if (!urlString || typeof urlString !== 'string') return null;
@@ -482,10 +487,13 @@ exports.getAllResumes = async (req, res) => {
 // -- GET /api/assistant/public/resume/:id (Public Resume View for Recruiters) --
 exports.getPublicResumeById = async (req, res) => {
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
+  }
   try {
     const result = await pool.query(
       `SELECT sr.id, sr.title, sr.schema_version, sr.version, sr.document, sr.updated_at,
-              u.full_name as author_name, u.email as author_email
+              u.full_name as author_name
        FROM public.student_resumes sr
        LEFT JOIN public.users u ON u.id = sr.user_id
        WHERE sr.id = $1 AND sr.deleted_at IS NULL
@@ -505,6 +513,9 @@ exports.getPublicResumeById = async (req, res) => {
 exports.getResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(404).json({ message: 'Resume not found.' });
+  }
   try {
     const result = await pool.query(
       `SELECT id, title, schema_version, version, document, is_primary, created_at, updated_at
@@ -576,6 +587,9 @@ exports.createResume = async (req, res) => {
 exports.updateResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
   const { title, document, expectedVersion } = req.body;
 
   if (!document || typeof document !== 'object') {
@@ -671,6 +685,9 @@ exports.updateResumeById = async (req, res) => {
 exports.renameResume = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
   const { title } = req.body;
 
   if (!title || typeof title !== 'string' || !title.trim()) {
@@ -707,6 +724,9 @@ exports.renameResume = async (req, res) => {
 exports.duplicateResume = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
   const { title } = req.body || {};
 
   try {
@@ -746,6 +766,9 @@ exports.duplicateResume = async (req, res) => {
 exports.setPrimaryResume = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
 
   try {
     const checkRes = await pool.query(
@@ -784,6 +807,9 @@ exports.setPrimaryResume = async (req, res) => {
 exports.deleteResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
 
   try {
     const targetRes = await pool.query(
@@ -856,6 +882,9 @@ exports.getRecycleBinResumes = async (req, res) => {
 exports.restoreResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
 
   try {
     const checkRes = await pool.query(
@@ -898,6 +927,9 @@ exports.restoreResumeById = async (req, res) => {
 exports.destroyResumeById = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
+  if (!isValidUuid(id)) {
+    return res.status(400).json({ message: 'Invalid resume ID format.' });
+  }
 
   try {
     const targetRes = await pool.query(

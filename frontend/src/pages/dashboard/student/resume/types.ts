@@ -116,7 +116,7 @@ export type TemplateCourseTrack =
 export interface ResumeTemplateMeta {
   id: string;
   name: string;
-  flowcvName: string;
+  flowcvName?: string;
   headline: string;
   recommendedFor: TemplateCourseTrack;
   description: string;

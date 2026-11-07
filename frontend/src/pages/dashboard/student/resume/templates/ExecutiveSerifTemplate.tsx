@@ -6,6 +6,38 @@ import { InlineText, InlineTextarea } from '../InlineEdit';
 import { ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b border-stone-800 pb-0.5 mb-2'
+      style={{
+        borderBottom: '1px solid #292524',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-left text-[11px] font-bold tracking-[0.14em] text-stone-900 uppercase font-serif'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.14em',
+          color: '#1c1917',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function ExecutiveSerifTemplate({
   data,
   sections,
@@ -35,7 +67,7 @@ export function ExecutiveSerifTemplate({
   const activeOrder = getResolvedSectionOrder(sections, data.sectionOrder);
 
   return (
-    <div className='font-serif text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-stone-200 shadow-xs'>
+    <div className='font-serif text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-stone-200 shadow-xs'>
       {/* ── HEADER (Centered Classical Academic / Harvard Format) ────────── */}
       <header className='text-center pb-4 mb-4 border-b border-stone-300'>
         <OrganizationLogoBadge variant='executive-seal' />
@@ -73,10 +105,9 @@ export function ExecutiveSerifTemplate({
         const renderSummary = () => {
           if (!data.summary) return null;
           return (
-            <section key='summary' className='mb-5 page-break-inside-avoid'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Profile
-              </h2>
+            <section key='summary' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='Profile
+              ' />
               <div className='group relative text-stone-800 text-[12.5px] leading-relaxed text-justify'>
                 <InlineTextarea
                   value={data.summary}
@@ -107,11 +138,10 @@ export function ExecutiveSerifTemplate({
         const renderEducation = () => {
           if (!data.education?.length) return null;
           return (
-            <section key='education' className='mb-5'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Education
-              </h2>
-              <div className='space-y-3'>
+            <section key='education' className='mb-3'>
+              <SectionHeading title='Education
+              ' />
+              <div className='space-y-1.5'>
                 {data.education.map((edu, eIdx) => (
                   <div key={edu.id || eIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
@@ -142,11 +172,11 @@ export function ExecutiveSerifTemplate({
         const renderProjects = () => {
           if (!data.projects?.length) return null;
           return (
-            <section key='projects' className='mb-5'>
+            <section key='projects' className='mb-3'>
               <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2.5 border-b border-stone-800 font-serif'>
                 Projects
               </h2>
-              <div className='space-y-3.5'>
+              <div className='space-y-2'>
                 {data.projects.map((proj, pIdx) => (
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
@@ -215,11 +245,10 @@ export function ExecutiveSerifTemplate({
         const renderExperience = () => {
           if (!data.experience?.length) return null;
           return (
-            <section key='experience' className='mb-5'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Experience
-              </h2>
-              <div className='space-y-3'>
+            <section key='experience' className='mb-3'>
+              <SectionHeading title='Experience
+              ' />
+              <div className='space-y-1.5'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
@@ -257,10 +286,9 @@ export function ExecutiveSerifTemplate({
             return null;
           }
           return (
-            <section key='skills' className='mb-5 page-break-inside-avoid'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Technical Skills
-              </h2>
+            <section key='skills' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='Technical Skills
+              ' />
               <div className='space-y-1.5 text-[12px] text-stone-800 font-serif'>
                 {data.skills?.languages?.length > 0 && (
                   <div>
@@ -294,10 +322,9 @@ export function ExecutiveSerifTemplate({
         const renderCertifications = () => {
           if (!data.certifications?.length) return null;
           return (
-            <section key='certifications' className='mb-5'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Certifications
-              </h2>
+            <section key='certifications' className='mb-3'>
+              <SectionHeading title='Certifications
+              ' />
               <div className='space-y-1.5 text-[12px]'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
@@ -326,10 +353,9 @@ export function ExecutiveSerifTemplate({
         const renderEvents = () => {
           if (!data.events?.length) return null;
           return (
-            <section key='events' className='mb-5'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2 border-b border-stone-800 font-serif'>
-                Extracurricular Activities & Events
-              </h2>
+            <section key='events' className='mb-3'>
+              <SectionHeading title='Extracurricular Activities & Events
+              ' />
               <div className='space-y-2 text-[12px]'>
                 {data.events.map((evt, vIdx) => (
                   <div key={evt.id || vIdx} className='page-break-inside-avoid'>

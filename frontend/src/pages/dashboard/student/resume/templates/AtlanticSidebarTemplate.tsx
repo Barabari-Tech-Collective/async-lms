@@ -29,6 +29,38 @@ export interface TemplateProps {
   rewritingKey: string | null;
 }
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b border-slate-200 pb-1 mb-2'
+      style={{
+        borderBottom: '1px solid #e2e8f0',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-bold tracking-[0.14em] text-[#1e2653] uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#1e2653',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function AtlanticSidebarTemplate({
   data,
   onUpdate,
@@ -318,21 +350,20 @@ export function AtlanticSidebarTemplate({
           </div>
 
           <div className='text-[9.5px] text-slate-400 text-center pt-4 border-t border-white/10'>
-            FlowCV • Atlantic Blue
+            CodeGuru • Atlantic Blue
           </div>
         </aside>
 
         {/* ── RIGHT MAIN BODY (Col 5-12) ────────────────────────────────────── */}
-        <main className='col-span-8 p-6 sm:p-8 print:p-7 space-y-6 bg-white'>
+        <main className='col-span-8 p-6 sm:p-8 print:p-7 space-y-3.5 bg-white'>
           {activeOrder
             .filter((k) => k !== 'skills' && k !== 'certifications')
             .map((sectionKey) => {
               if (sectionKey === 'summary') {
                 return data.summary ? (
                   <section key='summary' className='page-break-inside-avoid'>
-                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                      PROFILE SUMMARY
-                    </h2>
+                    <SectionHeading title='PROFILE SUMMARY
+                    ' />
                     <div className='group relative text-slate-700 text-[12px] leading-relaxed'>
                       <InlineTextarea
                         value={data.summary}
@@ -362,11 +393,10 @@ export function AtlanticSidebarTemplate({
 
               if (sectionKey === 'projects') {
                 return data.projects?.length > 0 ? (
-                  <section key='projects' className='space-y-4'>
-                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                      FEATURED PROJECTS & CAPSTONES
-                    </h2>
-                    <div className='space-y-4'>
+                  <section key='projects' className='space-y-2'>
+                    <SectionHeading title='FEATURED PROJECTS & CAPSTONES
+                    ' />
+                    <div className='space-y-2'>
                       {data.projects.map((proj, pIdx) => (
                         <div key={proj.id || pIdx} className='page-break-inside-avoid'>
                           <div className='flex flex-wrap items-baseline justify-between gap-2'>
@@ -456,9 +486,8 @@ export function AtlanticSidebarTemplate({
               if (sectionKey === 'education') {
                 return data.education?.length > 0 ? (
                   <section key='education' className='space-y-2.5'>
-                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                      EDUCATION
-                    </h2>
+                    <SectionHeading title='EDUCATION
+                    ' />
                     <div className='space-y-2.5'>
                       {data.education.map((edu, eIdx) => (
                         <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
@@ -490,10 +519,9 @@ export function AtlanticSidebarTemplate({
 
               if (sectionKey === 'experience') {
                 return data.experience?.length > 0 ? (
-                  <section key='experience' className='space-y-3'>
-                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                      WORK EXPERIENCE
-                    </h2>
+                  <section key='experience' className='space-y-1.5'>
+                    <SectionHeading title='WORK EXPERIENCE
+                    ' />
                     <div className='space-y-3'>
                       {data.experience.map((exp, xIdx) => (
                         <div key={exp.id || xIdx} className='page-break-inside-avoid'>
@@ -529,9 +557,8 @@ export function AtlanticSidebarTemplate({
               if (sectionKey === 'events') {
                 return data.events && data.events.length > 0 ? (
                   <section key='events' className='space-y-3'>
-                    <h2 className='text-[11px] font-black tracking-[0.16em] text-[#1e2653] uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                      WORKSHOPS & EVENTS
-                    </h2>
+                    <SectionHeading title='WORKSHOPS & EVENTS
+                    ' />
                     <div className='space-y-3'>
                       {data.events.map((evt, eIdx) => (
                         <div key={evt.id || eIdx} className='page-break-inside-avoid'>

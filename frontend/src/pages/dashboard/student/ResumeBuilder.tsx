@@ -16,7 +16,6 @@ import { ResumePreviewView } from './resume/ResumePreviewView';
 
 export default function ResumeBuilder() {
   const user = useAppSelector(selectUser);
-  const getDraftKey = useCallback((uid?: string | number) => (uid ? `codeguru_resume_draft_${uid}` : null), []);
 
   const [resumesList, setResumesList] = useState<ResumeListItem[]>([]);
   const [resumeRecord, setResumeRecord] = useState<ResumeRecord | null>(null);
@@ -63,21 +62,6 @@ export default function ResumeBuilder() {
       localStorage.removeItem('codeguru_resume_draft');
     } catch {}
 
-    const userDraftKey = getDraftKey(user.id);
-
-    // Helper to detect ghost boilerplate from prior dev versions
-    const isGhostMockResume = (doc: any) => {
-      if (!doc) return false;
-      const hasMockProject = doc.projects?.some((p: any) => p.title === 'Centralized Code Evaluator Engine');
-      const hasMockEdu = doc.education?.some(
-        (e: any) => typeof e.institution === 'string' && e.institution.includes('Indian Institute of Technology')
-      );
-      const hasMockSummary =
-        typeof doc.summary === 'string' &&
-        doc.summary.includes('Passionate Software Engineer skilled in full-stack web development');
-      return hasMockProject || (hasMockEdu && hasMockSummary);
-    };
-
     async function loadSavedResume() {
       try {
         const res = await apiClient.get('/assistant/resumes');
@@ -101,30 +85,6 @@ export default function ResumeBuilder() {
           if (fullRes.data?.success && isMounted) {
             const record = fullRes.data.data as ResumeRecord;
             let finalDoc = record.document;
-
-            // Purge ghost mock resume if detected
-            if (isGhostMockResume(finalDoc)) {
-              try {
-                await apiClient.delete(`/assistant/resume/${record.id}`);
-              } catch {}
-              if (userDraftKey) {
-                try {
-                  localStorage.removeItem(userDraftKey);
-                } catch {}
-              }
-              const refetch = await apiClient.get('/assistant/resumes');
-              const remaining = (refetch.data?.data || []) as ResumeListItem[];
-              setResumesList(remaining);
-              if (remaining.length === 0) {
-                setResumeRecord(null);
-                resumeRecordRef.current = null;
-                const freshDoc = createEmptyResume(user);
-                setResumeDoc(freshDoc);
-                resumeDocRef.current = freshDoc;
-                setInitialLoading(false);
-                return;
-              }
-            }
 
             // Sanitize cross-student email differences
             if (
@@ -183,7 +143,7 @@ export default function ResumeBuilder() {
     return () => {
       isMounted = false;
     };
-  }, [user?.id, user?.email, user?.full_name, getDraftKey, fetchRecycleBinCount]);
+  }, [user?.id, user?.email, user?.full_name, fetchRecycleBinCount]);
 
   // 2. Autosave with Debounce & Version Sync for Active Resume
   const triggerAutosave = useCallback((newDoc: ResumeDocType) => {
@@ -667,7 +627,6 @@ export default function ResumeBuilder() {
         box-shadow: none !important;
       }
       .exporting-pdf [data-section-heading] {
-        border-bottom: 1px solid #000000 !important;
         padding-bottom: 3.5mm !important;
         margin-bottom: 6px !important;
       }
@@ -709,7 +668,6 @@ export default function ResumeBuilder() {
             });
             clonedDoc.querySelectorAll('[data-section-heading]').forEach((el) => {
               const htmlEl = el as HTMLElement;
-              htmlEl.style.borderBottom = '1px solid #000000';
               htmlEl.style.paddingBottom = '3.5mm';
               htmlEl.style.marginBottom = '6px';
             });

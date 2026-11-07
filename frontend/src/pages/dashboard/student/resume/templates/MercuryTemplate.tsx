@@ -6,6 +6,39 @@ import { InlineText, InlineTextarea } from '../InlineEdit';
 import { VerificationBadge, ContactLinksRow, AvatarPhoto, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b-2 border-slate-900 pb-1 mb-2'
+      style={{
+        borderBottom: '2px solid #0f172a',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-bold tracking-[0.14em] text-slate-900 uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.14em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+          display: 'block',
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function MercuryTemplate({
   data,
   sections,
@@ -35,9 +68,9 @@ export function MercuryTemplate({
   const activeOrder = getResolvedSectionOrder(sections, data.sectionOrder);
 
   return (
-    <div className='font-sans text-slate-800 text-[13px] leading-relaxed max-w-[800px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text'>
+    <div className='font-sans text-slate-800 text-[12px] leading-normal max-w-[800px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-6 print:border-none print:shadow-none select-text'>
       {/* ── HEADER ────────────────────────────────────────────────────────── */}
-      <header className='mb-6 pb-4 border-b border-slate-200'>
+      <header className='mb-3 pb-2.5 border-b border-slate-200'>
         <div className='flex flex-row items-start justify-between gap-4'>
           <div className='text-left'>
             <h1 className='text-[26px] sm:text-[30px] font-black tracking-tight text-slate-950 uppercase'>
@@ -89,19 +122,15 @@ export function MercuryTemplate({
         const renderSummary = () => {
           if (!data.summary) return null;
           return (
-            <div key='summary' className='mb-6 page-break-inside-avoid'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  PROFESSIONAL SUMMARY
-                </h2>
-              </div>
-              <div className='group relative text-slate-700 text-[12.5px] leading-relaxed'>
+            <div key='summary' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='PROFESSIONAL SUMMARY' />
+              <div className='group relative text-slate-700 text-[11.5px] leading-relaxed'>
                 <InlineTextarea
                   value={data.summary}
                   onChange={
                     onUpdate && !readOnly ? (v) => onUpdate({ ...data, summary: v }) : undefined
                   }
-                  className='text-slate-700 text-[12.5px]'
+                  className='text-slate-700 text-[11.5px]'
                 />
                 {!readOnly && (
                   <button
@@ -135,13 +164,9 @@ export function MercuryTemplate({
             return null;
           }
           return (
-            <div key='skills' className='mb-6 page-break-inside-avoid'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  TECHNICAL SKILLS
-                </h2>
-              </div>
-              <div className='space-y-1.5 text-[12.5px] text-slate-800'>
+            <div key='skills' className='mb-3 page-break-inside-avoid'>
+              <SectionHeading title='TECHNICAL SKILLS' />
+              <div className='space-y-1 text-[11.5px] text-slate-800'>
                 {data.skills?.languages?.length > 0 && (
                   <div className='flex items-baseline'>
                     <span className='font-bold text-slate-900 w-36 shrink-0'>Languages:</span>
@@ -174,13 +199,9 @@ export function MercuryTemplate({
         const renderProjects = () => {
           if (!data.projects?.length) return null;
           return (
-            <div key='projects' className='mb-6'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  PROJECTS
-                </h2>
-              </div>
-              <div className='space-y-4'>
+            <div key='projects' className='mb-3'>
+              <SectionHeading title='PROJECTS' />
+              <div className='space-y-1'>
                 {data.projects.map((proj, pIdx) => (
                   <div
                     key={proj.id || pIdx}
@@ -188,7 +209,7 @@ export function MercuryTemplate({
                   >
                     <div className='flex flex-wrap items-baseline justify-between gap-2'>
                       <div className='flex items-center gap-2'>
-                        <span className='font-bold text-[13.5px] text-slate-900'>
+                        <span className='font-bold text-[12.5px] text-slate-900'>
                           <InlineText
                             value={proj.title}
                             onChange={
@@ -200,7 +221,7 @@ export function MercuryTemplate({
                                   }
                                 : undefined
                             }
-                            className='font-bold text-[13.5px] text-slate-900'
+                            className='font-bold text-[12.5px] text-slate-900'
                           />
                         </span>
                         <VerificationBadge status={proj.verificationStatus} />
@@ -240,7 +261,7 @@ export function MercuryTemplate({
                     )}
 
                     {proj.bullets && proj.bullets.length > 0 && (
-                      <ul className='mt-2 space-y-1.5'>
+                      <ul className='mt-1 space-y-0.5'>
                         {proj.bullets.map((bullet, bIdx) => {
                           const rewriteKey = `proj_bullet_${pIdx}_${bIdx}`;
                           return (
@@ -298,17 +319,13 @@ export function MercuryTemplate({
         const renderEducation = () => {
           if (!data.education?.length) return null;
           return (
-            <div key='education' className='mb-6'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  EDUCATION
-                </h2>
-              </div>
-              <div className='space-y-3'>
+            <div key='education' className='mb-3'>
+              <SectionHeading title='EDUCATION' />
+              <div className='space-y-1.5'>
                 {data.education.map((edu, eIdx) => (
                   <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
                     <div>
-                      <h3 className='font-bold text-[13px] text-slate-900'>
+                      <h3 className='font-bold text-[12px] text-slate-900'>
                         <InlineText
                           value={edu.degree}
                           onChange={
@@ -320,7 +337,7 @@ export function MercuryTemplate({
                                 }
                               : undefined
                           }
-                          className='font-bold text-[13px] text-slate-900'
+                          className='font-bold text-[12px] text-slate-900'
                         />
                       </h3>
                       <p className='text-[12px] text-slate-600'>
@@ -366,18 +383,14 @@ export function MercuryTemplate({
         const renderExperience = () => {
           if (!data.experience?.length) return null;
           return (
-            <div key='experience' className='mb-6'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  EXPERIENCE
-                </h2>
-              </div>
-              <div className='space-y-4'>
+            <div key='experience' className='mb-3'>
+              <SectionHeading title='EXPERIENCE' />
+              <div className='space-y-2'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
                       <div>
-                        <h3 className='font-bold text-[13px] text-slate-900'>{exp.role}</h3>
+                        <h3 className='font-bold text-[12px] text-slate-900'>{exp.role}</h3>
                         <p className='text-[12px] text-[#333d7c] font-medium'>
                           {[exp.organization || exp.company, exp.location].filter(Boolean).join(' • ')}
                           {exp.employmentType ? ` (${exp.employmentType})` : ''}
@@ -388,7 +401,7 @@ export function MercuryTemplate({
                       </span>
                     </div>
                     {exp.bullets && exp.bullets.length > 0 && (
-                      <ul className='mt-2 space-y-1 text-[12px] text-slate-700'>
+                      <ul className='mt-1 space-y-0.5 text-[11.5px] text-slate-700'>
                         {exp.bullets.map((b, bIdx) => (
                           <li key={bIdx} className='flex items-start gap-2'>
                             <span className='mt-1.5 w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0' />
@@ -407,12 +420,8 @@ export function MercuryTemplate({
         const renderCertifications = () => {
           if (!data.certifications?.length) return null;
           return (
-            <div key='certifications' className='mb-6'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  CERTIFICATIONS
-                </h2>
-              </div>
+            <div key='certifications' className='mb-3'>
+              <SectionHeading title='CERTIFICATIONS' />
               <div className='space-y-2'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex items-center justify-between text-[12px] page-break-inside-avoid'>
@@ -442,19 +451,15 @@ export function MercuryTemplate({
         const renderEvents = () => {
           if (!data.events?.length) return null;
           return (
-            <div key='events' className='mb-6'>
-              <div className='flex items-center gap-2 border-b-2 border-slate-800 pb-1 mb-3'>
-                <h2 className='text-[12px] font-black tracking-[0.18em] text-slate-900 uppercase font-mono'>
-                  WORKSHOPS, HACKATHONS & EVENTS
-                </h2>
-              </div>
-              <div className='space-y-3'>
+            <div key='events' className='mb-3'>
+              <SectionHeading title='WORKSHOPS, HACKATHONS & EVENTS' />
+              <div className='space-y-1.5'>
                 {data.events.map((evt, eIdx) => (
                   <div key={evt.id || eIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
                       <div>
                         <div className='flex items-center gap-2'>
-                          <h3 className='font-bold text-[13px] text-slate-900'>{evt.title}</h3>
+                          <h3 className='font-bold text-[12px] text-slate-900'>{evt.title}</h3>
                           {evt.eventType && (
                             <span className='text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200'>
                               {evt.eventType}

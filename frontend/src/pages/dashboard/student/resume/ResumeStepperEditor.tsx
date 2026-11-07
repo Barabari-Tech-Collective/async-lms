@@ -29,6 +29,7 @@ import { compressAvatarImage, calcLocalMatchAnalysis, validateUrl } from './resu
 import { CommaSeparatedInput } from './ResumeCommon';
 import { toast } from 'react-hot-toast';
 import { cn } from '@/lib/utils';
+import CalendarPicker from '@/components/ui/CalendarPicker';
 
 interface ResumeStepperEditorProps {
   resumeDoc: ResumeDocType;
@@ -192,55 +193,6 @@ function localPolishFallback(text: string, _context?: string): { proposedText: s
   };
 }
 
-const FULL_MONTHS = [
-  { short: 'Jan', full: 'January' },
-  { short: 'Feb', full: 'February' },
-  { short: 'Mar', full: 'March' },
-  { short: 'Apr', full: 'April' },
-  { short: 'May', full: 'May' },
-  { short: 'Jun', full: 'June' },
-  { short: 'Jul', full: 'July' },
-  { short: 'Aug', full: 'August' },
-  { short: 'Sep', full: 'September' },
-  { short: 'Oct', full: 'October' },
-  { short: 'Nov', full: 'November' },
-  { short: 'Dec', full: 'December' },
-];
-
-function parseMonthYear(val: string): {
-  month: string;
-  year: string;
-  day: string;
-  isPresent: boolean;
-} {
-  if (!val || !val.trim()) {
-    return { month: '', year: '', day: '', isPresent: false };
-  }
-  const trimmed = val.trim();
-  if (trimmed.toLowerCase() === 'present') {
-    return { month: '', year: '', day: '', isPresent: true };
-  }
-
-  const yearMatch = trimmed.match(/\b(19\d\d|20\d\d)\b/);
-  const year = yearMatch ? yearMatch[1] : '';
-
-  let month = '';
-  for (const m of FULL_MONTHS) {
-    const regex = new RegExp(`\\b(${m.short}|${m.full})\\b`, 'i');
-    if (regex.test(trimmed)) {
-      month = m.short;
-      break;
-    }
-  }
-
-  let day = '';
-  const dayMatch = trimmed.match(/\b([1-9]|[12][0-9]|3[01])\b/);
-  if (dayMatch && dayMatch[1] !== yearMatch?.[1]) {
-    day = dayMatch[1];
-  }
-
-  return { month, year, day, isPresent: false };
-}
 
 interface MonthYearSelectProps {
   label: string;
@@ -259,111 +211,19 @@ const MonthYearSelect: React.FC<MonthYearSelectProps> = ({
   allowPresent = false,
   isCurrentRole = false,
   onToggleCurrentRole,
+  placeholder,
 }) => {
-  const parsed = parseMonthYear(value);
-  const month = parsed.month;
-  const year = parsed.year;
-  const isPresent = isCurrentRole || parsed.isPresent || value.toLowerCase().trim() === 'present';
-
-  const currentYear = new Date().getFullYear();
-  const yearOptions: number[] = [];
-  for (let y = currentYear + 4; y >= currentYear - 25; y--) {
-    yearOptions.push(y);
-  }
-
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newMonth = e.target.value;
-    const currentY = year || String(currentYear);
-    if (!newMonth && !year) {
-      onChange('', false);
-    } else {
-      onChange([newMonth, currentY].filter(Boolean).join(' '), false);
-    }
-  };
-
-  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newYear = e.target.value;
-    const currentM = month || 'Jan';
-    if (!newYear && !month) {
-      onChange('', false);
-    } else {
-      onChange([currentM, newYear].filter(Boolean).join(' '), false);
-    }
-  };
-
   return (
-    <div className='w-full'>
-      <div className='flex items-center justify-between mb-1.5'>
-        <label className='text-xs font-semibold text-[#374151]'>
-          {label}
-        </label>
-        {allowPresent && (
-          <label className='inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer select-none'>
-            <input
-              type='checkbox'
-              checked={isPresent}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                onToggleCurrentRole?.(checked);
-                if (checked) {
-                  onChange('Present', true);
-                } else {
-                  onChange(`${month || 'Jan'} ${year || currentYear}`, false);
-                }
-              }}
-              className='w-3.5 h-3.5 rounded border-slate-300 text-[#1e2653] accent-[#1e2653] cursor-pointer'
-            />
-            <span>I currently work here</span>
-          </label>
-        )}
-      </div>
-
-      {allowPresent && isPresent ? (
-        <div className='w-full h-[38px] px-3 bg-emerald-50/90 border border-emerald-300/80 rounded-xl flex items-center justify-between text-xs text-emerald-900 font-semibold shadow-2xs'>
-          <div className='flex items-center gap-2'>
-            <span className='w-2 h-2 rounded-full bg-emerald-500 animate-pulse' />
-            <span>Present · Current Role</span>
-          </div>
-          <button
-            type='button'
-            onClick={() => {
-              onToggleCurrentRole?.(false);
-              onChange(`${month || 'Jan'} ${year || currentYear}`, false);
-            }}
-            className='text-[11px] text-emerald-700 hover:text-emerald-900 underline font-medium cursor-pointer'
-          >
-            Set end date
-          </button>
-        </div>
-      ) : (
-        <div className='flex items-center gap-2 w-full'>
-          <select
-            value={month}
-            onChange={handleMonthChange}
-            className='flex-1 min-w-0 px-3 py-2 text-xs bg-white border border-[#D1D5DB] rounded-xl text-slate-800 focus:outline-none focus:border-[#1e2653] cursor-pointer'
-          >
-            <option value=''>Select Month</option>
-            {FULL_MONTHS.map((m) => (
-              <option key={m.short} value={m.short}>
-                {m.short} ({m.full})
-              </option>
-            ))}
-          </select>
-          <select
-            value={year}
-            onChange={handleYearChange}
-            className='w-28 shrink-0 px-3 py-2 text-xs bg-white border border-[#D1D5DB] rounded-xl text-slate-800 focus:outline-none focus:border-[#1e2653] cursor-pointer'
-          >
-            <option value=''>Select Year</option>
-            {yearOptions.map((y) => (
-              <option key={y} value={String(y)}>
-                {y}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-    </div>
+    <CalendarPicker
+      label={label}
+      value={value}
+      onChange={onChange}
+      allowPresent={allowPresent}
+      isCurrentRole={isCurrentRole}
+      onToggleCurrentRole={onToggleCurrentRole}
+      mode='month-year'
+      placeholder={placeholder}
+    />
   );
 };
 

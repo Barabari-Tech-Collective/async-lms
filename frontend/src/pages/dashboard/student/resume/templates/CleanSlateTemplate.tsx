@@ -6,6 +6,38 @@ import { VerificationBadge, ContactLinksRow, AvatarPhoto, OrganizationLogoBadge 
 import type { SectionKey } from '../types';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b border-slate-200 pb-1 mb-2'
+      style={{
+        borderBottom: '1px solid #e2e8f0',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-medium tracking-[0.2em] text-slate-500 uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: '600',
+          letterSpacing: '0.16em',
+          color: '#64748b',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function CleanSlateTemplate({
   data,
   onUpdate,
@@ -44,10 +76,9 @@ export function CleanSlateTemplate({
   const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
     summary: () =>
       data.summary ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2'>
-            About
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='About
+          ' />
           <div className='group relative text-slate-600 text-[12.5px] leading-relaxed'>
             <InlineTextarea
               value={data.summary}
@@ -79,10 +110,9 @@ export function CleanSlateTemplate({
       data.skills?.frameworks?.length ||
       data.skills?.databases?.length ||
       data.skills?.tools?.length ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2.5'>
-            Skills
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='Skills
+          ' />
           <div className='space-y-1.5 text-[12px] text-slate-700'>
             {data.skills?.languages?.length > 0 && (
               <div>
@@ -114,11 +144,11 @@ export function CleanSlateTemplate({
 
     projects: () =>
       data.projects?.length > 0 ? (
-        <section className='mb-6'>
+        <section className='mb-3'>
           <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-3'>
             Projects
           </h2>
-          <div className='space-y-4'>
+          <div className='space-y-2'>
             {data.projects.map((proj, pIdx) => (
               <div key={proj.id || pIdx} className='page-break-inside-avoid'>
                 <div className='flex justify-between items-baseline'>
@@ -186,7 +216,7 @@ export function CleanSlateTemplate({
 
     experience: () =>
       data.experience && data.experience.length > 0 ? (
-        <section className='mb-6'>
+        <section className='mb-3'>
           <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-3'>
             Experience
           </h2>
@@ -219,10 +249,9 @@ export function CleanSlateTemplate({
 
     education: () =>
       data.education?.length > 0 ? (
-        <section className='mb-6'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2'>
-            Education
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='Education
+          ' />
           <div className='space-y-2'>
             {data.education.map((edu, eIdx) => (
               <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
@@ -242,10 +271,9 @@ export function CleanSlateTemplate({
 
     events: () =>
       data.events && data.events.length > 0 ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2'>
-            Workshops & Events
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='Workshops & Events
+          ' />
           <div className='space-y-3 text-[12.5px] text-slate-700'>
             {data.events.map((evt, eIdx) => (
               <div key={evt.id || eIdx} className='page-break-inside-avoid'>
@@ -290,10 +318,9 @@ export function CleanSlateTemplate({
 
     certifications: () =>
       data.certifications && data.certifications.length > 0 ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-2'>
-            Certifications
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='Certifications
+          ' />
           <div className='space-y-1.5 text-[12px] text-slate-700'>
             {data.certifications.map((cert, cIdx) => (
               <div key={cert.id || cIdx} className='flex justify-between items-baseline'>

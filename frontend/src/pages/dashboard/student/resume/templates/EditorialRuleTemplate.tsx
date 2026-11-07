@@ -6,6 +6,38 @@ import { VerificationBadge, ContactLinksRow, OrganizationLogoBadge } from '../Re
 import type { SectionKey } from '../types';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b-2 border-slate-900 pb-1 mb-2'
+      style={{
+        borderBottom: '2px solid #0f172a',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function EditorialRuleTemplate({
   data,
   onUpdate,
@@ -44,7 +76,7 @@ export function EditorialRuleTemplate({
   const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
     summary: () =>
       data.summary ? (
-        <section className='mb-5 page-break-inside-avoid'>
+        <section className='mb-3 page-break-inside-avoid'>
           <div className='border-l-4 border-amber-800 pl-4 py-1'>
             <div className='group relative text-slate-800 text-[12.5px] leading-relaxed font-serif italic'>
               <InlineTextarea
@@ -78,10 +110,9 @@ export function EditorialRuleTemplate({
       data.skills?.frameworks?.length ||
       data.skills?.databases?.length ||
       data.skills?.tools?.length ? (
-        <section className='mb-5 page-break-inside-avoid'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-2 font-mono'>
-            TECHNICAL & STRATEGIC TOOLKIT
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='TECHNICAL & STRATEGIC TOOLKIT
+          ' />
           <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px]'>
             {data.skills.languages?.length > 0 && (
               <div>
@@ -113,11 +144,11 @@ export function EditorialRuleTemplate({
 
     projects: () =>
       data.projects?.length > 0 ? (
-        <section className='mb-5'>
+        <section className='mb-3'>
           <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-3 font-mono'>
             INITIATIVES & DELIVERABLES
           </h2>
-          <div className='space-y-4'>
+          <div className='space-y-2'>
             {data.projects.map((proj, pIdx) => (
               <div key={proj.id || pIdx} className='page-break-inside-avoid relative pl-4 border-l-2 border-amber-800/40'>
                 <div className='absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-amber-800' />
@@ -188,11 +219,11 @@ export function EditorialRuleTemplate({
 
     experience: () =>
       data.experience && data.experience.length > 0 ? (
-        <section className='mb-5'>
+        <section className='mb-3'>
           <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-3 font-mono'>
             PROFESSIONAL EXPERIENCE
           </h2>
-          <div className='space-y-4'>
+          <div className='space-y-2'>
             {data.experience.map((exp, expIdx) => (
               <div key={exp.id || expIdx} className='page-break-inside-avoid relative pl-4 border-l-2 border-amber-800/40'>
                 <div className='absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-amber-800' />
@@ -222,10 +253,9 @@ export function EditorialRuleTemplate({
 
     education: () =>
       data.education?.length > 0 ? (
-        <section className='mb-5'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-2 font-mono'>
-            EDUCATION
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='EDUCATION
+          ' />
           <div className='space-y-2'>
             {data.education.map((edu, eIdx) => (
               <div key={edu.id || eIdx} className='page-break-inside-avoid'>
@@ -243,10 +273,9 @@ export function EditorialRuleTemplate({
 
     events: () =>
       data.events && data.events.length > 0 ? (
-        <section className='mb-5'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-2 font-mono'>
-            WORKSHOPS & EVENTS
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='WORKSHOPS & EVENTS
+          ' />
           <div className='space-y-3 text-[12px]'>
             {data.events.map((evt, eIdx) => (
               <div key={evt.id || eIdx} className='page-break-inside-avoid'>
@@ -294,10 +323,9 @@ export function EditorialRuleTemplate({
 
     certifications: () =>
       data.certifications?.length > 0 ? (
-        <section className='mb-5'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-slate-900 uppercase border-b-2 border-slate-900 pb-1 mb-2 font-mono'>
-            CERTIFICATIONS
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='CERTIFICATIONS
+          ' />
           <div className='space-y-1.5 text-[11.5px]'>
             {data.certifications.map((cert, cIdx) => (
               <div key={cert.id || cIdx} className='flex items-center justify-between page-break-inside-avoid'>
@@ -323,7 +351,7 @@ export function EditorialRuleTemplate({
   };
 
   return (
-    <div className='font-sans text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border-t-4 border-t-amber-800 border-x border-b border-slate-200 shadow-xs'>
+    <div className='font-sans text-slate-900 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border-t-4 border-t-amber-800 border-x border-b border-slate-200 shadow-xs'>
       {/* ── EDITORIAL HEADER ───────────────────────────────────────────────── */}
       <header className='pb-4 border-b-2 border-slate-900 mb-5 flex flex-row justify-between items-end gap-3'>
         <div>

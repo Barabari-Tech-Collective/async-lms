@@ -6,6 +6,38 @@ import { VerificationBadge, ContactLinksRow, AvatarPhoto, OrganizationLogoBadge 
 import type { SectionKey } from '../types';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b-2 border-teal-600 pb-1 mb-2'
+      style={{
+        borderBottom: '2px solid #0d9488',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[11px] font-bold tracking-widest text-teal-900 uppercase font-sans'
+        style={{
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#134e4a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function PhotoModernTemplate({
   data,
   onUpdate,
@@ -44,10 +76,9 @@ export function PhotoModernTemplate({
   const sectionRenderers: Record<SectionKey, () => React.ReactNode> = {
     summary: () =>
       data.summary ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2 font-mono'>
-            PROFESSIONAL OVERVIEW
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='PROFESSIONAL OVERVIEW
+          ' />
           <div className='group relative text-slate-700 text-[12.5px] leading-relaxed'>
             <InlineTextarea
               value={data.summary}
@@ -79,10 +110,9 @@ export function PhotoModernTemplate({
       data.skills?.frameworks?.length ||
       data.skills?.databases?.length ||
       data.skills?.tools?.length ? (
-        <section className='mb-6 page-break-inside-avoid'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2.5 font-mono'>
-            CORE EXPERTISE
-          </h2>
+        <section className='mb-3 page-break-inside-avoid'>
+          <SectionHeading title='CORE EXPERTISE
+          ' />
           <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px] bg-slate-50/70 p-3 rounded-lg border border-slate-200'>
             {data.skills?.languages?.length > 0 && (
               <div>
@@ -122,11 +152,11 @@ export function PhotoModernTemplate({
 
     projects: () =>
       data.projects?.length > 0 ? (
-        <section className='mb-6'>
+        <section className='mb-3'>
           <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-3 font-mono'>
             KEY PROJECTS & DEPLOYMENTS
           </h2>
-          <div className='space-y-4'>
+          <div className='space-y-2'>
             {data.projects.map((proj, pIdx) => (
               <div key={proj.id || pIdx} className='border-l-2 border-teal-600 pl-3 py-0.5 page-break-inside-avoid'>
                 <div className='flex justify-between items-baseline'>
@@ -184,7 +214,7 @@ export function PhotoModernTemplate({
 
     experience: () =>
       data.experience && data.experience.length > 0 ? (
-        <section className='mb-6'>
+        <section className='mb-3'>
           <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-3 font-mono'>
             PROFESSIONAL EXPERIENCE
           </h2>
@@ -217,10 +247,9 @@ export function PhotoModernTemplate({
 
     education: () =>
       data.education?.length > 0 ? (
-        <section className='mb-6'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2 font-mono'>
-            EDUCATION
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='EDUCATION
+          ' />
           <div className='space-y-2'>
             {data.education.map((edu, eIdx) => (
               <div key={edu.id || eIdx} className='page-break-inside-avoid'>
@@ -238,11 +267,10 @@ export function PhotoModernTemplate({
 
     events: () =>
       data.events && data.events.length > 0 ? (
-        <section className='mb-6'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2 font-mono'>
-            WORKSHOPS & EVENTS
-          </h2>
-          <div className='space-y-3'>
+        <section className='mb-3'>
+          <SectionHeading title='WORKSHOPS & EVENTS
+          ' />
+          <div className='space-y-1.5'>
             {data.events.map((evt, eIdx) => (
               <div key={evt.id || eIdx} className='page-break-inside-avoid text-[12px]'>
                 <div className='flex justify-between items-baseline'>
@@ -289,10 +317,9 @@ export function PhotoModernTemplate({
 
     certifications: () =>
       data.certifications?.length > 0 ? (
-        <section className='mb-6'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-2 font-mono'>
-            CERTIFICATIONS
-          </h2>
+        <section className='mb-3'>
+          <SectionHeading title='CERTIFICATIONS
+          ' />
           <div className='space-y-2'>
             {data.certifications.map((cert, cIdx) => (
               <div key={cert.id || cIdx} className='text-[11.5px] page-break-inside-avoid'>
@@ -316,7 +343,7 @@ export function PhotoModernTemplate({
   };
 
   return (
-    <div className='font-sans text-slate-800 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-10 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-teal-100 shadow-xs'>
+    <div className='font-sans text-slate-800 text-[12.5px] leading-relaxed max-w-[820px] mx-auto bg-white p-6 sm:p-8 print:max-w-none print:w-full print:p-8 print:border-none print:shadow-none select-text border border-teal-100 shadow-xs'>
       {/* ── HEADER WITH PROMINENT PHOTO ───────────────────────────────────── */}
       <header className='pb-5 border-b border-teal-200/80 mb-6'>
         <div className='flex flex-row items-center gap-5'>

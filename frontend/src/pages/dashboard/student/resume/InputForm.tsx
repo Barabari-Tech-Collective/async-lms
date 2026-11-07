@@ -264,7 +264,7 @@ export function InputForm({
                     Step 1: Choose Template, Photo & Contact Info
                   </h3>
                   <p className='text-xs text-slate-500'>
-                    Choose your course-tailored FlowCV template. You can switch templates anytime later!
+                    Choose your course-tailored CodeGuru template. You can switch templates anytime later!
                   </p>
                 </div>
               </div>

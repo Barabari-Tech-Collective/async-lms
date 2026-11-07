@@ -23,6 +23,7 @@ import {
   Mail,
   MessageSquare,
   FileDown,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useRef } from 'react';
 import type { ResumeDocument as ResumeDocType, Section, ResumeMatchResult } from './types';
@@ -61,6 +62,27 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
   const [showFullscreenModal, setShowFullscreenModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [showMobileMore, setShowMobileMore] = useState(false);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(850);
+  const [mobileFitScale, setMobileFitScale] = useState<boolean>(true);
+
+  useEffect(() => {
+    const el = previewContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const appliedScale =
+    containerWidth < 850 && mobileFitScale
+      ? Math.min(1, Math.max(0.38, (containerWidth - 24) / 800))
+      : 1;
 
   const previewDocRef = useRef<HTMLDivElement>(null);
   const [docHeight, setDocHeight] = useState<number>(0);
@@ -172,8 +194,9 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                 <h1 className='text-sm sm:text-base font-bold text-slate-900 truncate'>
                   {resumeDoc.personalInfo?.fullName || 'Placement Resume'}
                 </h1>
-                <span className='hidden sm:inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/70 uppercase tracking-wider shrink-0'>
-                  FlowCV Verified
+                <span className='hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/70 uppercase tracking-wider shrink-0'>
+                  <ShieldCheck size={11} className='text-indigo-600' />
+                  <span>CodeGuru Verified</span>
                 </span>
               </div>
               <p className='text-xs text-slate-500 truncate'>
@@ -189,7 +212,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               type='button'
               onClick={() => setShowTemplateModal(true)}
               className='h-8 px-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer'
-              title={`Switch Resume Template (10 Available) - Current: ${currentTemplate.name}`}
+              title={`Switch Resume Template (${RESUME_TEMPLATES.length} Available) - Current: ${currentTemplate.name}`}
             >
               <Palette size={13.5} className='text-indigo-600 shrink-0' />
               <span className='max-w-[110px] truncate'>{currentTemplate.name}</span>
@@ -208,8 +231,97 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
             </button>
           </div>
 
-          {/* Right: Actions (JD Match, AI Polish, Share, Edit, Download) */}
-          <div className='flex items-center gap-2 self-end md:self-auto flex-wrap sm:flex-nowrap shrink-0'>
+          {/* Right: Actions (Desktop full bar + Mobile consolidated) */}
+          <div className='flex items-center gap-2 self-end md:self-auto shrink-0 relative'>
+            {/* Mobile More Actions Menu Dropdown */}
+            <div className='inline-flex md:hidden items-center gap-1.5'>
+              <div className='relative'>
+                <button
+                  type='button'
+                  onClick={() => setShowMobileMore((prev) => !prev)}
+                  className='h-8 w-8 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center justify-center transition-colors shadow-2xs cursor-pointer'
+                  title='More Actions'
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+
+                {showMobileMore && (
+                  <div className='absolute right-0 top-10 z-50 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 animate-in fade-in zoom-in-95 duration-150'>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        onBackToEditor();
+                      }}
+                      className='w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2'
+                    >
+                      <Pencil size={13.5} className='text-slate-500' />
+                      <span>Edit Details</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        handleShare();
+                      }}
+                      className='w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2'
+                    >
+                      <Share2 size={13.5} className='text-slate-500' />
+                      <span>Share Link</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        onPolishWithAI();
+                      }}
+                      disabled={polishingWithAI}
+                      className='w-full px-3 py-2 text-left text-xs font-medium text-indigo-700 hover:bg-indigo-50 flex items-center gap-2'
+                    >
+                      <Sparkles size={13.5} className='text-indigo-600' />
+                      <span>Polish with AI</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        setShowJDModal(true);
+                      }}
+                      className='w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2'
+                    >
+                      <Briefcase size={13.5} className='text-indigo-600' />
+                      <span>JD Match</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        setShowFullscreenModal(true);
+                      }}
+                      className='w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2'
+                    >
+                      <Maximize2 size={13.5} className='text-slate-500' />
+                      <span>Fullscreen</span>
+                    </button>
+                    <div className='my-1 border-t border-slate-100' />
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        onSaveCompleted();
+                      }}
+                      className='w-full px-3 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 flex items-center gap-2'
+                    >
+                      <Check size={13.5} className='text-emerald-600' />
+                      <span>Mark Completed</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Desktop Full Actions (Hidden on Mobile) */}
+            <div className='hidden md:flex items-center gap-2'>
             {/* Check Skill / JD Match */}
             <button
               type='button'
@@ -269,6 +381,8 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               <span>Mark Done</span>
             </button>
 
+            </div>
+
             {/* Download PDF Primary Button */}
             <button
               type='button'
@@ -324,12 +438,31 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
           </div>
         </div>
 
+        {/* Mobile Viewport Scale Toggle (Under 850px) */}
+        {containerWidth < 850 && (
+          <div className='flex items-center justify-end mb-2 print:hidden'>
+            <button
+              type='button'
+              onClick={() => setMobileFitScale((prev) => !prev)}
+              className='px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-2xs hover:bg-slate-50 transition-colors flex items-center gap-1.5'
+            >
+              <span>{mobileFitScale ? '📱 Fit to Screen (Scale ' + Math.round(appliedScale * 100) + '%)' : '🔍 100% Zoom (Pan)'}</span>
+            </button>
+          </div>
+        )}
+
         {/* Clean, Non-Overlapped A4 Sheet with Real-Time Multi-Page Break Line */}
-        <div className='w-full flex justify-center pb-8'>
+        <div ref={previewContainerRef} className='w-full flex justify-center pb-8 overflow-x-auto custom-scrollbar'>
           <div
             data-resume-print-root
             ref={previewDocRef}
-            className='relative w-full max-w-[850px] bg-white shadow-xl rounded-xl border border-slate-200 overflow-hidden'
+            style={{
+              width: appliedScale < 1 ? '800px' : undefined,
+              transform: appliedScale < 1 ? 'scale(' + appliedScale + ')' : undefined,
+              transformOrigin: 'top center',
+              marginBottom: docHeight > 0 && appliedScale < 1 ? '-' + Math.round(docHeight * (1 - appliedScale)) + 'px' : undefined,
+            }}
+            className='relative w-full max-w-[850px] bg-white shadow-xl rounded-xl border border-slate-200 overflow-hidden transition-transform duration-150 shrink-0'
           >
             <ResumeDocument
               data={resumeDoc}

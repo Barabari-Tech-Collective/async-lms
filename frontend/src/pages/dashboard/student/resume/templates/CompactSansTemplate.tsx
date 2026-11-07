@@ -6,6 +6,38 @@ import { InlineText, InlineTextarea } from '../InlineEdit';
 import { VerificationBadge, ContactLinksRow, OrganizationLogoBadge } from '../ResumeCommon';
 import type { TemplateProps } from './AtlanticSidebarTemplate';
 
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <div
+      data-section-heading=''
+      className='border-b border-slate-400 pb-0.5 mb-1.5'
+      style={{
+        borderBottom: '1px solid #475569',
+        paddingBottom: '3.5mm',
+        marginBottom: '6px',
+        display: 'block',
+        width: '100%',
+      }}
+    >
+      <h2
+        className='text-[10.5px] font-bold tracking-widest text-slate-900 uppercase font-sans'
+        style={{
+          fontSize: '10.5px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.35',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export function CompactSansTemplate({
   data,
   sections,
@@ -114,9 +146,8 @@ export function CompactSansTemplate({
           }
           return (
             <section key='skills' className='mb-3 page-break-inside-avoid'>
-              <h2 className='text-[10.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
-                TECHNICAL SKILLS
-              </h2>
+              <SectionHeading title='TECHNICAL SKILLS
+              ' />
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]'>
                 {data.skills?.languages?.length > 0 && (
                   <div className='flex items-baseline'>
@@ -228,9 +259,8 @@ export function CompactSansTemplate({
           if (!data.education?.length) return null;
           return (
             <section key='education' className='mb-3'>
-              <h2 className='text-[10.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
-                EDUCATION
-              </h2>
+              <SectionHeading title='EDUCATION
+              ' />
               <div className='space-y-1 text-[11px]'>
                 {data.education.map((edu, eIdx) => (
                   <div key={edu.id || eIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
@@ -254,9 +284,8 @@ export function CompactSansTemplate({
           if (!data.experience?.length) return null;
           return (
             <section key='experience' className='mb-3'>
-              <h2 className='text-[10.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
-                EXPERIENCE
-              </h2>
+              <SectionHeading title='EXPERIENCE
+              ' />
               <div className='space-y-2 text-[11px]'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
@@ -284,9 +313,8 @@ export function CompactSansTemplate({
           if (!data.certifications?.length) return null;
           return (
             <section key='certifications' className='mb-3'>
-              <h2 className='text-[10.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
-                CERTIFICATIONS
-              </h2>
+              <SectionHeading title='CERTIFICATIONS
+              ' />
               <div className='space-y-1 text-[11px]'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex justify-between items-baseline page-break-inside-avoid'>
