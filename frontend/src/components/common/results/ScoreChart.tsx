@@ -17,15 +17,21 @@ const ScoreChart = ({ results } : Props) => {
   "80-100": 0,
 };
 
-results.forEach((r: Result) => {
-  const m = r.marks;
-
-  if (m <= 20) buckets["0-20"]++;
-  else if (m <= 40) buckets["20-40"]++;
-  else if (m <= 60) buckets["40-60"]++;
-  else if (m <= 80) buckets["60-80"]++;
-  else buckets["80-100"]++;
-});
+  results.forEach((r: any) => {
+    if (
+      (r.status === 'completed' || r.status === 'evaluated') &&
+      r.marks !== null &&
+      r.marks !== undefined &&
+      !isNaN(Number(r.marks))
+    ) {
+      const m = Number(r.marks);
+      if (m <= 20) buckets["0-20"]++;
+      else if (m <= 40) buckets["20-40"]++;
+      else if (m <= 60) buckets["40-60"]++;
+      else if (m <= 80) buckets["60-80"]++;
+      else buckets["80-100"]++;
+    }
+  });
 
 const data = Object.entries(buckets).map(([range, value]) => ({
   range,

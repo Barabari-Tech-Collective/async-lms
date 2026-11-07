@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -7,12 +8,27 @@ import { defineConfig } from 'vite';
 // Workaround for __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+const resolvePkg = (pkg: string) => {
+  try {
+    return require.resolve(pkg);
+  } catch {
+    return pkg;
+  }
+};
 
 export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-    },
+      '@radix-ui/react-slot': path.resolve(__dirname, './src/components/ui/slot.tsx'),
+      'react-hot-toast': resolvePkg('react-hot-toast'),
+      'redux': resolvePkg('redux'),
+      'immer': resolvePkg('immer'),
+      'reselect': resolvePkg('reselect'),
+      'redux-thunk': resolvePkg('redux-thunk'),
+          },
   },
   optimizeDeps: {
     // Pre-bundle these with esbuild on cold start so the browser gets single
@@ -83,7 +99,11 @@ export default defineConfig({
   ],
   build: {
     target: 'esnext',
+    commonjsOptions: {
+      exclude: ['lucide-react'],
+    },
     rollupOptions: {
+      maxParallelFileOps: 50,
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;

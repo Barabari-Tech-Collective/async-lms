@@ -66,15 +66,18 @@ const initialState: LessonState = {
 export const fetchLesson = createAsyncThunk<
   LessonResponse,
   string,
-  { rejectValue: string }
->('lesson/fetchLesson', async (subtopicSlug, { rejectWithValue }) => {
+  { state: RootState; rejectValue: string }
+>('lesson/fetchLesson', async (subtopicSlug, { getState, rejectWithValue }) => {
   try {
     const response = await apiClient.get<{ data: LessonResponse }>(
       `/subjects/content/${subtopicSlug}`,
     );
 
-    // If lesson loads, we can also try to mark it as started (fire-and-forget)
-    if (response.data.data?.subtopic?.id) {
+    const state = getState();
+    const isStudent = state.auth?.user?.role === 'student';
+
+    // If lesson loads, we can also try to mark it as started (fire-and-forget) for students
+    if (isStudent && response.data.data?.subtopic?.id) {
       apiClient
         .post(
           `/students/progress/subtopic/${response.data.data.subtopic.id}/start`,
@@ -146,9 +149,13 @@ export const submitQuiz = createAsyncThunk<
 export const completeLesson = createAsyncThunk<
   boolean,
   string,
-  { rejectValue: string }
->('lesson/completeLesson', async (lessonId, { rejectWithValue, dispatch }) => {
+  { state: RootState; rejectValue: string }
+>('lesson/completeLesson', async (lessonId, { getState, rejectWithValue, dispatch }) => {
   try {
+    const state = getState();
+    if (state.auth?.user?.role !== 'student') {
+      return true;
+    }
     await apiClient.post(`/students/progress/lesson/${lessonId}/complete`);
     dispatch(loadUser());
     return true;

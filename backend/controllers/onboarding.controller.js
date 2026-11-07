@@ -83,10 +83,10 @@ exports.selectSubjects = async (req, res) => {
   const userId = req.user.id;
   const { subjectIds } = req.body;
 
-  if (!Array.isArray(subjectIds) || subjectIds.length === 0) {
+  if (!Array.isArray(subjectIds) || subjectIds.length !== 1) {
     return res
       .status(400)
-      .json({ message: 'Please select at least one subject' });
+      .json({ message: 'Please select exactly one initial subject during onboarding. Additional subjects require instructor approval.' });
   }
 
   const existingRes = await pool.query(

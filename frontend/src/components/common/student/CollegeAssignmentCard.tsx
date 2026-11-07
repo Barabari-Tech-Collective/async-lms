@@ -1,6 +1,7 @@
 import { FileText, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CollegeAssignment } from '@/utils/types';
+import { formatDateTime, isPastDate } from '@/utils/dateUtils';
 
 function stripHtml(html: string) {
   return html
@@ -10,13 +11,8 @@ function stripHtml(html: string) {
 }
 
 function formatDueDate(dateStr: string) {
-  const date = new Date(dateStr);
-  const isPast = date < new Date();
-  const label = date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const isPast = isPastDate(dateStr);
+  const label = formatDateTime(dateStr);
   return { label, isPast };
 }
 
@@ -55,10 +51,12 @@ export const CollegeAssignmentCard = ({ assignment, onClick }: Props) => {
           className={`px-3 py-0.5 rounded-full text-[10px] font-bold uppercase ${
             isSubmitted
               ? 'bg-emerald-50 text-emerald-700 border-none'
+              : due?.isPast
+              ? 'bg-red-50 text-red-600 border-none'
               : 'bg-orange-50 text-orange-600 border-none'
           }`}
         >
-          {isSubmitted ? 'Completed' : 'Pending'}
+          {isSubmitted ? 'Completed' : due?.isPast ? 'Overdue' : 'Pending'}
         </span>
       </div>
 

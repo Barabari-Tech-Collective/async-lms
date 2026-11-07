@@ -56,7 +56,7 @@ export const AssignmentRubricsViewer: React.FC<AssignmentRubricsViewerProps> = (
   return (
     <Card className={`overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm p-0 ${className}`}>
       {/* Card Header */}
-      <div className='flex items-center justify-between px-4 sm:px-8 pt-5 sm:pt-6 pb-2'>
+      <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-8 pt-5 sm:pt-6 pb-2'>
         <div>
           <div className='flex items-center gap-2'>
             <Award className='h-4 w-4 text-amber-500' />
@@ -68,7 +68,7 @@ export const AssignmentRubricsViewer: React.FC<AssignmentRubricsViewerProps> = (
             Evaluation criteria and score distribution
           </p>
         </div>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-1.5 sm:gap-2 flex-wrap'>
           {maxScore !== undefined && maxScore > 0 && (
             <Badge className='bg-slate-100 text-slate-700 border-slate-200 text-xs font-semibold px-2.5 py-0.5'>
               Max: {maxScore} pts

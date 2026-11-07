@@ -1,11 +1,14 @@
 import { Button } from '@/components/ui/button';
-import { Save, X, Wand2, Loader2, Eye, Check } from 'lucide-react';
+import { Save, X, Eye, Check } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import toast from 'react-hot-toast';
 import AdminAssignmentPreviewModal from '@/components/common/admin/AdminAssignmentPreviewModal';
+import { RubricVisualEditor } from '@/components/common/assignment/RubricVisualEditor';
+import { TestCasesVisualEditor } from '@/components/common/assignment/TestCasesVisualEditor';
 import type { SubmissionType } from '@/utils/types';
+import { ALL_SUBMISSION_TYPES } from '@/utils/types';
 import {
   detectEditorType,
   cleanCorruptedMarkdown,
@@ -93,7 +96,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<SubmissionType[]>(
     editData?.allowed_submission_types && editData.allowed_submission_types.length > 0
       ? editData.allowed_submission_types
-      : ['file', 'github', 'docs', 'figma', 'excel', 'url']
+      : ALL_SUBMISSION_TYPES
   );
 
   useEffect(() => {
@@ -114,7 +117,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
       setAllowedSubmissionTypes(
         editData?.allowed_submission_types && editData.allowed_submission_types.length > 0
           ? editData.allowed_submission_types
-          : ['file', 'github', 'docs', 'figma', 'excel', 'url']
+          : ALL_SUBMISSION_TYPES
       );
     }
   }, [isOpen, editData]);
@@ -142,7 +145,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
   };
 
   const selectAllSubmissionTypes = () => {
-    setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+    setAllowedSubmissionTypes(ALL_SUBMISSION_TYPES);
   };
 
   const handleGenerateTestCases = async () => {
@@ -245,10 +248,10 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
 
     let finalTestCases = testCases.trim();
     const upperType = (evaluatorType || '').toUpperCase();
-    const isTestCasesRequired = Boolean(evaluatorType && evaluatorType.trim()) && (['JS', 'PYTHON', 'EXCEL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL'));
+    const isTestCasesRequired = Boolean(evaluatorType && evaluatorType.trim()) && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperType) || upperType.includes('JAVASCRIPT') || upperType.includes('PYTHON') || upperType.includes('EXCEL') || upperType.includes('SQL'));
 
     if (isTestCasesRequired && !finalTestCases) {
-      toast.error('Test Cases / Spec are required for Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
+      toast.error('Test Cases / Spec are required for SQL, Excel, JavaScript, and Python. Please add or click "Generate Test Cases".');
       return;
     }
     if (upperType === 'REACT' || upperType === 'AI' || upperType === 'FULLSTACK' || upperType === 'BACKEND') {
@@ -291,14 +294,14 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
     setEvaluatorType('');
     setTestCases('');
     setRubric('');
-    setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+    setAllowedSubmissionTypes(ALL_SUBMISSION_TYPES);
   };
 
   if (!isOpen) return null;
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs'>
-      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-2xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden'>
+      <div className='flex max-h-[90vh] w-[94vw] sm:max-w-3xl lg:max-w-4xl flex-col rounded-2xl bg-white shadow-xl overflow-hidden transition-all'>
         <div className='flex items-center justify-between p-4 sm:p-6 pb-3 sm:pb-4 border-b border-slate-100'>
           <div>
             <h3 className='text-lg font-bold text-slate-900'>
@@ -397,6 +400,7 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
               <option value='FULLSTACK'>Full Stack Evaluator</option>
               <option value='AI'>Backend API Evaluator</option>
               <option value='EXCEL'>Excel Spreadsheet Evaluator</option>
+              <option value='SQL'>SQL Database Evaluator</option>
             </select>
           </div>
 
@@ -492,6 +496,22 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
                   ),
                 },
                 {
+                  id: 'drive' as SubmissionType,
+                  title: 'Google Drive',
+                  desc: 'Files or folders in Google Drive (Anyone with link)',
+                  iconBg: 'bg-emerald-50 border-emerald-100',
+                  renderIcon: () => (
+                    <svg className='w-4 h-4' viewBox='0 0 87.3 78'>
+                      <path d='M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z' fill='#0066DA'/>
+                      <path d='M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44C.4 50 0 51.55 0 53.1h27.5z' fill='#00AC47'/>
+                      <path d='M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 10.1z' fill='#EA4335'/>
+                      <path d='M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z' fill='#00832D'/>
+                      <path d='M59.8 53.1H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z' fill='#2684FC'/>
+                      <path d='M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.15 28.1H87.3c0-1.55-.4-3.1-1.2-4.5z' fill='#FFBA00'/>
+                    </svg>
+                  ),
+                },
+                {
                   id: 'url' as SubmissionType,
                   title: 'General URL / Live App',
                   desc: 'Deployed applications, portfolios, or external links',
@@ -539,69 +559,26 @@ const AssignmentModal: React.FC<AssignmentModalProps> = ({
           </div>
 
           {/* 1. Evaluation Rubric First */}
-          <div>
-            <div className='mb-2 flex items-center justify-between'>
-              <label className='text-sm font-medium text-slate-700'>
-                Rubric (JSON) {evaluatorType ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional without evaluator)</span>}
-              </label>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateRubric}
-                disabled={generatingRubric || !instructions.trim()}
-                className='h-7 text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
-              >
-                {generatingRubric ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5 text-emerald-600' />
-                )}
-                ✨ Auto-Generate Rubric
-              </Button>
-            </div>
-            <textarea
-              value={rubric}
-              onChange={(e) => setRubric(e.target.value)}
-              placeholder='[\n  { "name": "Criteria 1", "weight": 20, "description": "..." }\n]'
-              className='w-full min-h-[130px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-            />
-          </div>
+          <RubricVisualEditor
+            value={rubric}
+            onChange={setRubric}
+            onGenerate={handleGenerateRubric}
+            generating={generatingRubric}
+            canGenerate={Boolean(title.trim() && instructions.trim())}
+            evaluatorType={evaluatorType}
+            required={Boolean(evaluatorType && evaluatorType.trim())}
+          />
 
           {/* 2. Automated Test Cases Second */}
-          <div>
-            <div className='mb-2 flex items-center justify-between'>
-              <div>
-                <label className='text-sm font-medium text-slate-700'>
-                  Test Cases (JSON) {['JS', 'PYTHON', 'EXCEL'].includes((evaluatorType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
-                </label>
-                {(evaluatorType || '').toUpperCase() === 'EXCEL' && !rubric.trim() && (
-                  <p className='text-[11px] text-amber-600 font-medium mt-0.5'>Generate the Rubric above first to ensure test cases bind to criteria.</p>
-                )}
-              </div>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleGenerateTestCases}
-                disabled={generating || !evaluatorType}
-                className='h-7 text-xs bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100 hover:text-indigo-700'
-              >
-                {generating ? (
-                  <Loader2 className='mr-1.5 h-3.5 w-3.5 animate-spin' />
-                ) : (
-                  <Wand2 className='mr-1.5 h-3.5 w-3.5' />
-                )}
-                ✨ Auto-Generate Test Cases
-              </Button>
-            </div>
-            <textarea
-              value={testCases}
-              onChange={(e) => setTestCases(e.target.value)}
-              placeholder='{\n  "evaluationMode": "script",\n  "expectedLogs": []\n}'
-              className='w-full min-h-[140px] rounded-lg border border-slate-300 p-3 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-            />
-          </div>
+          <TestCasesVisualEditor
+            value={testCases}
+            onChange={setTestCases}
+            onGenerate={handleGenerateTestCases}
+            generating={generating}
+            canGenerate={Boolean(evaluatorType)}
+            evaluatorType={evaluatorType}
+            rubricJson={rubric}
+          />
         </div>
         </div>
 

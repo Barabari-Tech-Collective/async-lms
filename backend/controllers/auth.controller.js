@@ -1137,9 +1137,8 @@ exports.forgotPassword = async (req, res) => {
 
     // Google-linked accounts cannot sign in with a password, so issuing a reset
     // would walk the user through setting one and then still refuse them at
-    // login. It is also how these accounts ended up holding a password_hash
-    // they could never use. Same generic response, so this does not become an
-    // account-enumeration oracle.
+    // login. We explicitly return a 400 error here to prevent the user from
+    // waiting for an OTP that will never arrive.
     if (userRes.rows[0].google_id) {
       logAction({
         req,
@@ -1149,7 +1148,9 @@ exports.forgotPassword = async (req, res) => {
         actor: { id: userRes.rows[0].id, email: normalizedEmail, role: null },
         details: { reason: 'google_account' },
       });
-      return res.json(genericResponse);
+      return res.status(400).json({
+        message: 'This email is associated with a Google account. Please return to the login page and sign in using Google.'
+      });
     }
 
     const throttled = await otpThrottleError(normalizedEmail, purpose);

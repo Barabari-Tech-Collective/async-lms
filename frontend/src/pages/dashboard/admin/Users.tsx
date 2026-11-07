@@ -514,7 +514,11 @@ const Users = () => {
                       <span className='truncate'>{user.college_name || 'No College Assigned'}</span>
                     </div>
                     <div className='flex flex-wrap items-center gap-1.5 text-slate-500 pt-1 border-t border-slate-200/50'>
-                      <Badge className='bg-slate-100 text-slate-700 font-semibold text-[10px] border border-slate-200/60'>
+                      <Badge
+                        onClick={() => setProfileId(user.id)}
+                        className='bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold text-[10px] border border-indigo-200/60 cursor-pointer transition-colors'
+                        title='Click to view and manage courses'
+                      >
                         {user.enrolled_courses || 0} enrolled
                       </Badge>
                       {user.year ? (
@@ -590,7 +594,11 @@ const Users = () => {
                         <p className='text-xs sm:text-sm text-slate-700 truncate max-w-[160px]'>{user.college_name || 'N/A'}</p>
                       </TableCell>
                       <TableCell className='py-3.5 whitespace-nowrap'>
-                        <Badge className='bg-slate-100 text-slate-700 font-semibold text-[11px] border border-slate-200/60'>
+                        <Badge
+                          onClick={() => setProfileId(user.id)}
+                          className='bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold text-[11px] border border-indigo-200/60 cursor-pointer transition-colors'
+                          title='Click to view and manage courses'
+                        >
                           {user.enrolled_courses || 0} enrolled
                         </Badge>
                       </TableCell>
@@ -640,7 +648,7 @@ const Users = () => {
                             size='icon'
                             className='h-8 w-8 text-slate-500 hover:text-indigo-600 rounded-lg'
                             onClick={() => setProfileId(user.id)}
-                            title='View Profile'
+                            title='View Profile & Manage Courses'
                           >
                             <Eye className='h-4 w-4' />
                           </Button>
@@ -1562,7 +1570,10 @@ const Users = () => {
       <StudentProfileDialog
         studentId={profileId}
         apiPrefix='admin'
-        onClose={() => setProfileId(null)}
+        onClose={() => {
+          setProfileId(null);
+          fetchUsers();
+        }}
       />
 
       <FacilitatorProfileDialog
