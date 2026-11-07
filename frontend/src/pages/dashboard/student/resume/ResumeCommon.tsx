@@ -6,7 +6,6 @@ import {
   Linkedin,
   Github,
   Globe,
-  ShieldCheck,
   X,
   Camera,
   User,
@@ -217,19 +216,7 @@ export function OrganizationLogoBadge({
 }
 
 // ── Verification Badge ────────────────────────────────────────────────────────
-export function VerificationBadge({ status }: { status?: VerificationStatus }) {
-  if (status === 'LMS_VERIFIED') {
-    return (
-      <span
-        title='Authoritative Barabari verified achievement'
-        className='inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200'
-      >
-        <ShieldCheck size={11} className='text-emerald-600' />
-        <span>Barabari Verified</span>
-      </span>
-    );
-  }
-
+export function VerificationBadge({ status: _status }: { status?: VerificationStatus }) {
   return null;
 }
 

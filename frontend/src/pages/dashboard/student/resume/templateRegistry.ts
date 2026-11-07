@@ -22,7 +22,7 @@ export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
     headline: 'Modern Single-Column Tech Layout',
     recommendedFor: 'Full-Stack & Web Dev',
     description:
-      'Engineered for Full-Stack & Backend engineers. Features clear categorized skills (Languages, Frameworks, DBs, Tools), verified LMS capstones, and GitHub/Demo badges.',
+      'Engineered for Full-Stack & Backend engineers. Features clear categorized skills (Languages, Frameworks, DBs, Tools), featured project portfolios, and GitHub/Demo badges.',
     layoutType: 'single-column',
     fontFamily: 'sans',
     accentColor: '#333d7c',
@@ -141,7 +141,7 @@ export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
     headline: 'Education & Capstones First Priority',
     recommendedFor: 'Campus Fresher & Internships',
     description:
-      'Reordered structure placing Education & verified Barabari Capstone Projects at the very top. Gives college students maximum placement leverage without requiring past work experience.',
+      'Reordered structure placing Education & Technical Projects at the very top. Gives college students maximum placement leverage without requiring past work experience.',
     layoutType: 'single-column',
     fontFamily: 'sans',
     accentColor: '#059669',

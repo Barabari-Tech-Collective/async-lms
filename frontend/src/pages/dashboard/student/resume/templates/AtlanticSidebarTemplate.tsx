@@ -33,10 +33,10 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b border-slate-200 pb-1 mb-2'
+      className='border-b border-slate-200 pb-0.5 mb-2'
       style={{
         borderBottom: '1px solid #e2e8f0',
-        paddingBottom: '3.5mm',
+        paddingBottom: '2px',
         marginBottom: '6px',
         display: 'block',
         width: '100%',
@@ -106,11 +106,26 @@ export function AtlanticSidebarTemplate({
     (l) => l !== githubLink && l !== linkedinLink && l.url.trim().length > 0
   );
 
+  const hasAnyMainContent = Boolean(
+    data.summary ||
+      (data.projects && data.projects.length > 0) ||
+      (data.experience && data.experience.length > 0) ||
+      (data.education && data.education.length > 0)
+  );
+
+  const hasAnySidebarContent = Boolean(
+    (data.skills?.languages?.length ||
+      data.skills?.frameworks?.length ||
+      data.skills?.databases?.length ||
+      data.skills?.tools?.length) ||
+      (data.certifications && data.certifications.length > 0)
+  );
+
   return (
     <div className='font-sans text-slate-800 text-[12.5px] leading-relaxed max-w-[850px] mx-auto bg-white select-text shadow-sm overflow-hidden border border-slate-200 print:max-w-none print:w-full print:border-none print:shadow-none'>
-      <div className='grid grid-cols-12 min-h-[900px] print:min-h-0'>
+      <div className='grid grid-cols-12 min-h-full print:min-h-0'>
         {/* ── LEFT ACCENT SIDEBAR (Col 1-4) ─────────────────────────────────── */}
-        <aside className='col-span-4 bg-[#1e2653] text-white p-6 sm:p-7 flex flex-col justify-between space-y-6 print:bg-[#1e2653] print:text-white print:p-6'>
+        <aside className='col-span-4 bg-[#1e2653] text-white p-6 sm:p-7 flex flex-col space-y-6 print:bg-[#1e2653] print:text-white print:p-6'>
           <div className='space-y-6'>
             {/* Top Institutional Organization Badge */}
             <OrganizationLogoBadge variant='sidebar-dark' />
@@ -347,15 +362,32 @@ export function AtlanticSidebarTemplate({
 
                 return null;
               })}
+
+            {!hasAnySidebarContent && (
+              <div className='p-3 border border-dashed border-white/20 rounded-lg text-white/70 text-[10px] text-center print:hidden'>
+                <span>Skills & Certifications will appear here</span>
+              </div>
+            )}
           </div>
 
-          <div className='text-[9.5px] text-slate-400 text-center pt-4 border-t border-white/10'>
+          <div className='text-[9.5px] text-slate-400 text-center pt-4 mt-auto border-t border-white/10'>
             CodeGuru • Atlantic Blue
           </div>
         </aside>
 
         {/* ── RIGHT MAIN BODY (Col 5-12) ────────────────────────────────────── */}
         <main className='col-span-8 p-6 sm:p-8 print:p-7 space-y-3.5 bg-white'>
+          {!hasAnyMainContent && (
+            <div className='flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-200 rounded-xl my-4 text-slate-400 print:hidden'>
+              <div className='w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 mb-2'>
+                <Sparkles size={18} className='text-[#1e2653]' />
+              </div>
+              <p className='text-xs font-bold text-slate-700'>Live Section Preview</p>
+              <p className='text-[11px] text-slate-500 max-w-[280px] mt-1 leading-relaxed'>
+                As you complete Steps 2 to 7 (Bio, Projects, Experience, and Education), your formatted sections will automatically appear here.
+              </p>
+            </div>
+          )}
           {activeOrder
             .filter((k) => k !== 'skills' && k !== 'certifications')
             .map((sectionKey) => {

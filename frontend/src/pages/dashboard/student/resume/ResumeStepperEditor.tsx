@@ -439,7 +439,7 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
       }
       case 4: {
         const expList = resumeDoc.experience || [];
-        if (expList.length === 0) return true; // Optional for freshers
+        if (expList.length === 0) return false;
         return expList.every(
           (e) =>
             Boolean(e.role?.trim()) &&
@@ -463,17 +463,23 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
       case 6: {
         const certs = resumeDoc.certifications || [];
         const evs = resumeDoc.events || [];
-        const certsValid = certs.every(
-          (c) =>
-            Boolean((c.title || c.name || '').trim()) &&
-            Boolean(c.issuer?.trim()) &&
-            Boolean(c.issueDate?.trim())
-        );
-        const evsValid = evs.every(
-          (ev) =>
-            Boolean(ev.title?.trim()) &&
-            Boolean(ev.organizer?.trim())
-        );
+        if (certs.length === 0 && evs.length === 0) return false;
+
+        const certsValid =
+          certs.length === 0 ||
+          certs.every(
+            (c) =>
+              Boolean((c.title || c.name || '').trim()) &&
+              Boolean(c.issuer?.trim()) &&
+              Boolean(c.issueDate?.trim())
+          );
+        const evsValid =
+          evs.length === 0 ||
+          evs.every(
+            (ev) =>
+              Boolean(ev.title?.trim()) &&
+              Boolean(ev.organizer?.trim() || ev.eventType?.trim())
+          );
         return certsValid && evsValid;
       }
       case 7: {

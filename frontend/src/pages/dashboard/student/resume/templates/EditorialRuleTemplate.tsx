@@ -10,10 +10,10 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b-2 border-slate-900 pb-1 mb-2'
+      className='border-b-2 border-slate-900 pb-0.5 mb-2'
       style={{
         borderBottom: '2px solid #0f172a',
-        paddingBottom: '3.5mm',
+        paddingBottom: '2px',
         marginBottom: '6px',
         display: 'block',
         width: '100%',

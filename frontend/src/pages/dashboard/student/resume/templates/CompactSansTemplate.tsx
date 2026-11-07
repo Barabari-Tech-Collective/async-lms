@@ -13,7 +13,7 @@ function SectionHeading({ title }: { title: string }) {
       className='border-b border-slate-400 pb-0.5 mb-1.5'
       style={{
         borderBottom: '1px solid #475569',
-        paddingBottom: '3.5mm',
+        paddingBottom: '2px',
         marginBottom: '6px',
         display: 'block',
         width: '100%',

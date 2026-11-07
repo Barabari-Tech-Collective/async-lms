@@ -21,10 +21,10 @@ function SectionHeading({ title, icon }: { title: string; icon?: React.ReactNode
   return (
     <div
       data-section-heading=''
-      className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-2'
+      className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-0.5 mb-2'
       style={{
         borderBottom: '2px solid #047857',
-        paddingBottom: '3.5mm',
+        paddingBottom: '2px',
         marginBottom: '6px',
         display: 'flex',
         alignItems: 'center',
@@ -171,7 +171,7 @@ export function FirstJobFresherTemplate({
           if (!data.projects?.length) return null;
           return (
             <section key='projects' className='mb-3'>
-              <SectionHeading title='PORTFOLIO PROJECTS & VERIFIED CAPSTONES' icon={<Code2 size={14} className='text-emerald-700' />} />
+              <SectionHeading title='PORTFOLIO & KEY TECHNICAL PROJECTS' icon={<Code2 size={14} className='text-emerald-700' />} />
               <div className='space-y-2'>
                 {data.projects.map((proj, pIdx) => (
                   <div

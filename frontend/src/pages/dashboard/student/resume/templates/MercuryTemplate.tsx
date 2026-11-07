@@ -10,31 +10,54 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b-2 border-slate-900 pb-1 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '2px solid #0f172a',
-        paddingBottom: '3.5mm',
         marginBottom: '6px',
+        paddingBottom: '0px',
+        borderBottom: 'none',
         display: 'block',
         width: '100%',
       }}
     >
-      <h2
-        className='text-[11px] font-bold tracking-[0.14em] text-slate-900 uppercase font-sans'
+      <div
         style={{
-          fontSize: '11px',
-          fontWeight: 'bold',
-          letterSpacing: '0.14em',
-          color: '#0f172a',
-          textTransform: 'uppercase',
-          lineHeight: '1.35',
-          margin: 0,
-          padding: 0,
           display: 'block',
+          width: '100%',
+          lineHeight: '1.2',
+          paddingBottom: '5px',
+          margin: 0,
         }}
       >
-        {title}
-      </h2>
+        <h2
+          className='text-[11px] font-bold tracking-[0.14em] text-slate-900 uppercase font-sans'
+          style={{
+            fontSize: '11px',
+            fontWeight: 'bold',
+            letterSpacing: '0.14em',
+            color: '#0f172a',
+            textTransform: 'uppercase',
+            lineHeight: '1.2',
+            margin: 0,
+            padding: 0,
+            display: 'block',
+          }}
+        >
+          {title}
+        </h2>
+      </div>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '2px',
+          backgroundColor: '#0f172a',
+          marginTop: '0px',
+          marginBottom: '5px',
+          border: 'none',
+          padding: 0,
+        }}
+      />
     </div>
   );
 }

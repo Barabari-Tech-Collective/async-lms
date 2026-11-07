@@ -285,6 +285,40 @@ export default function ResumeBuilder() {
     }
   };
 
+  // 5b. Rename resume
+  const handleRenameResume = async (id: string, newTitle: string): Promise<boolean> => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      toast.error('Resume name cannot be empty.');
+      return false;
+    }
+    try {
+      const res = await apiClient.patch(`/assistant/resume/${id}/rename`, { title: trimmed });
+      if (res.data?.success) {
+        setResumesList((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  title: trimmed,
+                  updated_at: res.data.data?.updated_at || new Date().toISOString(),
+                }
+              : item
+          )
+        );
+        if (resumeRecord?.id === id) {
+          setResumeRecord((prev) => (prev ? { ...prev, title: trimmed } : null));
+        }
+        toast.success(`Renamed to "${trimmed}"!`);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to rename resume.');
+      return false;
+    }
+  };
+
   // 6. Delete resume (Soft delete to Recycle Bin)
   const handleDeleteResume = async (idToDelete?: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -616,7 +650,7 @@ export default function ResumeBuilder() {
     const exportStyle = document.createElement('style');
     exportStyle.id = 'resume-export-style';
     exportStyle.textContent = `
-      .exporting-pdf .print\:hidden,
+      .exporting-pdf .print\\:hidden,
       .exporting-pdf button,
       .exporting-pdf [title="Change profile photo"] {
         display: none !important;
@@ -626,9 +660,23 @@ export default function ResumeBuilder() {
         cursor: default !important;
         box-shadow: none !important;
       }
+      .exporting-pdf img {
+        display: inline-block !important;
+      }
       .exporting-pdf [data-section-heading] {
-        padding-bottom: 3.5mm !important;
+        border-bottom: none !important;
+        padding-bottom: 0px !important;
         margin-bottom: 6px !important;
+      }
+      .exporting-pdf [data-heading-line] {
+        display: block !important;
+        width: 100% !important;
+        height: 1px !important;
+        background-color: #000000 !important;
+        border: none !important;
+        margin-top: 0px !important;
+        margin-bottom: 5px !important;
+        padding: 0 !important;
       }
     `;
     document.head.appendChild(exportStyle);
@@ -650,15 +698,31 @@ export default function ResumeBuilder() {
           scrollY: 0,
           scrollX: 0,
           backgroundColor: '#ffffff',
+          windowWidth: 800,
           onclone: (clonedDoc: Document) => {
             const printRoot = clonedDoc.querySelector('[data-resume-print-root]') as HTMLElement;
             if (printRoot) {
+              printRoot.style.transform = 'none';
+              printRoot.style.transformOrigin = 'initial';
+              printRoot.style.margin = '0 auto';
               printRoot.style.width = '800px';
               printRoot.style.maxWidth = '800px';
               printRoot.style.boxShadow = 'none';
               printRoot.style.border = 'none';
               printRoot.style.borderRadius = '0';
               printRoot.style.overflow = 'visible';
+            }
+            clonedDoc.querySelectorAll('img').forEach((img) => {
+              (img as HTMLElement).style.display = 'inline-block';
+            });
+            if (document.fonts) {
+              document.fonts.forEach((font) => {
+                try {
+                  clonedDoc.fonts.add(font);
+                } catch {
+                  // ignore
+                }
+              });
             }
             clonedDoc.querySelectorAll('[title="Double-click to edit"]').forEach((el) => {
               const htmlEl = el as HTMLElement;
@@ -668,8 +732,20 @@ export default function ResumeBuilder() {
             });
             clonedDoc.querySelectorAll('[data-section-heading]').forEach((el) => {
               const htmlEl = el as HTMLElement;
-              htmlEl.style.paddingBottom = '3.5mm';
+              htmlEl.style.borderBottom = 'none';
+              htmlEl.style.paddingBottom = '0px';
               htmlEl.style.marginBottom = '6px';
+            });
+            clonedDoc.querySelectorAll('[data-heading-line]').forEach((el) => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.display = 'block';
+              htmlEl.style.width = '100%';
+              htmlEl.style.height = '1px';
+              htmlEl.style.backgroundColor = '#000000';
+              htmlEl.style.border = 'none';
+              htmlEl.style.marginTop = '0px';
+              htmlEl.style.marginBottom = '5px';
+              htmlEl.style.padding = '0px';
             });
             const canvas = clonedDoc.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -758,6 +834,7 @@ export default function ResumeBuilder() {
           onDeleteResume={(id, e) => handleDeleteResume(id, e)}
           onDuplicateResume={(id, e) => handleDuplicateResume(id, e)}
           onSetPrimary={(id, e) => handleSetPrimary(id, e)}
+          onRenameResume={handleRenameResume}
           openRecycleBin={() => setShowRecycleBinModal(true)}
           recycleBinCount={recycleBinCount}
           activeFilter={activeFilter}

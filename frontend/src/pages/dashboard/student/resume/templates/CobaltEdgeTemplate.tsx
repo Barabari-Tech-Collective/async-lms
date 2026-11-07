@@ -10,10 +10,10 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='flex items-center gap-2 mb-2 pb-1 border-b border-blue-200'
+      className='flex items-center gap-2 mb-2 pb-0.5 border-b border-blue-200'
       style={{
         borderBottom: '1px solid #bfdbfe',
-        paddingBottom: '3.5mm',
+        paddingBottom: '2px',
         marginBottom: '6px',
         display: 'flex',
         alignItems: 'center',

@@ -11,33 +11,56 @@ function SectionHeading({ title, icon }: { title: string; icon?: React.ReactNode
   return (
     <div
       data-section-heading=''
-      className='border-b border-slate-400 pb-1 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '1px solid #334155',
-        paddingBottom: '3.5mm',
         marginBottom: '6px',
+        paddingBottom: '0px',
+        borderBottom: 'none',
         display: 'block',
         width: '100%',
       }}
     >
-      <h2
-        className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans flex items-center gap-1.5'
+      <div
         style={{
-          fontSize: '11px',
-          fontWeight: 'bold',
-          letterSpacing: '0.12em',
-          color: '#0f172a',
-          textTransform: 'uppercase',
-          lineHeight: '1.35',
+          display: 'block',
+          width: '100%',
+          lineHeight: '1.2',
+          paddingBottom: '5px',
           margin: 0,
-          padding: 0,
-          display: 'flex',
-          alignItems: 'center',
         }}
       >
-        {icon}
-        {title}
-      </h2>
+        <h2
+          className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans flex items-center gap-1.5'
+          style={{
+            fontSize: '11px',
+            fontWeight: 'bold',
+            letterSpacing: '0.12em',
+            color: '#0f172a',
+            textTransform: 'uppercase',
+            lineHeight: '1.2',
+            margin: 0,
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          {icon}
+          {title}
+        </h2>
+      </div>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '1px',
+          backgroundColor: '#334155',
+          marginTop: '0px',
+          marginBottom: '5px',
+          border: 'none',
+          padding: 0,
+        }}
+      />
     </div>
   );
 }

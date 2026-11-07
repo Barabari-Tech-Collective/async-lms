@@ -21,31 +21,54 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='pb-1 mb-1.5 border-b border-black'
       style={{
-        borderBottom: '1px solid #000000',
-        paddingBottom: '3.5mm',
-        marginBottom: '6px',
         display: 'block',
         width: '100%',
+        marginBottom: '6px',
+        paddingBottom: '0px',
+        borderBottom: 'none',
       }}
     >
-      <h2
-        className='text-left text-[10px] font-bold tracking-[0.04em] text-black uppercase'
+      <div
         style={{
-          fontSize: '10px',
-          fontWeight: 'bold',
-          letterSpacing: '0.04em',
-          color: '#000000',
-          textTransform: 'uppercase',
-          lineHeight: '1.35',
-          margin: 0,
-          padding: 0,
           display: 'block',
+          width: '100%',
+          lineHeight: '1.2',
+          paddingBottom: '5px',
+          margin: 0,
         }}
       >
-        {title}
-      </h2>
+        <h2
+          className='text-left text-[11px] font-bold tracking-[0.03em] text-black uppercase'
+          style={{
+            fontFamily: "'Times New Roman', Times, Garamond, Georgia, serif",
+            fontSize: '11px',
+            fontWeight: 'bold',
+            letterSpacing: '0.03em',
+            color: '#000000',
+            textTransform: 'uppercase',
+            lineHeight: '1.2',
+            margin: 0,
+            padding: 0,
+            display: 'block',
+          }}
+        >
+          {title}
+        </h2>
+      </div>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '1px',
+          backgroundColor: '#000000',
+          marginTop: '0px',
+          marginBottom: '5px',
+          border: 'none',
+          padding: 0,
+        }}
+      />
     </div>
   );
 }
@@ -108,39 +131,39 @@ export function IvyStandardTemplate({
   }
 
   return (
-    <div className="font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] text-black text-[9.5px] leading-[1.32] max-w-[800px] mx-auto bg-white p-7 sm:p-9 print:max-w-none print:w-full print:p-6 print:border-none print:shadow-none select-text border border-stone-200 shadow-2xs">
-      {/* ── HEADER (Exact Match to Image 2: Centered Title Case Serif, Subtitle, Contact Links) ── */}
-      <header className='text-center mb-2.5'>
-        <h1 className="text-[22px] sm:text-[24px] font-bold text-black font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] tracking-normal leading-tight">
+    <div className="font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] text-black text-[10px] leading-[1.35] max-w-[800px] mx-auto bg-white p-7 sm:p-9 print:max-w-none print:w-full print:p-6 print:border-none print:shadow-none select-text border border-stone-200 shadow-2xs">
+      {/* ── HEADER (Exact Match to Omkari Kasula: Centered Small-Caps Serif, Subtitle, Contact Links, No Line) ── */}
+      <header className='text-center mb-3'>
+        <h1 className="text-[22px] sm:text-[24px] font-bold text-black font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] tracking-[0.03em] leading-tight uppercase">
           <InlineText
             value={pi.fullName || 'Your Name'}
             onChange={onUpdate && !readOnly ? (v) => upPI({ fullName: v }) : undefined}
             placeholder='Full Name'
-            className="font-bold text-black font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] tracking-normal"
+            className="font-bold text-black font-['Times_New_Roman',_Times,_Garamond,_Georgia,_serif] tracking-[0.03em] uppercase"
           />
         </h1>
 
         {pi.location && (
-          <p className='text-[9.5px] text-[#1f2937] mt-0.5'>
+          <p className='text-[10px] text-black mt-0.5 font-serif'>
             <InlineText
               value={pi.location}
               onChange={onUpdate && !readOnly ? (v) => upPI({ location: v }) : undefined}
               placeholder='City, State, Country'
-              className='text-[#1f2937]'
+              className='text-black'
             />
           </p>
         )}
 
-        <div className='mt-0.5 flex flex-wrap items-center justify-center gap-x-2 text-[9.5px] text-[#1f2937]'>
+        <div className='mt-0.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[10px] text-black font-serif'>
           {contactItems.map((item, idx) => (
             <Fragment key={idx}>
-              {idx > 0 && <span className='text-[#9ca3af] select-none'>|</span>}
+              {idx > 0 && <span className='text-black select-none mx-0.5'>|</span>}
               {item.href ? (
                 <a
                   href={item.href}
                   target={item.isExternal ? '_blank' : undefined}
                   rel={item.isExternal ? 'noopener noreferrer' : undefined}
-                  className='text-[#1e40af] hover:underline transition-colors'
+                  className='text-[#1a0dab] underline hover:text-[#0b57d0] transition-colors'
                 >
                   {item.label}
                 </a>
@@ -159,10 +182,9 @@ export function IvyStandardTemplate({
             </button>
           )}
         </div>
-        <div className='w-full border-b border-black' style={{ marginTop: '3.5mm' }} />
       </header>
 
-      {/* ── SECTIONS (Exact match to Image 2 hierarchy and font sizes) ── */}
+      {/* ── SECTIONS (Exact match to Omkari Kasula hierarchy, font sizes and styling) ── */}
       {(() => {
         // 1. PROFILE
         const renderSummary = () => {
@@ -170,13 +192,13 @@ export function IvyStandardTemplate({
           return (
             <section key='summary' className='mb-2.5 page-break-inside-avoid'>
               <SectionHeading title='Profile' />
-              <div className='group relative text-black text-[9.5px] leading-[1.35] text-justify'>
+              <div className='group relative text-black text-[10px] leading-[1.38] text-justify'>
                 <InlineTextarea
                   value={data.summary}
                   onChange={
                     onUpdate && !readOnly ? (v) => onUpdate({ ...data, summary: v }) : undefined
                   }
-                  className='text-black text-[9.5px] leading-[1.35] text-justify'
+                  className='text-black text-[10px] leading-[1.38] text-justify'
                 />
                 {!readOnly && onTriggerRewrite && (
                   <button
@@ -207,20 +229,22 @@ export function IvyStandardTemplate({
                 {data.education.map((edu, eIdx) => (
                   <div key={edu.id || eIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
-                      <h3 className='font-bold text-[10px] text-black'>{edu.institution}</h3>
-                      <span className='text-[9.5px] text-[#1f2937] italic shrink-0 ml-2'>
+                      <h3 className='font-bold text-[10.5px] text-black'>{edu.institution}</h3>
+                      <span className='text-[10px] text-black shrink-0 ml-2 font-normal'>
                         {edu.startYear ? `${edu.startYear} – ` : ''}
                         {edu.endYear || 'Present'}
                       </span>
                     </div>
-                    <div className='flex justify-between items-baseline text-[9.5px] text-[#111827]'>
+                    <div className='flex justify-between items-baseline text-[10px] text-black'>
                       <p className='italic'>
                         {edu.degree}
                         {edu.fieldOfStudy ? `, ${edu.fieldOfStudy}` : ''}
                       </p>
                       {edu.score && (
-                        <span className='font-semibold text-black text-[9.5px] shrink-0 ml-2'>
-                          Score: {edu.score}
+                        <span className='italic text-black text-[10px] shrink-0 ml-2'>
+                          {String(edu.score).toLowerCase().includes('cgpa') || String(edu.score).toLowerCase().includes('score')
+                            ? edu.score
+                            : `CGPA: ${edu.score}`}
                         </span>
                       )}
                     </div>
@@ -242,15 +266,15 @@ export function IvyStandardTemplate({
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
                       <div className='flex items-baseline gap-1 flex-wrap'>
-                        <span className='font-bold text-[10px] text-black'>{proj.title}</span>
+                        <span className='font-bold text-[10.5px] text-black'>{proj.title}</span>
                         {proj.techStack?.length > 0 && (
-                          <span className='text-[9.5px] text-[#1f2937] italic'>
-                            | {proj.techStack.join(', ')}
+                          <span className='text-[10px] text-black italic'>
+                            {' | '}
+                            {proj.techStack.join(', ')}
                           </span>
                         )}
                         {formatHref(proj.repositoryUrl, 'web') && (
-                          <span className='text-[9.5px] text-[#1e40af] italic'>
-                            ,{' '}
+                          <span className='text-[10px] text-[#1a0dab] ml-1'>
                             <a
                               href={formatHref(proj.repositoryUrl, 'web')}
                               target='_blank'
@@ -262,8 +286,7 @@ export function IvyStandardTemplate({
                           </span>
                         )}
                         {formatHref(proj.liveDemoUrl, 'web') && (
-                          <span className='text-[9.5px] text-[#1e40af] italic'>
-                            ,{' '}
+                          <span className='text-[10px] text-[#1a0dab] ml-1'>
                             <a
                               href={formatHref(proj.liveDemoUrl, 'web')}
                               target='_blank'
@@ -278,9 +301,9 @@ export function IvyStandardTemplate({
                     </div>
 
                     {proj.bullets?.length > 0 && (
-                      <ul className='mt-0.5 space-y-0.5 text-[9.5px] text-black list-disc list-outside ml-4 leading-[1.3]'>
+                      <ul className='mt-0.5 space-y-0.5 text-[10px] text-black list-disc list-outside ml-4 leading-[1.35]'>
                         {proj.bullets.map((b, bIdx) => (
-                          <li key={bIdx} className='group leading-[1.3] pl-0.5'>
+                          <li key={bIdx} className='group leading-[1.35] pl-0.5'>
                             <InlineText
                               value={b}
                               onChange={
@@ -292,7 +315,7 @@ export function IvyStandardTemplate({
                                     }
                                   : undefined
                               }
-                              className='text-[9.5px] text-black'
+                              className='text-[10px] text-black'
                             />
                           </li>
                         ))}
@@ -315,21 +338,21 @@ export function IvyStandardTemplate({
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
-                      <h3 className='font-bold text-[10px] text-black'>{exp.role}</h3>
-                      <span className='text-[9.5px] text-[#1f2937] italic shrink-0 ml-2'>
+                      <h3 className='font-bold text-[10.5px] text-black'>{exp.role}</h3>
+                      <span className='text-[10px] text-black shrink-0 ml-2 font-normal'>
                         {exp.startDate} – {exp.endDate || 'Present'}
                       </span>
                     </div>
                     {(exp.organization || exp.company || exp.location) && (
-                      <div className='flex justify-between items-baseline text-[9.5px] text-[#1f2937]'>
+                      <div className='flex justify-between items-baseline text-[10px] text-black'>
                         <span className='italic'>{exp.company || exp.organization}</span>
-                        {exp.location && <span>{exp.location}</span>}
+                        {exp.location && <span className='italic'>{exp.location}</span>}
                       </div>
                     )}
                     {exp.bullets && exp.bullets.length > 0 && (
-                      <ul className='mt-0.5 space-y-0.5 text-[9.5px] text-black list-disc list-outside ml-4 leading-[1.3]'>
+                      <ul className='mt-0.5 space-y-0.5 text-[10px] text-black list-disc list-outside ml-4 leading-[1.35]'>
                         {exp.bullets.map((b, bIdx) => (
-                          <li key={bIdx} className='leading-[1.3] pl-0.5'>{b}</li>
+                          <li key={bIdx} className='leading-[1.35] pl-0.5'>{b}</li>
                         ))}
                       </ul>
                     )}
@@ -355,29 +378,29 @@ export function IvyStandardTemplate({
           return (
             <section key='skills' className='mb-2.5 page-break-inside-avoid'>
               <SectionHeading title='Technical Skills' />
-              <div className='space-y-0.5 text-[9.5px] text-black leading-[1.35]'>
+              <div className='space-y-0.5 text-[10px] text-black leading-[1.38]'>
                 {data.skills?.languages?.length > 0 && (
                   <div>
                     <span className='font-bold text-black'>Languages & Core Strengths: </span>
-                    <span className='text-[#111827]'>{data.skills.languages.join(', ')}</span>
+                    <span className='text-black'>{data.skills.languages.join(', ')}</span>
                   </div>
                 )}
                 {data.skills?.frameworks?.length > 0 && (
                   <div>
                     <span className='font-bold text-black'>Frameworks & Libraries: </span>
-                    <span className='text-[#111827]'>{data.skills.frameworks.join(', ')}</span>
+                    <span className='text-black'>{data.skills.frameworks.join(', ')}</span>
                   </div>
                 )}
                 {data.skills?.databases?.length > 0 && (
                   <div>
                     <span className='font-bold text-black'>Databases: </span>
-                    <span className='text-[#111827]'>{data.skills.databases.join(', ')}</span>
+                    <span className='text-black'>{data.skills.databases.join(', ')}</span>
                   </div>
                 )}
                 {data.skills?.tools?.length > 0 && (
                   <div>
                     <span className='font-bold text-black'>Tools & Platforms: </span>
-                    <span className='text-[#111827]'>{data.skills.tools.join(', ')}</span>
+                    <span className='text-black'>{data.skills.tools.join(', ')}</span>
                   </div>
                 )}
               </div>
@@ -391,18 +414,18 @@ export function IvyStandardTemplate({
           return (
             <section key='certifications' className='mb-2.5'>
               <SectionHeading title='Certifications' />
-              <ul className='space-y-0.5 text-[9.5px] text-black list-disc list-outside ml-4 leading-[1.3]'>
+              <ul className='space-y-0.5 text-[10px] text-black list-disc list-outside ml-4 leading-[1.35]'>
                 {data.certifications.map((cert, cIdx) => (
                   <li key={cert.id || cIdx} className='page-break-inside-avoid pl-0.5'>
-                    <span className='font-semibold text-black'>{cert.title || cert.name}</span>
-                    {cert.issuer && <span className='text-[#1f2937]'> — {cert.issuer}</span>}
-                    {cert.issueDate && <span className='text-[#374151]'>, {cert.issueDate}</span>}
+                    <span className='font-bold text-black'>{cert.title || cert.name}</span>
+                    {cert.issuer && <span className='text-black'> — {cert.issuer}</span>}
+                    {cert.issueDate && <span className='text-black'>, {cert.issueDate}</span>}
                     {formatHref(cert.credentialUrl, 'web') && (
                       <a
                         href={formatHref(cert.credentialUrl, 'web')}
                         target='_blank'
                         rel='noopener noreferrer'
-                        className='text-[#1e40af] underline ml-1.5'
+                        className='text-[#1a0dab] underline ml-1.5'
                       >
                         [Credential]
                       </a>
@@ -420,33 +443,28 @@ export function IvyStandardTemplate({
           return (
             <section key='events' className='mb-2.5'>
               <SectionHeading title='Extracurricular Activities' />
-              <div className='space-y-1.5 text-[9.5px]'>
+              <div className='space-y-1.5 text-[10px]'>
                 {data.events.map((evt, vIdx) => (
                   <div key={evt.id || vIdx} className='page-break-inside-avoid'>
                     <div className='flex justify-between items-baseline'>
                       <div className='flex items-baseline gap-1'>
                         <span className='font-bold text-black'>{evt.title}</span>
-                        {evt.organizer && <span className='text-[#1f2937] italic'>— {evt.organizer}</span>}
+                        {evt.organizer && <span className='text-black italic'>— {evt.organizer}</span>}
                       </div>
                       <div className='flex items-center gap-2'>
-                        {evt.date && <span className='text-[9.5px] text-[#1f2937] italic'>{evt.date}</span>}
+                        {evt.date && <span className='text-[10px] text-black font-normal'>{evt.date}</span>}
                         {formatHref(evt.credentialUrl, 'web') && (
                           <a
                             href={formatHref(evt.credentialUrl, 'web')}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='text-[9.5px] text-[#1e40af] underline'
+                            className='text-[#1a0dab] underline ml-1'
                           >
-                            [Credential]
+                            [Link]
                           </a>
                         )}
                       </div>
                     </div>
-                    {evt.learnings && (
-                      <ul className='mt-0.5 space-y-0.5 text-[9.5px] text-black list-disc list-outside ml-4 leading-[1.3]'>
-                        <li className='pl-0.5'>{evt.learnings}</li>
-                      </ul>
-                    )}
                   </div>
                 ))}
               </div>

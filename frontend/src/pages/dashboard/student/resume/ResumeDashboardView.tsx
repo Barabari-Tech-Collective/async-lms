@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Plus,
   ArrowRight,
@@ -11,9 +11,16 @@ import {
   Edit3,
   Eye,
   Archive,
+  Pencil,
+  Check,
+  X,
+  Loader2,
 } from 'lucide-react';
 import type { ResumeListItem, ResumeDocument as ResumeDocType } from './types';
 import { RESUME_TEMPLATES } from './templateRegistry';
+import { TemplateModal } from './templates/TemplateModal';
+import { TemplateVisualCard } from './templates/TemplateVisualCard';
+import { TemplateQuickPreviewModal } from './templates/TemplateQuickPreviewModal';
 
 interface ResumeDashboardViewProps {
   resumesList: ResumeListItem[];
@@ -23,11 +30,27 @@ interface ResumeDashboardViewProps {
   onDeleteResume: (id: string, e?: React.MouseEvent) => void;
   onDuplicateResume: (id: string, e?: React.MouseEvent) => void;
   onSetPrimary: (id: string, e?: React.MouseEvent) => void;
+  onRenameResume?: (id: string, newTitle: string) => Promise<boolean | void>;
   openRecycleBin: () => void;
   recycleBinCount: number;
   activeFilter: 'drafted' | 'completed';
   setActiveFilter: (filter: 'drafted' | 'completed') => void;
   activeResumeDoc?: ResumeDocType;
+}
+
+const PAGE_SIZE = 8;
+
+function getPageNumbers(currentPage: number, totalPages: number): (number | '...')[] {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  if (currentPage <= 2) {
+    return [1, 2, 3, '...', totalPages];
+  }
+  if (currentPage >= totalPages - 1) {
+    return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+  }
+  return [1, '...', currentPage, '...', totalPages];
 }
 
 export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
@@ -38,12 +61,59 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
   onDeleteResume,
   onDuplicateResume,
   onSetPrimary,
+  onRenameResume,
   openRecycleBin,
   recycleBinCount,
   activeFilter,
   setActiveFilter,
 }) => {
   const carouselRef = useRef<HTMLDivElement>(null);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [quickPreviewTemplateId, setQuickPreviewTemplateId] = useState<string | null>(null);
+
+  // Inline Resume Title Renaming
+  const [editingResumeId, setEditingResumeId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  const startEditing = (id: string, currentTitle: string) => {
+    setEditingResumeId(id);
+    setEditingTitle(currentTitle);
+    setTimeout(() => {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    }, 50);
+  };
+
+  const cancelEditing = () => {
+    setEditingResumeId(null);
+    setEditingTitle('');
+  };
+
+  const handleSaveRename = async (id: string) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
+      return;
+    }
+    const currentItem = resumesList.find((r) => r.id === id);
+    if (currentItem && currentItem.title === trimmed) {
+      cancelEditing();
+      return;
+    }
+
+    if (onRenameResume) {
+      setIsSavingTitle(true);
+      try {
+        await onRenameResume(id, trimmed);
+        setEditingResumeId(null);
+      } finally {
+        setIsSavingTitle(false);
+      }
+    } else {
+      setEditingResumeId(null);
+    }
+  };
 
   const scrollCarousel = (direction: 'left' | 'right') => {
     if (carouselRef.current) {
@@ -70,10 +140,21 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
     }
   };
 
+  // Pagination State (8 resumes per page)
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 whenever active filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter]);
+
   const completedResumes = resumesList.filter((r) => isCompleted(r));
   const draftedResumes = resumesList.filter((r) => !isCompleted(r));
 
   const displayedResumes = activeFilter === 'completed' ? completedResumes : draftedResumes;
+  const totalPages = Math.max(1, Math.ceil(displayedResumes.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedResumes = displayedResumes.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className='min-h-screen bg-[#F1F4F9] text-slate-800 pb-16 font-sans antialiased'>
@@ -123,7 +204,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
             </div>
             <button
               type='button'
-              onClick={() => onCreateNew('ivy-standard')}
+              onClick={() => setIsTemplateModalOpen(true)}
               className='inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#344499] hover:underline cursor-pointer shrink-0 mt-1'
             >
               <span>See All</span>
@@ -141,18 +222,30 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
               {/* Blank Card */}
               <div
                 onClick={() => onCreateNew('blank')}
-                className='group flex flex-col items-center gap-3 shrink-0 cursor-pointer'
+                className='group flex flex-col shrink-0 cursor-pointer text-left select-none'
+                style={{ width: '175px' }}
+                role='button'
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onCreateNew('blank');
+                  }
+                }}
+                aria-label='Start with a blank resume'
               >
-                <div className='w-[159px] h-[219px] bg-white rounded-md shadow-xs border border-transparent group-hover:border-[#344499] group-hover:shadow-md transition-all flex flex-col items-center justify-center bg-radial from-slate-50 to-white'>
-                  <div className='w-10 h-10 rounded-full border-2 border-black flex items-center justify-center group-hover:scale-110 transition-transform'>
-                    <Plus size={22} className='text-black' strokeWidth={2.2} />
+                <div className='w-[175px] h-[245px] bg-white rounded-lg shadow-xs border-2 border-dashed border-slate-300 group-hover:border-[#344499] group-hover:shadow-lg transition-all flex flex-col items-center justify-center bg-radial from-slate-50 to-white'>
+                  <div className='w-11 h-11 rounded-full border-2 border-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform'>
+                    <Plus size={22} className='text-slate-800' strokeWidth={2.2} />
                   </div>
+                  <span className='mt-2.5 text-xs font-bold text-slate-800'>Blank Resume</span>
+                  <span className='text-[10px] text-slate-400'>Start from scratch</span>
                 </div>
-                <div className='w-[146px] text-left'>
-                  <span className='block text-sm font-semibold text-[#223498] group-hover:underline'>
-                    Blank
+                <div className='mt-2.5 text-left'>
+                  <span className='block text-xs font-bold text-[#223498] group-hover:underline'>
+                    Blank Canvas
                   </span>
-                  <span className='block text-[10px] text-[#223498]/80 font-normal leading-tight mt-0.5'>
+                  <span className='block text-[10.5px] text-[#223498]/80 font-normal leading-tight mt-0.5'>
                     Start completely from scratch
                   </span>
                 </div>
@@ -160,60 +253,16 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
 
               {/* Template Cards */}
               {RESUME_TEMPLATES.map((tmpl) => (
-                <div
+                <TemplateVisualCard
                   key={tmpl.id}
-                  onClick={() => onCreateNew(tmpl.id)}
-                  className='group flex flex-col items-center gap-3 shrink-0 cursor-pointer'
-                >
-                  <div className='w-[159px] h-[219px] bg-white rounded-md shadow-xs border border-slate-200/80 group-hover:border-[#344499] group-hover:shadow-md transition-all overflow-hidden relative flex flex-col'>
-                    {/* Visual mockup thumbnail */}
-                    <div className='h-[145px] w-full bg-slate-50 border-b border-slate-100 p-2 flex flex-col gap-1.5 overflow-hidden select-none pointer-events-none'>
-                      <div className='flex items-center gap-1.5'>
-                        <div
-                          className='w-5 h-5 rounded-full shrink-0'
-                          style={{ backgroundColor: tmpl.accentColor }}
-                        />
-                        <div className='flex-1 flex flex-col gap-0.5'>
-                          <div className='h-2 bg-slate-400 rounded-xs w-3/4' />
-                          <div className='h-1.5 bg-slate-300 rounded-xs w-1/2' />
-                        </div>
-                      </div>
-                      <div className='h-1 bg-slate-200 rounded-xs w-full mt-1' />
-                      <div className='space-y-1 mt-1'>
-                        <div className='h-1.5 bg-slate-300 rounded-xs w-full' />
-                        <div className='h-1.5 bg-slate-200 rounded-xs w-5/6' />
-                        <div className='h-1.5 bg-slate-200 rounded-xs w-4/6' />
-                      </div>
-                      <div className='mt-auto flex gap-1'>
-                        <div
-                          className='h-3 rounded-xs px-1 text-[7px] text-white font-mono flex items-center'
-                          style={{ backgroundColor: tmpl.accentColor }}
-                        >
-                          ATS
-                        </div>
-                        <div className='h-3 bg-slate-200 rounded-xs w-10' />
-                      </div>
-                    </div>
-                    {/* Bottom card micro info */}
-                    <div className='p-2 flex-1 flex flex-col justify-center'>
-                      <div className='text-[10px] font-bold text-slate-700 truncate'>
-                        {tmpl.name}
-                      </div>
-                      <div className='text-[8px] text-slate-400 truncate'>
-                        {tmpl.headline}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className='w-[146px] text-left'>
-                    <span className='block text-sm font-semibold text-[#223498] group-hover:underline truncate'>
-                      {tmpl.name}
-                    </span>
-                    <span className='block text-[10px] text-[#223498]/80 font-normal leading-tight mt-0.5 line-clamp-2'>
-                      {tmpl.description.slice(0, 48)}...
-                    </span>
-                  </div>
-                </div>
+                  template={tmpl}
+                  isSelected={false}
+                  onSelect={(id) => onCreateNew(id)}
+                  onPreview={(id, e) => {
+                    e.stopPropagation();
+                    setQuickPreviewTemplateId(id);
+                  }}
+                />
               ))}
             </div>
 
@@ -293,8 +342,9 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
               </button>
             </div>
           ) : (
-            <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 pt-2'>
-              {displayedResumes.map((resume) => {
+            <>
+              <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 pt-2'>
+                {pagedResumes.map((resume) => {
                 const isSelected = resume.id === activeResumeRecordId;
                 const updatedDateStr = formatUpdatedDate(resume.updated_at);
 
@@ -388,21 +438,166 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
                     </div>
 
                     {/* Footer Info */}
-                    <div className='p-3 bg-white'>
-                      <h4 className='text-sm font-semibold text-black truncate'>
-                        {resume.title || 'Untitled Resume'}
-                      </h4>
-                      <p className='text-[10px] text-slate-500 mt-0.5'>
-                        Last updated on {updatedDateStr}
-                      </p>
+                    <div
+                      className='p-3 bg-white border-t border-slate-100 transition-colors'
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {editingResumeId === resume.id ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            handleSaveRename(resume.id);
+                          }}
+                          className='flex items-center gap-1.5'
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            ref={editInputRef}
+                            type='text'
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                e.stopPropagation();
+                                cancelEditing();
+                              }
+                            }}
+                            disabled={isSavingTitle}
+                            maxLength={100}
+                            placeholder='Enter resume name...'
+                            className='flex-1 min-w-0 text-xs sm:text-sm font-semibold text-slate-900 bg-slate-50 border border-[#344499] rounded px-2 py-1 outline-hidden focus:bg-white focus:ring-2 focus:ring-[#344499]/20 transition-all'
+                            autoFocus
+                          />
+                          <button
+                            type='submit'
+                            disabled={isSavingTitle || !editingTitle.trim()}
+                            className='p-1.5 rounded-md bg-[#344499] text-white hover:bg-[#253275] transition-colors cursor-pointer shrink-0 disabled:opacity-50'
+                            title='Save resume name'
+                            aria-label='Save resume name'
+                          >
+                            {isSavingTitle ? (
+                              <Loader2 size={13} className='animate-spin' />
+                            ) : (
+                              <Check size={13} strokeWidth={2.5} />
+                            )}
+                          </button>
+                          <button
+                            type='button'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelEditing();
+                            }}
+                            disabled={isSavingTitle}
+                            className='p-1.5 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors cursor-pointer shrink-0'
+                            title='Cancel'
+                            aria-label='Cancel renaming'
+                          >
+                            <X size={13} strokeWidth={2.5} />
+                          </button>
+                        </form>
+                      ) : (
+                        <div className='flex items-start justify-between gap-1.5 group/title'>
+                          <div className='min-w-0 flex-1'>
+                            <h4
+                              className='text-sm font-semibold text-slate-900 truncate hover:text-[#344499] transition-colors cursor-pointer'
+                              title={`${resume.title || 'Untitled Resume'} — Click to rename`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEditing(resume.id, resume.title || 'Untitled Resume');
+                              }}
+                            >
+                              {resume.title || 'Untitled Resume'}
+                            </h4>
+                            <p className='text-[10px] text-slate-500 mt-0.5'>
+                              Last updated on {updatedDateStr}
+                            </p>
+                          </div>
+
+                          <button
+                            type='button'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditing(resume.id, resume.title || 'Untitled Resume');
+                            }}
+                            className='p-1 text-slate-400 hover:text-[#344499] hover:bg-slate-100 rounded transition-all cursor-pointer shrink-0 -mt-0.5'
+                            title='Edit resume name'
+                            aria-label={`Edit name for ${resume.title || 'Untitled Resume'}`}
+                          >
+                            <Pencil size={12.5} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className='flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-4 border-t border-slate-200/80'>
+                <span className='text-xs text-slate-500 font-medium'>
+                  Showing {((currentPage - 1) * PAGE_SIZE) + 1} to {Math.min(currentPage * PAGE_SIZE, displayedResumes.length)} of {displayedResumes.length} resumes
+                </span>
+                <div className='flex items-center gap-1 sm:gap-1.5'>
+                  <button
+                    type='button'
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1 cursor-pointer'
+                  >
+                    <ChevronLeft size={14} />
+                    <span>Previous</span>
+                  </button>
+
+                  {getPageNumbers(currentPage, totalPages).map((p, i) => (
+                    <button
+                      key={i}
+                      type='button'
+                      onClick={() => typeof p === 'number' && setPage(p)}
+                      disabled={p === '...'}
+                      className={`min-w-[32px] h-[32px] px-2 flex items-center justify-center rounded-lg border text-xs sm:text-sm transition font-medium cursor-pointer ${
+                        p === currentPage
+                          ? 'bg-[#1e2653] text-white border-[#1e2653] font-bold shadow-xs'
+                          : p === '...'
+                          ? 'border-transparent text-slate-400 cursor-default'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+
+                  <button
+                    type='button'
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className='px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs sm:text-sm font-medium text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition min-h-[32px] flex items-center gap-1 cursor-pointer'
+                  >
+                    <span>Next</span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
           )}
         </div>
       </div>
+
+      <TemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        currentTemplateId=''
+        onSelectTemplate={(templateId) => onCreateNew(templateId)}
+      />
+
+      <TemplateQuickPreviewModal
+        isOpen={Boolean(quickPreviewTemplateId)}
+        templateId={quickPreviewTemplateId}
+        onClose={() => setQuickPreviewTemplateId(null)}
+        onSelectTemplate={(templateId) => onCreateNew(templateId)}
+      />
     </div>
   );
 };
