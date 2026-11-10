@@ -284,7 +284,7 @@ export function calcLocalMatchAnalysis(doc: ResumeDocument | null): ResumeMatchR
     matchPercentage: Math.min(100, score),
     matchedKeywords,
     missingKeywords: [],
-    readabilityTips: tips.length ? tips : ['Formatting structure is clean and ATS-friendly'],
+    readabilityTips: tips.length ? tips : ['Formatting structure is clean and recruiter-ready'],
     actionableSuggestions: suggestions.length ? suggestions : ['Your profile has complete core sections'],
   };
 }

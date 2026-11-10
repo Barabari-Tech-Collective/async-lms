@@ -107,18 +107,31 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
 
-  // JD Match state
+  // JD & Role Match state
+  const [matchTargetRole, setMatchTargetRole] = useState(resumeDoc.targetRole || '');
   const [jdText, setJdText] = useState('');
   const [jdLoading, setJdLoading] = useState(false);
   const [matchResult, setMatchResult] = useState<ResumeMatchResult | null>(null);
 
+  // Sync default target role when modal opens
+  useEffect(() => {
+    if (showJDModal && !matchTargetRole && resumeDoc.targetRole) {
+      setMatchTargetRole(resumeDoc.targetRole);
+    }
+  }, [showJDModal, resumeDoc.targetRole]);
+
   const handleAnalyzeJD = async () => {
-    if (!jdText.trim()) return toast.error('Paste a job description first.');
+    const roleTrimmed = matchTargetRole.trim();
+    const jdTrimmed = jdText.trim();
+    if (!roleTrimmed && !jdTrimmed) {
+      return toast.error('Please enter a target job role or job requirements.');
+    }
     setJdLoading(true);
     try {
       const res = await apiClient.post('/assistant/resume/optimize', {
         resumeData: resumeDoc,
-        jobDescription: jdText,
+        targetRole: roleTrimmed,
+        jobDescription: jdTrimmed,
       });
       if (res.data?.success && res.data.data) {
         setMatchResult(res.data.data as ResumeMatchResult);
@@ -541,7 +554,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               <div className='flex items-center gap-2'>
                 <Briefcase size={18} className='text-[#223498]' />
                 <h3 className='text-base font-bold text-slate-800'>
-                  Check Skill / Job Description Match
+                  Role & Job Match Analysis
                 </h3>
               </div>
               <button
@@ -554,16 +567,36 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
             </div>
 
             <p className='text-xs text-slate-500 mb-3'>
-              Paste the job requirements below to analyze keyword alignment, ATS readiness score, and get personalized recommendations.
+              Enter your target job role, paste a formal JD, or add quick notes about what the company is asking for to see how your resume aligns.
             </p>
 
-            <textarea
-              rows={4}
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-              placeholder='Paste job description or requirements here...'
-              className='w-full p-3 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1F285B] focus:outline-hidden text-slate-800 resize-none mb-3'
-            />
+            {/* Target Job Role Input */}
+            <div className='mb-3'>
+              <label className='block text-xs font-semibold text-slate-700 mb-1'>
+                Target Job Role <span className='text-slate-400 font-normal'>(Recommended)</span>
+              </label>
+              <input
+                type='text'
+                value={matchTargetRole}
+                onChange={(e) => setMatchTargetRole(e.target.value)}
+                placeholder='e.g. Full Stack Developer, Junior Data Analyst, React Native Fresher'
+                className='w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1F285B] focus:outline-hidden text-slate-800'
+              />
+            </div>
+
+            {/* Job Requirements / Description / Notes */}
+            <div className='mb-3'>
+              <label className='block text-xs font-semibold text-slate-700 mb-1'>
+                Job Requirements or Notes <span className='text-slate-400 font-normal'>(Optional if role provided)</span>
+              </label>
+              <textarea
+                rows={3}
+                value={jdText}
+                onChange={(e) => setJdText(e.target.value)}
+                placeholder='Paste a formal job description, or casual notes (e.g. "Looking for someone with React, Node, and basic SQL knowledge to build dashboard APIs")...'
+                className='w-full p-3 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1F285B] focus:outline-hidden text-slate-800 resize-none'
+              />
+            </div>
 
             <button
               type='button'
@@ -574,7 +607,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               {jdLoading ? (
                 <>
                   <Loader2 size={14} className='animate-spin' />
-                  <span>Analyzing Match...</span>
+                  <span>Analyzing Role Alignment...</span>
                 </>
               ) : (
                 <>
@@ -588,7 +621,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               <div className='mt-5 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4 animate-in fade-in-50'>
                 <div className='flex items-center justify-between'>
                   <span className='text-xs font-bold text-slate-700'>
-                    ATS Keyword Match Score:
+                    Role Match Alignment:
                   </span>
                   <span className='text-sm font-black text-[#223498] bg-[#DEE8FB] px-2.5 py-0.5 rounded-full'>
                     {matchResult.matchPercentage ?? (matchResult as any).matchScore ?? 0}%
@@ -598,7 +631,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                 {matchResult.matchedKeywords?.length > 0 && (
                   <div>
                     <span className='block text-[11px] font-bold text-emerald-800 mb-1.5'>
-                      ✓ Matched Keywords:
+                      ✓ Matched in your Resume:
                     </span>
                     <div className='flex flex-wrap gap-1.5'>
                       {matchResult.matchedKeywords.map((kw, i) => (
@@ -616,7 +649,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                 {matchResult.missingKeywords?.length > 0 && (
                   <div>
                     <span className='block text-[11px] font-bold text-amber-800 mb-1.5'>
-                      ⚠ Missing Keywords from Resume:
+                      ⚠ Missing for this Role:
                     </span>
                     <div className='flex flex-wrap gap-1.5'>
                       {matchResult.missingKeywords.map((kw, i) => (

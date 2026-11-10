@@ -1679,13 +1679,19 @@ Additional Context: ${context.slice(0, 500) || 'None'}`,
 
 // ── POST /api/assistant/resume/optimize (Resume Match Analysis) ───────────────
 exports.optimizeWithJD = async (req, res) => {
-  const { resumeData, jobDescription } = req.body;
+  const { resumeData, targetRole, jobDescription } = req.body;
 
-  if (!resumeData || !jobDescription) {
-    return res.status(400).json({ message: 'resumeData and jobDescription are required.' });
+  const trimmedRole = (targetRole || resumeData?.targetRole || '').trim();
+  const trimmedJD = (jobDescription || '').trim();
+
+  if (!resumeData || (!trimmedRole && !trimmedJD)) {
+    return res.status(400).json({ message: 'Target role or job description is required.' });
   }
 
-  const truncatedJD = String(jobDescription).slice(0, 3000);
+  const roleText = trimmedRole ? `Target Role: ${trimmedRole}\n` : '';
+  const jdText = trimmedJD
+    ? `Job Description / Recruiter Notes:\n${trimmedJD.slice(0, 3000)}`
+    : 'No full job description provided; evaluate against standard industry hiring requirements for this target role.';
 
   try {
     const completion = await openai.chat.completions.create({
@@ -1693,8 +1699,9 @@ exports.optimizeWithJD = async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are a Senior Technical Recruiter performing a Resume Match Analysis against a Job Description.
-Evaluate keyword match, missing technologies, formatting readability, and actionable recommendations.
+          content: `You are a Senior Technical Recruiter and hiring manager performing a Resume Role & Job Match Analysis.
+Evaluate candidate alignment against the target role and any job description or informal notes provided. If only a job role or partial notes are provided, evaluate against standard industry technical requirements and core competencies expected for that role.
+Identify keyword matches, missing technologies/tools that the role demands, formatting/content readability, and actionable recommendations.
 Return ONLY valid JSON matching this structure:
 {
   "matchPercentage": <number 0-100>,
@@ -1710,17 +1717,17 @@ Return ONLY valid JSON matching this structure:
         },
         {
           role: 'user',
-          content: `Analyze this resume against the JD:
+          content: `Analyze this resume against the target role and job criteria:
+${roleText}${jdText}
+
 Resume Content:
 ${JSON.stringify({
+  targetRole: trimmedRole || resumeData.targetRole,
   summary: resumeData.summary,
   skills: resumeData.skills,
   projects: (resumeData.projects || []).map(p => ({ title: p.title, techStack: p.techStack, bullets: p.bullets })),
   experience: resumeData.experience,
-})}
-
-Job Description:
-${truncatedJD}`,
+})}`,
         },
       ],
       max_tokens: 900,

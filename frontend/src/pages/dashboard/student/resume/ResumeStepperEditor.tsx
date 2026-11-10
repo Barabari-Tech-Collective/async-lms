@@ -806,10 +806,10 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                       ? 'bg-indigo-50 text-indigo-900 border-indigo-200 hover:bg-indigo-100/80'
                       : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100/80'
                   )}
-                  title='Click to view ATS Readiness Checklist'
+                  title='Click to view Resume Readiness Checklist'
                 >
                   <Sparkles size={13} className='text-current shrink-0' />
-                  <span>{atsAnalysis.matchPercentage}% ATS Score</span>
+                  <span>{atsAnalysis.matchPercentage}% Resume Readiness</span>
                   <ChevronDown
                     size={12}
                     className={cn('transition-transform shrink-0', showAtsScoreDropdown && 'rotate-180')}
@@ -819,7 +819,7 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                 {showAtsScoreDropdown && (
                   <div className='absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-40 animate-in fade-in zoom-in-95 duration-100 text-xs'>
                     <div className='flex items-center justify-between pb-2 mb-2 border-b border-slate-100'>
-                      <span className='font-bold text-slate-900'>ATS Placement Readiness</span>
+                      <span className='font-bold text-slate-900'>Resume Readiness</span>
                       <span className='font-black text-indigo-700'>{atsAnalysis.matchPercentage}%</span>
                     </div>
 
