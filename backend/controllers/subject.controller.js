@@ -237,6 +237,19 @@ exports.getCourseStructure = async (req, res) => {
       }
     }
 
+    // Student access control: Students must be enrolled in the subject
+    if (req.user?.role === 'student') {
+      const enrollCheck = await pool.query(
+        'SELECT 1 FROM user_subjects WHERE user_id = $1 AND subject_id = $2',
+        [userId, subject.id]
+      );
+      if (enrollCheck.rows.length === 0) {
+        return res.status(403).json({
+          message: 'Access denied: You are not enrolled in this course. Please request enrollment from your facilitator.',
+        });
+      }
+    }
+
     // 2. Fetch full structure
     const query = `
       SELECT 
@@ -668,6 +681,22 @@ exports.getSubtopicContent = async (req, res) => {
       return res.status(404).json({ message: 'Lesson not found' });
     }
 
+    if (userRole === 'student') {
+      const enrollCheck = await pool.query(
+        `SELECT 1 FROM user_subjects us
+         JOIN topics t ON t.subject_id = us.subject_id
+         JOIN units u ON u.topic_id = t.id
+         JOIN subtopics st ON st.unit_id = u.id
+         WHERE us.user_id = $1 AND st.slug = $2`,
+        [userId, subtopicSlug]
+      );
+      if (enrollCheck.rows.length === 0) {
+        return res.status(403).json({
+          message: 'Access denied: You are not enrolled in this course. Please request enrollment from your facilitator.',
+        });
+      }
+    }
+
     // ---- Build response ----
     const base = rows[0];
     const lessonRows = rows.filter((r) => r.lesson_id);
@@ -1054,6 +1083,21 @@ exports.getExerciseContent = async (req, res) => {
 
     const row = rows[0];
 
+    // Student access control: Must be enrolled in the subject
+    if (req.user?.role === 'student') {
+      const enrollCheck = await pool.query(
+        `SELECT 1 FROM user_subjects us
+         JOIN topics t ON t.subject_id = us.subject_id
+         JOIN units u ON u.topic_id = t.id
+         LEFT JOIN subtopics st ON st.unit_id = u.id
+         WHERE us.user_id = $1 AND (u.id = $2 OR st.id = $3)`,
+        [req.user.id, row.unit_id, row.subtopic_id]
+      );
+      if (enrollCheck.rows.length === 0) {
+        return res.status(403).json({ message: 'Access denied: You are not enrolled in this course.' });
+      }
+    }
+
     if (req.user?.role === 'facilitator') {
       const subjectIds = (req.user?.subject_ids || []).map(String);
       const exCheck = await pool.query(
@@ -1174,6 +1218,19 @@ exports.getQuizContent = async (req, res) => {
       );
       if (quizCheck.rows.length === 0 || !subjectIds.includes(String(quizCheck.rows[0].subject_id))) {
         return res.status(403).json({ message: 'Access denied: You are not assigned to this subject' });
+      }
+    }
+
+    if (userRole === 'student') {
+      const enrollCheck = await pool.query(
+        `SELECT 1 FROM user_subjects us
+         JOIN topics t ON t.subject_id = us.subject_id
+         JOIN units u ON u.topic_id = t.id
+         WHERE us.user_id = $1 AND u.id = $2`,
+        [userId, rows[0].unit_id]
+      );
+      if (enrollCheck.rows.length === 0) {
+        return res.status(403).json({ message: 'Access denied: You are not enrolled in this course.' });
       }
     }
 

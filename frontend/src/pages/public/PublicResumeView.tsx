@@ -10,6 +10,7 @@ import {
   Phone,
   AlertCircle,
   Loader2,
+  Lock,
 } from 'lucide-react';
 import apiClient from '@/services/api';
 import { toast } from 'react-hot-toast';
@@ -25,6 +26,7 @@ interface PublicResumeData {
   updated_at: string;
   author_name?: string;
   author_email?: string;
+  is_author_preview?: boolean;
 }
 
 export default function PublicResumeView() {
@@ -313,6 +315,14 @@ export default function PublicResumeView() {
   return (
     <div className='min-h-screen bg-[#F8FAFC] text-slate-800 antialiased font-sans pb-24 print:bg-white print:p-0'>
       {/* ── TOP RECRUITER ACTION BAR (Hidden in print) ────────────────────────── */}
+            {resumeData.is_author_preview && (
+        <div className='bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2 text-xs flex items-center justify-center gap-2 print:hidden font-medium'>
+          <Lock size={14} className='text-amber-600 shrink-0' />
+          <span>
+            <strong>Private Author Preview:</strong> You are viewing your own private resume. External recruiters visiting this link will see a 404 private message until you click <strong>Make Public</strong> in your resume builder.
+          </span>
+        </div>
+      )}
       <nav className='sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs print:hidden'>
         <div className='max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4 flex-wrap'>
           {/* Left: CodeGuru Verified Candidate Branding */}

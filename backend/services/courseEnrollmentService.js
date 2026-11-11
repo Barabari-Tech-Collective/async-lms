@@ -38,6 +38,17 @@ async function enrollStudentInSubject(client, { userId, subjectId, reviewerId = 
   }
 
   try {
+    // 0. Ensure subject exists, is published, and not deleted
+    const subjectCheck = await managedClient.query(
+      'SELECT id, name FROM subjects WHERE id = $1 AND is_published = true AND is_deleted = false',
+      [subjectId],
+    );
+    if (subjectCheck.rows.length === 0) {
+      const err = new Error('Subject does not exist, is unpublished, or has been archived');
+      err.statusCode = 404;
+      throw err;
+    }
+
     // 1. Insert enrollment (idempotent)
     await managedClient.query(
       `INSERT INTO user_subjects (user_id, subject_id, started_at)
@@ -158,9 +169,9 @@ async function removeStudentFromSubject({ userId, subjectId, force = false }) {
   const enrollment = checkRes.rows[0];
   if ((enrollment.is_completed || enrollment.certificate_id) && !force) {
     const err = new Error(
-      'Cannot revoke a course that the student has already completed with an issued certificate. Pass force=true to override.',
+      'Cannot revoke a course that the student has already completed with an issued certificate. Only administrators can override with force=true.',
     );
-    err.statusCode = 400;
+    err.statusCode = 403;
     err.isCompleted = true;
     throw err;
   }

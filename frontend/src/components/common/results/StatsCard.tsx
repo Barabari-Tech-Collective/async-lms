@@ -1,4 +1,5 @@
 import { BarChart, TrendingUp, TrendingDown, Activity } from "lucide-react";
+import { getEffectiveScore } from "@/utils/scoreUtils";
 
 type Result = {
   student_name: string;
@@ -20,13 +21,8 @@ const StatsCard = ({ results }: Props) => {
 
 
   const evaluatedScores = results
-    .filter((r: any) => 
-      (r.status === 'completed' || r.status === 'evaluated') && 
-      r.marks !== null && 
-      r.marks !== undefined && 
-      !isNaN(Number(r.marks))
-    )
-    .map((r: any) => Number(r.marks));
+    .map(getEffectiveScore)
+    .filter((s): s is number => s !== null && !isNaN(s));
 
   const avg = evaluatedScores.length > 0
     ? (evaluatedScores.reduce((a: number, b: number) => a + b, 0) / evaluatedScores.length).toFixed(1)

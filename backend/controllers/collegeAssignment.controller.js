@@ -801,6 +801,7 @@ exports.getCollegeAssignmentById = async (req, res) => {
               u.full_name AS created_by_name,
               cas.id AS submission_id,
               cas.submission_type, cas.submission_link, cas.submission_file_url, cas.submission_file_name, cas.submitted_at,
+              cas.updated_at,
               cas.updated_at AS submission_updated_at,
               er.id AS evaluation_result_id,
               er.status AS er_status,

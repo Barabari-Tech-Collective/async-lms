@@ -1,9 +1,18 @@
 const router = require('express').Router();
 const multer = require('multer');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const verifyToken = require('../middlewares/verfiyToken');
 const isStudent = require('../middlewares/isStudent');
 const isStudentOrFacilitator = require('../middlewares/isStudentOrFacilitator');
+
+const verifyUrlLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many URL verification attempts. Please wait a minute and try again.' },
+});
 
 const ALLOWED_SUBMISSION_EXTENSIONS = new Set([
   '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
@@ -140,6 +149,7 @@ router.post(
   '/assignments/verify-url-access',
   verifyToken,
   isStudent,
+  verifyUrlLimiter,
   verifySubmissionUrl,
 );
 router.post(

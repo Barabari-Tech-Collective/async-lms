@@ -19,6 +19,7 @@ import {
   Copy,
   ExternalLink,
   Globe,
+  Lock,
   ShieldCheck,
   Mail,
   MessageSquare,
@@ -151,6 +152,24 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
     return '';
   };
 
+  const isPublic = Boolean(resumeDoc.is_public);
+
+  const handleTogglePublic = async (forceVal?: boolean) => {
+    const nextVal = typeof forceVal === 'boolean' ? forceVal : !isPublic;
+    const updated = { ...resumeDoc, is_public: nextVal };
+    onUpdate(updated);
+    if (resumeId) {
+      try {
+        await apiClient.put(`/assistant/resume/${resumeId}`, {
+          document: updated,
+        });
+        toast.success(nextVal ? 'Public link enabled! Anyone with link can view.' : 'Resume made private. Public link disabled.');
+      } catch (err) {
+        toast.error('Failed to update sharing preference');
+      }
+    }
+  };
+
   const handleShare = () => {
     const url = getPublicShareUrl();
     if (!url) {
@@ -165,7 +184,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
     if (!url) return;
     navigator.clipboard.writeText(url);
     setShareCopied(true);
-    toast.success('Public recruiter link copied to clipboard!');
+    toast.success(isPublic ? 'Public recruiter link copied!' : 'Private draft link copied!');
     setTimeout(() => setShareCopied(false), 2500);
   };
 
@@ -837,6 +856,35 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               >
                 <Download size={12} />
                 <span>Download Again</span>
+              </button>
+            </div>
+
+            {/* Privacy Status & Toggle */}
+            <div className='flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50'>
+              <div className='flex items-center gap-2.5'>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isPublic ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {isPublic ? <Globe size={16} /> : <Lock size={16} />}
+                </div>
+                <div>
+                  <div className='flex items-center gap-1.5'>
+                    <span className='text-xs font-bold text-slate-800'>
+                      {isPublic ? 'Public Recruiter Link Active' : 'Private Draft (Access Blocked)'}
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isPublic ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
+                      {isPublic ? 'PUBLIC' : 'PRIVATE'}
+                    </span>
+                  </div>
+                  <p className='text-[11px] text-slate-500'>
+                    {isPublic ? 'Anyone with this link can view your verified resume.' : 'Outsiders see a 404 private message until you turn on public sharing.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type='button'
+                onClick={() => handleTogglePublic()}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${isPublic ? 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100' : 'bg-[#1F285B] text-white hover:bg-[#161D44] shadow-xs'}`}
+              >
+                {isPublic ? 'Make Private' : 'Make Public'}
               </button>
             </div>
 

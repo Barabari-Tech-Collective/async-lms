@@ -40,7 +40,7 @@ function isAllowedGitUrl(urlStr) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
-    const allowed = ['github.com', 'gitlab.com', 'bitbucket.org'];
+    const allowed = ['github.com', 'gitlab.com', 'bitbucket.org', 'github.io'];
     return allowed.some(h => host === h || host.endsWith('.' + h));
   } catch {
     return false;
@@ -136,6 +136,18 @@ function isAllowedSqlUrl(urlStr) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
+    // Reject loopback / private IP immediately
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.startsWith('127.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+    ) {
+      return false;
+    }
     // 1. Google Drive / Docs
     if (host.includes('drive.google.com') || host.includes('docs.google.com')) return true;
     // 2. OneDrive / SharePoint / Dropbox
@@ -172,8 +184,32 @@ async function getSqlDownloadUrl(sub) {
     }
   }
   // Convert GitHub blob links to raw file content
-  if (link.includes('github.com') && !link.includes('/raw/') && link.includes('/blob/')) {
-    return link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  if (link.includes('github.com') && link.includes('/blob/')) {
+    const match = link.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)(?:\/blob\/.*)?/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  if (link.includes('raw.githubusercontent.com')) {
+    try {
+      const parsed = new URL(link);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return `https://github.com/${parts[0]}/${parts[1]}`;
+      }
+    } catch {}
+  }
+  if (link.includes('.github.io')) {
+    try {
+      const parsed = new URL(link);
+      const host = parsed.hostname.toLowerCase();
+      if (host.endsWith('.github.io')) {
+        const username = host.replace('.github.io', '');
+        const pathParts = parsed.pathname.split('/').filter(Boolean);
+        const repo = pathParts[0] || `${username}.github.io`;
+        return `https://github.com/${username}/${repo}`;
+      }
+    } catch {}
   }
   return link;
 }
@@ -186,14 +222,34 @@ function isAllowedVisualUrl(urlStr) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
-    if (host.includes('drive.google.com') || host.includes('docs.google.com')) return true;
-    if (['onedrive.live.com', '1drv.ms', 'sharepoint.com', 'dropbox.com'].some(h => host === h || host.endsWith('.' + h))) return true;
+
+    // 1. Immediately reject localhost, loopback, and private network IPs (e.g. Live Server on student laptop)
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.startsWith('127.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+    ) {
+      return false;
+    }
+
+    // 2. Allowed Git repositories (including github.com, gitlab.com, bitbucket.org, and *.github.io)
     if (isAllowedGitUrl(trimmed)) return true;
+
+    // 3. Direct downloadable zip archives on trusted cloud storage
     const pathLower = parsed.pathname.toLowerCase();
-    if (pathLower.endsWith('.zip') || pathLower.endsWith('.tar.gz') || pathLower.endsWith('.html') || pathLower.endsWith('.htm')) return true;
-    if (host.includes('amazonaws.com') || host.includes('s3') || host.includes('storage.googleapis.com') || host.includes('blob.core.windows.net')) return true;
-    if (host.includes('vercel.app') || host.includes('netlify.app') || host.includes('onrender.com') || host.includes('github.io')) return true;
-    return true;
+    if (
+      (pathLower.endsWith('.zip') || pathLower.endsWith('.tar.gz')) &&
+      (host.includes('amazonaws.com') || host.includes('storage.googleapis.com') || host.includes('blob.core.windows.net'))
+    ) {
+      return true;
+    }
+
+    // Explicitly reject web cloud drives (OneDrive, Dropbox, etc.), local live servers, and non-git sites
+    return false;
   } catch {
     return false;
   }
@@ -216,8 +272,32 @@ async function getVisualDownloadUrl(sub) {
       return `https://drive.google.com/uc?export=download&id=${match[1]}`;
     }
   }
-  if (link.includes('github.com') && !link.includes('/raw/') && link.includes('/blob/')) {
-    return link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  if (link.includes('github.com') && link.includes('/blob/')) {
+    const match = link.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)(?:\/blob\/.*)?/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  if (link.includes('raw.githubusercontent.com')) {
+    try {
+      const parsed = new URL(link);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return `https://github.com/${parts[0]}/${parts[1]}`;
+      }
+    } catch {}
+  }
+  if (link.includes('.github.io')) {
+    try {
+      const parsed = new URL(link);
+      const host = parsed.hostname.toLowerCase();
+      if (host.endsWith('.github.io')) {
+        const username = host.replace('.github.io', '');
+        const pathParts = parsed.pathname.split('/').filter(Boolean);
+        const repo = pathParts[0] || `${username}.github.io`;
+        return `https://github.com/${username}/${repo}`;
+      }
+    } catch {}
   }
   return link;
 }
@@ -230,6 +310,18 @@ function isAllowedPythonUrl(urlStr) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
+    // Reject loopback / private IP immediately
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.startsWith('127.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+    ) {
+      return false;
+    }
     if (host.includes('drive.google.com') || host.includes('docs.google.com')) return true;
     if (['onedrive.live.com', '1drv.ms', 'sharepoint.com', 'dropbox.com'].some(h => host === h || host.endsWith('.' + h))) return true;
     if (isAllowedGitUrl(trimmed)) return true;
@@ -259,23 +351,54 @@ async function getPythonDownloadUrl(sub) {
       return `https://drive.google.com/uc?export=download&id=${match[1]}`;
     }
   }
-  if (link.includes('github.com') && !link.includes('/raw/') && link.includes('/blob/')) {
-    return link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  if (link.includes('github.com') && link.includes('/blob/')) {
+    const match = link.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)(?:\/blob\/.*)?/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  if (link.includes('raw.githubusercontent.com')) {
+    try {
+      const parsed = new URL(link);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return `https://github.com/${parts[0]}/${parts[1]}`;
+      }
+    } catch {}
+  }
+  if (link.includes('.github.io')) {
+    try {
+      const parsed = new URL(link);
+      const host = parsed.hostname.toLowerCase();
+      if (host.endsWith('.github.io')) {
+        const username = host.replace('.github.io', '');
+        const pathParts = parsed.pathname.split('/').filter(Boolean);
+        const repo = pathParts[0] || `${username}.github.io`;
+        return `https://github.com/${username}/${repo}`;
+      }
+    } catch {}
   }
   return link;
 }
 
 function resolveEvaluatorType(evaluation, assignment = null) {
-  let type = (
-    assignment?.evaluator_type ||
-    evaluation?.assignment_evaluator_type ||
-    evaluation?.evaluator_type ||
-    ''
-  ).toString().trim().toUpperCase();
+  // If the assignment has an explicit evaluator_type configured (e.g. VISUAL, EXCEL, SQL, PYTHON, REACT),
+  // that is the primary source of truth for what kind of assignment this is.
+  const assignType = (assignment?.evaluator_type || '').toString().trim().toUpperCase();
+  const evalType = (evaluation?.evaluator_type || evaluation?.assignment_evaluator_type || '').toString().trim().toUpperCase();
 
-  // If type is not explicitly set, or is generic fallback ('JS', 'NONE', 'AI'),
+  let type = '';
+  if (assignType && !['NONE', 'AI', 'JS', 'BACKEND'].includes(assignType)) {
+    type = assignType;
+  } else if (evalType && !['NONE', 'AI', 'JS', 'BACKEND'].includes(evalType)) {
+    type = evalType;
+  } else {
+    type = assignType || evalType || '';
+  }
+
+  // If type is not explicitly set, or is generic fallback ('JS', 'NONE', 'AI', 'BACKEND'),
   // verify against rubric, test cases, feedback, and assignment title to ensure correct evaluator matching.
-  if (!type || type === 'NONE' || type === 'JS') {
+  if (!type || type === 'NONE' || type === 'JS' || type === 'AI' || type === 'BACKEND') {
     const testCasesStr = typeof (assignment?.test_cases || evaluation?.test_cases) === 'string'
       ? (assignment?.test_cases || evaluation?.test_cases)
       : JSON.stringify(assignment?.test_cases || evaluation?.test_cases || '');
@@ -348,6 +471,21 @@ function resolveEvaluatorType(evaluation, assignment = null) {
       combined.includes('.tsx')
     ) {
       type = 'REACT';
+    } else if (
+      combined.includes('semantic html') ||
+      combined.includes('html') ||
+      combined.includes('css') ||
+      combined.includes('visual') ||
+      combined.includes('website') ||
+      combined.includes('webpage') ||
+      combined.includes('web page') ||
+      combined.includes('.html') ||
+      combined.includes('.css') ||
+      combined.includes('flexbox') ||
+      combined.includes('stylesheet') ||
+      combined.includes('poster')
+    ) {
+      type = 'VISUAL';
     } else if (
       combined.includes('api endpoints') ||
       combined.includes('controller logic') ||
@@ -1216,10 +1354,15 @@ exports.syncEvaluationStatus = async (req, res) => {
 
     if (activeJobIds.length > 0) {
       try {
-        let evalType = (evalRes.rows[0]?.evaluator_type || '').toLowerCase();
-        if (!evalType && pendingJobsRes.rows[0]?.status_url) {
+        let evalType = null;
+        if (activeJobIds[0] && typeof activeJobIds[0] === 'string' && activeJobIds[0].includes('-')) {
+          const prefix = activeJobIds[0].split('-')[0].toLowerCase();
+          evalType = prefix === 'js' ? 'javascript' : prefix;
+        } else if (pendingJobsRes.rows[0]?.status_url) {
           const parts = pendingJobsRes.rows[0].status_url.split('/');
           evalType = (parts[2] || '').toLowerCase();
+        } else {
+          evalType = (evalRes.rows[0]?.evaluator_type || '').toLowerCase();
         }
         const batchResponse = await axios.post(
           `${baseUrl}/jobs/batch-status`,
@@ -1337,10 +1480,17 @@ exports.syncEvaluationStatus = async (req, res) => {
                 }
                 const bList = feedback.breakdown || feedback.rubric_breakdown;
                 if (Array.isArray(bList) && bList.length > 0) {
+                  const bMax = bList.reduce((acc, it) => acc + (Number(it.max ?? it.max_marks ?? it.weight ?? 0)), 0);
                   const bSum = bList.reduce((acc, it) => acc + (Number(it.awarded ?? it.score ?? it.points ?? it.marks ?? 0)), 0);
-                  if (bSum > 0 && marks !== bSum) {
+                  if (bMax > 0) {
+                    const harmonized = Math.min(100, Math.round((bSum / bMax) * 100 * 100) / 100);
+                    if (marks !== harmonized) {
+                      console.log(`[Sync] Harmonizing marks (${marks} -> ${harmonized}) based on breakdown (${bSum}/${bMax})`);
+                      marks = harmonized;
+                    }
+                  } else if (bSum > 0 && marks !== bSum) {
                     console.log(`[Sync] Harmonizing marks (${marks} -> ${bSum}) to match rubric breakdown sum`);
-                    marks = bSum;
+                    marks = Math.min(100, Math.round(bSum * 100) / 100);
                   }
                 }
               }
@@ -1618,9 +1768,12 @@ exports.getResultsByAssignment = async (req, res) => {
             if (fb && typeof fb === 'object') {
               const bList = fb.breakdown || fb.rubric_breakdown;
               if (Array.isArray(bList) && bList.length > 0) {
+                const bMax = bList.reduce((acc, it) => acc + (Number(it.max ?? it.max_marks ?? it.weight ?? 0)), 0);
                 const bSum = bList.reduce((acc, it) => acc + (Number(it.awarded ?? it.score ?? it.points ?? it.marks ?? 0)), 0);
-                if (bSum > 0) {
-                  effectiveMarks = bSum;
+                if (bMax > 0) {
+                  effectiveMarks = Math.min(100, Math.round((bSum / bMax) * 100 * 100) / 100);
+                } else if (bSum > 0) {
+                  effectiveMarks = Math.min(100, Math.round(bSum * 100) / 100);
                 }
               }
             }
@@ -3040,15 +3193,51 @@ You must select 3-6 criteria from this list that cover both Frontend and Backend
     - DO NOT generate "Table Joins" or "Data Aggregation" if the assignment only queries a single table without aggregations!
 
 - CRITICAL: The weights of all criteria MUST sum to exactly 100 with clean, rounded numbers (e.g., 50, 50 or 30, 25, 25, 20 or 25, 25, 25, 25).`;
+    } else if (evaluatorType?.toLowerCase() === 'visual') {
+      systemPrompt += `\n8. For Visual / HTML & CSS / JavaScript DOM Web assignments, you are designing a rubric for an automated browser & source code grading engine:
+- ASSIGNMENT TIER IDENTIFICATION (CRITICAL):
+  Analyze the title and instructions to identify the assignment's exact technical tier:
+
+  TIER 1: BEGINNER HTML / MULTI-PAGE HTML ONLY:
+  - Trigger: The instructions focus on HTML tags, document structure, forms, tables, links, images, or multi-page sites (e.g. "HTML only", "My College Website", "build pages using HTML").
+  - STRICT PROHIBITION: DO NOT generate ANY criteria for CSS, styling, colors, Flexbox, or JavaScript!
+  - Generate 3 to 5 focused criteria tailored to the requested HTML features:
+    * "Semantic HTML & Document Hierarchy": Proper doctype, <title>, headings (<h1>-<h6>), <header>, <nav>, <main>, <section>, <article>, <footer>, <p>, and text formatting.
+    * "Multi-Page Navigation & Linking": Working anchor tags (<a href>) connecting the site's pages (e.g., home.html, departments.html, contact.html) with valid relative URLs.
+    * "Forms & User Input": (if requested): <form>, labeled <input>, <textarea>, <select>, <button type="submit">.
+    * "Tables & Structured Data": (if requested): <table>, <thead>, <tbody>, <tr>, <th>, <td>.
+    * "Media & Image Assets": <img> tags with valid paths and meaningful alt attributes.
+
+  TIER 2: HTML + CSS / RESPONSIVE WEB DESIGN:
+  - Trigger: The instructions specifically ask for CSS styling, layouts, stylesheets, colors, or responsiveness.
+  - STRICT PROHIBITION: DO NOT generate JavaScript or interactivity criteria!
+  - Generate 3 to 5 balanced criteria:
+    * "Semantic HTML Structure": Proper page layout and semantic tags.
+    * "CSS Layout & Flexbox/Grid": Flexbox or Grid layout (display: flex/grid, justify-content, align-items, flex-direction).
+    * "Styling & Visual Design": Colors, typography (font-family, font-size), spacing (margin, padding), borders, shadows.
+    * "External Stylesheet Linking": Proper <link rel="stylesheet" href="*.css"> tags and clean file organization.
+    * "Responsive Design & Media Queries": (if requested): Viewport meta tag, @media queries adapting layout to mobile/tablet.
+
+  TIER 3: HTML + CSS + JAVASCRIPT DOM / INTERACTIVE WEB APPS:
+  - Trigger: The instructions require dynamic interactivity, event handling, DOM manipulation, timers, calculators, clocks, or game logic (e.g. "DOM", "JavaScript", "click event", "setInterval", "calculator").
+  - Generate 3 to 5 comprehensive criteria:
+    * "UI Structure & Layout": Semantic HTML and CSS layout for the application interface.
+    * "DOM Queries & Event Listeners": Proper querySelector/getElementById and addEventListener for user actions (click, input, submit, change).
+    * "Dynamic DOM State & UI Updates": Dynamically updating textContent, innerHTML, styles, or classList in response to user events.
+    * "Functional Logic & API/Timers": Correct calculation logic, form handling, setInterval/setTimeout, or Date API usage as specified.
+    * "Code Quality & Script Linking": Proper <script src="*.js"> linking, no uncaught exceptions, and clean separation of concerns.
+
+- CRITICAL: In each criterion's "description", include concrete guidance mentioning expected HTML tags, CSS properties, or JavaScript APIs so the automated evaluator can verify them with 100% precision.
+- The weights of all criteria MUST sum to exactly 100 with clean, rounded numbers (e.g., 30, 25, 25, 20 or 35, 35, 30 or 25, 25, 25, 25).`;
     }
 
     systemPrompt += `
 
 Example output format (adapt criteria count dynamically: 2 criteria for simple/setup labs, 3-4 for standard queries/DDL, 4-6 for complex/analytics assignments):
 [
-  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Table Formatting & Professional Structure' : (evaluatorType?.toLowerCase() === 'sql' ? 'SQL Syntax & Column Projections' : 'Feature A'))))}", "description": "Accurate syntax and column selections.", "weight": 30 },
-  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Dynamic Calculations & Formulas' : (evaluatorType?.toLowerCase() === 'sql' ? 'Table Joins & Relationships' : 'Feature B'))))}", "description": "Correct relational join cardinality.", "weight": 35 },
-  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Entry & Completeness' : (evaluatorType?.toLowerCase() === 'sql' ? 'Data Aggregation & Grouping' : 'Code Quality & Structure')}", "description": "Aggregations using GROUP BY and aggregate functions.", "weight": 35 }
+  { "name": "${evaluatorType === 'react' ? 'State Updates' : (evaluatorType === 'backend' ? 'API Endpoints' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Fullstack Integration' : (evaluatorType?.toLowerCase() === 'excel' ? 'Table Formatting & Professional Structure' : (evaluatorType?.toLowerCase() === 'sql' ? 'SQL Syntax & Column Projections' : (evaluatorType?.toLowerCase() === 'visual' ? 'Semantic HTML & Page Structure' : 'Feature A')))))}", "description": "Accurate syntax and column selections.", "weight": 30 },
+  { "name": "${evaluatorType === 'react' ? 'Components Render Correctly' : (evaluatorType === 'backend' ? 'Database Operations' : (evaluatorType?.toLowerCase() === 'fullstack' ? 'Backend API & Routing' : (evaluatorType?.toLowerCase() === 'excel' ? 'Dynamic Calculations & Formulas' : (evaluatorType?.toLowerCase() === 'sql' ? 'Table Joins & Relationships' : (evaluatorType?.toLowerCase() === 'visual' ? 'CSS Styling & Layout Alignment' : 'Feature B')))))}", "description": "Correct relational join cardinality.", "weight": 35 },
+  { "name": "${evaluatorType?.toLowerCase() === 'excel' ? 'Data Entry & Completeness' : (evaluatorType?.toLowerCase() === 'sql' ? 'Data Aggregation & Grouping' : (evaluatorType?.toLowerCase() === 'visual' ? 'External Linking & File Organization' : 'Code Quality & Structure'))}", "description": "Aggregations using GROUP BY and aggregate functions.", "weight": 35 }
 ]`;
 
     const userPrompt = `Assignment Title: ${title || 'Untitled'}
@@ -3367,6 +3556,8 @@ exports.reEvaluateSubmission = async (req, res) => {
           ? 'No spreadsheet URL or file provided by student.'
           : isSqlEvaluation
           ? 'No SQL query, file, or repository provided by student.'
+          : isVisualEvaluation
+          ? 'No HTML/CSS repository, zip file, or Google Drive link provided by student.'
           : 'No repository URL provided by student.';
         if (invalid.submission_link) {
           try {
@@ -3375,6 +3566,8 @@ exports.reEvaluateSubmission = async (req, res) => {
               ? `Invalid spreadsheet host (${h}). Submissions must be a Google Sheets link, OneDrive/SharePoint, or direct .xlsx file.`
               : isSqlEvaluation
               ? `Invalid SQL submission source (${h}). Submissions must be a .sql file or git repository.`
+              : isVisualEvaluation
+              ? `Invalid visual submission source (${h}). Submissions must be a public repository on GitHub, GitLab, Bitbucket, or a direct zip archive.`
               : `Invalid repository host (${h}). Submissions must be a public repository on GitHub, GitLab, or Bitbucket.`;
           } catch {
             reason = isExcelEvaluation
@@ -3773,13 +3966,15 @@ exports.reEvaluateSubmission = async (req, res) => {
     }
 
     // Recalculate total_submissions to account for newly added students,
+    // update evaluator_type to match the evaluator used,
     // then reset status to 'running' so the sync doesn't prematurely finish
     await pool.query(
       `UPDATE evaluations
        SET status = 'running',
+           evaluator_type = $2,
            total_submissions = (SELECT COUNT(*) FROM evaluation_results WHERE evaluation_id = $1)
        WHERE id = $1`,
-      [evaluationId]
+      [evaluationId, (effectiveType || 'backend').toLowerCase()]
     );
 
     return res.json({ success: true, message: "Re-evaluation started" });

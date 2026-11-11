@@ -536,6 +536,7 @@ export interface ResumeDocument {
   targetRole?: string;
   templateId?: string;
   status?: 'draft' | 'completed';
+  is_public?: boolean;
   sectionOrder?: SectionKey[];
   personalInfo: ResumePersonalInfo;
   summary: string;

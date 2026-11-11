@@ -3,6 +3,7 @@ import { Search, ChevronLeft, ChevronRight, Square, Eye, ExternalLink, Filter } 
 import { Link, useLocation } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getEffectiveScore } from '@/utils/scoreUtils';
 import apiClient from '@/services/api';
 
 type Result = {
@@ -87,25 +88,7 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
     );
   };
 
-  // Authoritative grade calculator: guarantees score in table matches rubric criteria sum
-  const getEffectiveScore = (item: any) => {
-    if (isRowEvaluating(item) || isRowUnevaluated(item) || item.status === 'cancelled' || item.status === 'stopped' || isRowFailed(item)) return null;
-    let breakdown = null;
-    if (item.feedback) {
-      let fb = item.feedback;
-      if (typeof fb === 'string') {
-        try { fb = JSON.parse(fb); } catch {}
-      }
-      if (fb && typeof fb === 'object') {
-        breakdown = fb.breakdown || fb.rubric_breakdown;
-      }
-    }
-    if (Array.isArray(breakdown) && breakdown.length > 0) {
-      const sum = breakdown.reduce((acc: number, it: any) => acc + Number(it.score ?? it.awarded ?? it.points ?? it.marks ?? 0), 0);
-      if (!isNaN(sum) && sum > 0) return sum;
-    }
-    return Number(item.marks ?? 0);
-  };
+
 
   const getConciseFailureBadge = (item: any): string => {
     const reason = (getFailureReason(item) || '').toLowerCase();
@@ -286,7 +269,9 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
 
   const handleBulkReevaluate = async () => {
     if (!onRefresh || selectedSubmissions.length === 0) return;
-    const type = bulkEvaluatorType || evaluation?.evaluator_type || undefined;
+    // When bulkEvaluatorType is empty ("Auto"), send undefined so backend resolves
+    // from assignment's true configured evaluator_type, rather than reusing a stale record!
+    const type = bulkEvaluatorType || undefined;
 
     try {
       setBulkReEvaluating(true);

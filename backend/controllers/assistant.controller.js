@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const OpenAI = require('openai');
 const pool = require('../config/pg');
 const { filterLmsDataForTrack } = require('../utils/resumeDomainMatcher');
@@ -490,9 +491,20 @@ exports.getPublicResumeById = async (req, res) => {
   if (!isValidUuid(id)) {
     return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
   }
+
+  // Optional author identity extraction: allows the student to preview their own private draft
+  let requestingUserId = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
+      requestingUserId = decoded.id;
+    } catch {}
+  }
+
   try {
     const result = await pool.query(
-      `SELECT sr.id, sr.title, sr.schema_version, sr.version, sr.document, sr.updated_at,
+      `SELECT sr.id, sr.user_id, sr.title, sr.schema_version, sr.version, sr.document, sr.updated_at,
               u.full_name as author_name
        FROM public.student_resumes sr
        LEFT JOIN public.users u ON u.id = sr.user_id
@@ -503,7 +515,23 @@ exports.getPublicResumeById = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
     }
-    return res.json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    const isPublic = Boolean(row.document && (row.document.is_public === true || row.document.is_public === 'true'));
+    const isAuthor = requestingUserId && String(requestingUserId) === String(row.user_id);
+
+    // If private and requester is not the authenticated owner, reject access
+    if (!isPublic && !isAuthor) {
+      return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        ...row,
+        is_author_preview: !isPublic && isAuthor,
+      },
+    });
   } catch (err) {
     console.error('GET PUBLIC RESUME ERROR:', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve public resume.' });

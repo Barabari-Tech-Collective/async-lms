@@ -4,7 +4,7 @@ const pool = require('../config/pg');
 // In-memory cache to prevent flooding the database with duplicate queries
 // when multiple dashboard widgets make concurrent requests on page load.
 const userAuthCache = new Map(); // userId -> { data, cachedAt }
-const CACHE_TTL_MS = 60 * 1000; // 60 seconds cache to prevent connection pool exhaustion on dashboard load
+const CACHE_TTL_MS = 15 * 1000; // 15 seconds: absorbs concurrent dashboard bursts while rejecting revoked sessions promptly
 
 // Self-cleaning timer to ensure zero memory leaks in long-running production environments
 setInterval(() => {
@@ -79,14 +79,8 @@ const verifyToken = async (req, res, next) => {
               return res.status(401).json({ message: 'Access Denied: Account is disabled, deleted, or not found' });
             }
           } catch (retryErr) {
-            console.warn(`[verifyToken] DB retry also failed: ${retryErr.message}. Falling back to verified JWT claims.`);
-            // 3. Fallback to cryptographically verified JWT claims rather than throwing 503
-            userDb = {
-              deleted_at: null,
-              token_version: verified.token_version,
-              email: verified.email,
-              full_name: verified.name || verified.full_name || 'Authenticated User'
-            };
+            console.error(`[verifyToken] DB retry also failed: ${retryErr.message}`);
+            return res.status(503).json({ message: 'Authentication service temporarily unavailable. Please retry.' });
           }
         }
       }

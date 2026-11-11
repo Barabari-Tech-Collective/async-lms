@@ -103,24 +103,33 @@ const outboundLimiter = new Semaphore(MAX_CONCURRENT_PROBES);
 
 // ── 3. SSRF IP Blacklist & Validation ──
 function isPrivateIp(ip) {
-  if (net.isIPv4(ip)) {
-    const parts = ip.split('.').map(Number);
+  if (!ip || typeof ip !== 'string') return true;
+  const cleanIp = ip.trim().toLowerCase();
+
+  // Handle IPv4-mapped IPv6 (e.g., ::ffff:169.254.169.254 or ::ffff:127.0.0.1)
+  if (cleanIp.startsWith('::ffff:')) {
+    return isPrivateIp(cleanIp.slice(7));
+  }
+
+  if (net.isIPv4(cleanIp)) {
+    const parts = cleanIp.split('.').map(Number);
     if (parts[0] === 127) return true; // Loopback
     if (parts[0] === 10) return true;  // 10.0.0.0/8
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
     if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
     if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16 (Link-local & AWS Metadata)
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // 100.64.0.0/10 Carrier-grade NAT
     if (parts[0] === 0) return true;
+    if (parts[0] >= 224) return true; // Multicast & Reserved
     return false;
   }
-  if (net.isIPv6(ip)) {
-    const lower = ip.toLowerCase();
+  if (net.isIPv6(cleanIp)) {
     if (
-      lower === '::1' ||
-      lower === '::' ||
-      lower.startsWith('fc') ||
-      lower.startsWith('fd') ||
-      lower.startsWith('fe80')
+      cleanIp === '::1' ||
+      cleanIp === '::' ||
+      cleanIp.startsWith('fc') ||
+      cleanIp.startsWith('fd') ||
+      cleanIp.startsWith('fe80')
     ) {
       return true;
     }

@@ -2442,6 +2442,7 @@ exports.getAssignmentById = async (req, res) => {
         sub.submission_file_url,
         sub.submission_file_name,
         sub.submitted_at,
+        sub.updated_at,
         sub.updated_at AS submission_updated_at,
         er.id AS evaluation_result_id,
         er.status AS er_status,

@@ -346,7 +346,8 @@ export default function StudentEvaluationDetails() {
   }, [breakdown]);
 
   // Authoritative grade: Rubric breakdown sum is the mathematical source of truth
-  const marks = Number(breakdownSum !== null ? breakdownSum : (studentResult?.marks ?? 0));
+  const rawMarks = Number(breakdownSum !== null ? breakdownSum : (studentResult?.marks ?? 0));
+  const marks = Math.min(Number(evaluation?.max_score ?? 100), Math.round(rawMarks * 100) / 100);
   const maxScore = Number(evaluation?.max_score ?? 100);
   const percentage = Math.min(100, Math.round((marks / (maxScore || 100)) * 100));
 
@@ -657,6 +658,21 @@ export default function StudentEvaluationDetails() {
                 {/* Submission Links Card */}
                 <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3">
                   <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400">Submission Deliverables</h3>
+                  {Boolean(
+                    (studentResult?.submission_updated_at || studentResult?.updated_at) &&
+                    studentResult?.evaluated_at &&
+                    new Date(studentResult.submission_updated_at || studentResult.updated_at).getTime() > new Date(studentResult.evaluated_at).getTime() + 2000
+                  ) && (
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs">
+                      <RefreshCw size={15} className="text-amber-600 shrink-0" />
+                      <div>
+                        <p className="font-bold">Submission Updated After Evaluation</p>
+                        <p className="text-[11px] text-amber-700">
+                          Student resubmitted on {new Date(studentResult.submission_updated_at || studentResult.updated_at).toLocaleString()}. Please review and re-evaluate the new deliverables.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     {studentResult?.submission_link && (
                       <a
@@ -692,6 +708,16 @@ export default function StudentEvaluationDetails() {
                     )}
                     {!studentResult?.submission_link && !studentResult?.submission_file_url && (
                       <p className="text-xs text-slate-400 italic">No deliverable link or file attached.</p>
+                    )}
+                    {(studentResult?.submission_updated_at || studentResult?.updated_at || studentResult?.submitted_at) && (
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Submitted: {studentResult?.submitted_at ? new Date(studentResult.submitted_at).toLocaleDateString() : '—'}</span>
+                        {(studentResult?.submission_updated_at || studentResult?.updated_at) && (
+                          <span className="font-semibold text-slate-700">
+                            Updated: {new Date(studentResult.submission_updated_at || studentResult.updated_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
