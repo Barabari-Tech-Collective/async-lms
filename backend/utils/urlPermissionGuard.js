@@ -1,5 +1,7 @@
 const dns = require('dns').promises;
 const net = require('net');
+const http = require('http');
+const https = require('https');
 
 /**
  * Universal Pre-Submission URL Permission & Accessibility Guard
@@ -137,8 +139,8 @@ function isPrivateIp(ip) {
   return false;
 }
 
-async function assertSafeHost(hostname) {
-  if (!hostname || typeof hostname !== 'string') return false;
+async function resolveSafeRecord(hostname) {
+  if (!hostname || typeof hostname !== 'string') return null;
   const lower = hostname.toLowerCase();
   if (
     lower === 'localhost' ||
@@ -146,20 +148,88 @@ async function assertSafeHost(hostname) {
     lower.endsWith('.local') ||
     lower.endsWith('.internal')
   ) {
-    return false;
+    return null;
   }
 
   try {
     const records = await dns.lookup(hostname, { all: true });
+    if (!records || records.length === 0) return null;
     for (const r of records) {
       if (isPrivateIp(r.address)) {
-        return false;
+        return null;
       }
     }
-    return true;
+    return records[0];
   } catch {
-    return false;
+    return null;
   }
+}
+
+const ssrfBlockedResult = (platform) => ({
+  accessible: false,
+  verdict: 'SSRF_BLOCKED',
+  platform,
+  message: 'Target host resolves to a restricted or private address.',
+});
+
+async function assertSafeHost(hostname) {
+  return Boolean(await resolveSafeRecord(hostname));
+}
+
+/**
+ * Pins the DNS-checked IP address directly onto the Node http/https socket
+ * to prevent DNS rebinding (TOCTOU) attacks between check and request.
+ */
+async function safeFetch(urlStr, options = {}) {
+  const parsed = new URL(urlStr);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    const err = new Error('SSRF_BLOCKED: Disallowed URL scheme');
+    err.isSsrf = true;
+    throw err;
+  }
+  const safeRecord = await resolveSafeRecord(parsed.hostname);
+  if (!safeRecord) {
+    const err = new Error('SSRF_BLOCKED');
+    err.isSsrf = true;
+    throw err;
+  }
+
+  return new Promise((resolve, reject) => {
+    const lib = parsed.protocol === 'https:' ? https : http;
+    const req = lib.request(
+      parsed,
+      {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        lookup: (_host, opts, cb) => {
+          if (opts && opts.all) return cb(null, [safeRecord]);
+          return cb(null, safeRecord.address, safeRecord.family);
+        },
+        signal: options.signal,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const bodyText = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            status: res.statusCode,
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            headers: {
+              get: (name) => {
+                const val = res.headers[name.toLowerCase()];
+                return Array.isArray(val) ? val[0] : (val || null);
+              },
+            },
+            text: async () => bodyText,
+            json: async () => JSON.parse(bodyText),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 const BROWSER_HEADERS = {
@@ -198,7 +268,7 @@ async function probeGoogleResource(probeUrl, platform) {
         };
       }
 
-      res = await fetch(currentUrl, {
+      res = await safeFetch(currentUrl, {
         method: 'GET',
         redirect: 'manual',
         headers: BROWSER_HEADERS,
@@ -332,6 +402,7 @@ async function probeGoogleResource(probeUrl, platform) {
         "Open your file in Google -> Click 'Share' (top right) -> Under 'General access', change from 'Restricted' to 'Anyone with the link can view' -> Ensure role is set to 'Viewer' -> Re-submit.",
     };
   } catch (err) {
+    if (err.isSsrf) return ssrfBlockedResult(platform);
     if (err.name === 'AbortError') {
       return {
         accessible: true,
@@ -378,7 +449,7 @@ async function probeGitHubRepo(rawUrl) {
     const repo = match[2].replace(/\.git$/, '');
     const probeUrl = `https://github.com/${owner}/${repo}`;
 
-    const res = await fetch(probeUrl, {
+    const res = await safeFetch(probeUrl, {
       method: 'HEAD',
       redirect: 'manual',
       headers: BROWSER_HEADERS,
@@ -422,6 +493,7 @@ async function probeGitHubRepo(rawUrl) {
         "Open your repository on GitHub -> Go to 'Settings' -> Scroll down to 'Danger Zone' -> Click 'Change visibility' -> Select 'Make public' -> Re-submit.",
     };
   } catch (err) {
+    if (err.isSsrf) return ssrfBlockedResult('github');
     if (err.name === 'AbortError') {
       return {
         accessible: true,
@@ -450,7 +522,7 @@ async function probeOneDrive(rawUrl) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(rawUrl, {
+    const res = await safeFetch(rawUrl, {
       method: 'GET',
       redirect: 'manual',
       headers: BROWSER_HEADERS,
@@ -517,6 +589,7 @@ async function probeOneDrive(rawUrl) {
       message: `OneDrive returned HTTP ${res.status}. Access could not be verified.`,
     };
   } catch (err) {
+    if (err.isSsrf) return ssrfBlockedResult('onedrive');
     if (err.name === 'AbortError') {
       return {
         accessible: true,
@@ -545,7 +618,7 @@ async function probeFigma(rawUrl) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(rawUrl, {
+    const res = await safeFetch(rawUrl, {
       method: 'GET',
       redirect: 'manual',
       headers: BROWSER_HEADERS,
@@ -594,6 +667,7 @@ async function probeFigma(rawUrl) {
 
     return { accessible: true, verdict: 'ACCESSIBLE', platform: 'figma' };
   } catch (err) {
+    if (err.isSsrf) return ssrfBlockedResult('figma');
     return {
       accessible: true,
       verdict: 'TRANSIENT_FAIL_OPEN',
@@ -613,7 +687,7 @@ async function probeGenericUrl(rawUrl) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(rawUrl, {
+    const res = await safeFetch(rawUrl, {
       method: 'HEAD',
       redirect: 'manual',
       headers: BROWSER_HEADERS,
@@ -622,11 +696,10 @@ async function probeGenericUrl(rawUrl) {
 
     if (res.status === 401 || res.status === 403) {
       return {
-        accessible: false,
-        verdict: 'DEFINITE_RESTRICTED',
+        accessible: true,
+        verdict: 'TRANSIENT_FAIL_OPEN',
         platform: 'general_url',
-        message: `HTTP ${res.status} Access Denied: The URL requires authentication.`,
-        instructions: 'Please make sure your project or website is publicly accessible.',
+        message: `Warning: HTTP ${res.status} returned (common with Cloudflare or bot protection). Submission allowed — please double-check your link opens publicly in an incognito window.`,
       };
     }
 
@@ -636,6 +709,7 @@ async function probeGenericUrl(rawUrl) {
       platform: 'general_url',
     };
   } catch (err) {
+    if (err.isSsrf) return ssrfBlockedResult('general_url');
     return {
       accessible: true,
       verdict: 'TRANSIENT_FAIL_OPEN',

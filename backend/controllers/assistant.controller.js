@@ -277,7 +277,7 @@ async function computeVerificationProvenance(userId, document) {
                      (link.label || '').toLowerCase().includes('linkedin') ? 'linkedin' : 'web';
         return {
           label: String(link.label || 'Link').slice(0, 50),
-          url: sanitizeUrl(link.url, type) || link.url || '',
+          url: sanitizeUrl(link.url, type) || '',
         };
       }).filter(l => Boolean(l.url));
     }
