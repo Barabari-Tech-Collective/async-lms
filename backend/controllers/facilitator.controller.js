@@ -1775,8 +1775,10 @@ exports.getAssignmentAnalytics = async (req, res) => {
       return res.json({ success: true, data: emptyAssignmentData() });
     }
 
-    const sLimit = Math.min(parseInt(limit, 10) || 20, 100);
-    const sOffset = (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
+    const isAll = limit === 'all' || limit === '-1';
+    const parsedLimit = parseInt(limit, 10);
+    const sLimit = isAll ? 100000 : (parsedLimit > 0 ? parsedLimit : 20);
+    const sOffset = isAll ? 0 : (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
     if (!colleges.length) return res.json({ success: true, data: emptyAssignmentData() });
 
@@ -2092,8 +2094,10 @@ exports.getProjectAnalytics = async (req, res) => {
       return res.json({ success: true, data: emptyProjectData() });
     }
     
-    const sLimit = Math.min(parseInt(limit, 10) || 10, 100);
-    const sOffset = (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
+    const isAll = limit === 'all' || limit === '-1';
+    const parsedLimit = parseInt(limit, 10);
+    const sLimit = isAll ? 100000 : (parsedLimit > 0 ? parsedLimit : 20);
+    const sOffset = isAll ? 0 : (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
 
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
     if (!colleges.length) return res.json({ success: true, data: emptyProjectData() });
@@ -3092,14 +3096,16 @@ exports.getStudentAnalytics = async (req, res) => {
       return res.json({ success: true, data: [], total: 0 });
     }
 
-    const { college_id, batch, subject_id, topic_id, page, limit, search, active_filter, inactive_filter } = req.query;
+    const { college_id, batch, subject_id, topic_id, page, limit, search, active_filter, inactive_filter, sort_by } = req.query;
 
     if (isFacilitator && subject_id && !subjectIds.includes(subject_id)) {
       return res.json({ success: true, data: [], total: 0 });
     }
 
-    const sLimit = Math.min(parseInt(limit, 10) || 20, 100);
-    const sOffset = (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
+    const isAll = limit === 'all' || limit === '-1';
+    const parsedLimit = parseInt(limit, 10);
+    const sLimit = isAll ? 100000 : (parsedLimit > 0 ? parsedLimit : 20);
+    const sOffset = isAll ? 0 : (Math.max(parseInt(page, 10) || 1, 1) - 1) * sLimit;
     const colleges = await getFacilitatorCollegeIds(facilitatorId, college_id, role);
     if (!colleges.length) return res.json({ success: true, data: [], total: 0 });
 
@@ -3411,6 +3417,25 @@ exports.getStudentAnalytics = async (req, res) => {
       assignments_submitted: data.filter((s) => s.assignment_submitted_count > 0).length,
       projects_completed: data.filter((s) => s.project_submitted_count > 0).length,
     };
+
+    if (sort_by === 'score_desc' || sort_by === 'score_asc') {
+      data.sort((a, b) => {
+        const totalA = (a.quiz_total_count || 0) + (a.assignment_total_count || 0) + (a.project_total_count || 0);
+        const doneA = (a.quiz_submitted_count || 0) + (a.assignment_submitted_count || 0) + (a.project_submitted_count || 0);
+        const pctA = totalA > 0 ? (doneA / totalA) * 100 : 0;
+
+        const totalB = (b.quiz_total_count || 0) + (b.assignment_total_count || 0) + (b.project_total_count || 0);
+        const doneB = (b.quiz_submitted_count || 0) + (b.assignment_submitted_count || 0) + (b.project_submitted_count || 0);
+        const pctB = totalB > 0 ? (doneB / totalB) * 100 : 0;
+
+        if (pctA !== pctB) {
+          return sort_by === 'score_desc' ? pctB - pctA : pctA - pctB;
+        }
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    } else {
+      data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
 
     res.json({ 
       success: true, 

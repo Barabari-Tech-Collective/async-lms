@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { Search, ChevronLeft, ChevronRight, Square, Eye, ExternalLink, Filter } from 'lucide-react';
-import { Link, useLocation } from 'react-router';
+import { Search, ChevronLeft, ChevronRight, Square, Eye, ExternalLink, Filter, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Link, useLocation, useSearchParams } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getEffectiveScore } from '@/utils/scoreUtils';
@@ -29,16 +29,26 @@ type Props = {
 
 const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) => {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const basePath = location.pathname.includes('/facilitator/') ? '/dashboard/facilitator' : '/dashboard/admin';
   const [selectedSubmissions, setSelectedSubmissions] = useState<string[]>([]);
   const [bulkEvaluatorType, setBulkEvaluatorType] = useState<string>('');
   const [bulkReEvaluating, setBulkReEvaluating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<'alpha' | 'score_desc' | 'score_asc'>('alpha');
   const [statusFilter, setStatusFilter] = useState<'all' | 'evaluated' | 'not_evaluated' | 'failed'>('all');
   const [failureReasonFilter, setFailureReasonFilter] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+
+  const pageParam = Number(searchParams.get('page'));
+  const sizeParam = searchParams.get('size');
+  const [currentPage, setCurrentPage] = useState<number>(pageParam > 0 ? pageParam : 1);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    if (sizeParam === 'all' || sizeParam === '-1') return -1;
+    const n = Number(sizeParam);
+    if (n === 10 || n === 20 || n === 50) return n;
+    return 20; // Default 20 submissions per page for facilitators
+  });
 
   const getFailureReason = (item: any): string => {
     if (typeof item.feedback === 'string' && item.feedback.trim()) {
@@ -249,23 +259,101 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
     }
 
     return [...list].sort((a, b) => {
+      if (sortOrder === 'score_desc' || sortOrder === 'score_asc') {
+        const isAUnscored = isRowEvaluating(a) || isRowUnevaluated(a) || isRowFailed(a);
+        const isBUnscored = isRowEvaluating(b) || isRowUnevaluated(b) || isRowFailed(b);
+        const rawScoreA = isAUnscored ? -1 : getEffectiveScore(a);
+        const rawScoreB = isBUnscored ? -1 : getEffectiveScore(b);
+        const scoreA = rawScoreA != null ? rawScoreA : -1;
+        const scoreB = rawScoreB != null ? rawScoreB : -1;
+        if (scoreA !== scoreB) {
+          if (sortOrder === 'score_desc') {
+            return scoreB - scoreA;
+          } else {
+            if (scoreA === -1) return 1;
+            if (scoreB === -1) return -1;
+            return scoreA - scoreB;
+          }
+        }
+      }
       const nameA = (a.student_name || '').trim();
       const nameB = (b.student_name || '').trim();
       const cmp = nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
       if (cmp !== 0) return cmp;
       return String(a.submission_id || a.id || '').localeCompare(String(b.submission_id || b.id || ''));
     });
-  }, [results, searchQuery, statusFilter, failureReasonFilter]);
+  }, [results, searchQuery, statusFilter, failureReasonFilter, sortOrder]);
+
+  const totalPages = useMemo(() => {
+    if (pageSize === -1) return 1;
+    return Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  }, [filteredResults.length, pageSize]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, failureReasonFilter]);
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
   const paginatedResults = useMemo(() => {
+    if (pageSize === -1) return filteredResults;
     const start = (currentPage - 1) * pageSize;
     return filteredResults.slice(start, start + pageSize);
   }, [filteredResults, currentPage, pageSize]);
+
+  const handlePageChange = (p: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, p));
+    setCurrentPage(clamped);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (clamped > 1) {
+          next.set('page', String(clamped));
+        } else {
+          next.delete('page');
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  };
+
+  const handlePageSizeChange = (s: number) => {
+    setPageSize(s);
+    setCurrentPage(1);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('page');
+        if (s === -1) {
+          next.set('size', 'all');
+        } else if (s !== 20) {
+          next.set('size', String(s));
+        } else {
+          next.delete('size'); // Default 20 keeps URL clean
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+    if (searchParams.get('page')) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('page');
+          return next;
+        },
+        { replace: true }
+      );
+    }
+  }, [searchQuery, statusFilter, failureReasonFilter, sortOrder]);
+
+  const showingStart = filteredResults.length === 0 ? 0 : pageSize === -1 ? 1 : (currentPage - 1) * pageSize + 1;
+  const showingEnd = pageSize === -1 ? filteredResults.length : Math.min(currentPage * pageSize, filteredResults.length);
 
   const handleBulkReevaluate = async () => {
     if (!onRefresh || selectedSubmissions.length === 0) return;
@@ -345,6 +433,19 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
+            </div>
+
+            <div className="relative shrink-0">
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as 'alpha' | 'score_desc' | 'score_asc')}
+                className="w-full sm:w-auto text-xs sm:text-sm font-medium border border-slate-200 bg-white rounded-xl px-3 py-1.5 text-slate-700 min-h-[36px] focus:outline-none focus:ring-2 focus:ring-blue-100 cursor-pointer shadow-2xs"
+                aria-label="Sort student results"
+              >
+                <option value="alpha">Sort: Name (A → Z)</option>
+                <option value="score_desc">Sort: Score (Highest first)</option>
+                <option value="score_asc">Sort: Score (Lowest first)</option>
+              </select>
             </div>
           </div>
 
@@ -542,8 +643,11 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                 {/* Action Bar */}
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                   <Link
-                    to={`${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`}
-                    state={{ studentResult: item, evaluation }}
+                    to={{
+                      pathname: `${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`,
+                      search: location.search,
+                    }}
+                    state={{ studentResult: item, evaluation, returnSearch: location.search }}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition"
                     title="View detailed student evaluation result"
                   >
@@ -579,9 +683,39 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                   className="w-4 h-4 rounded border-slate-300"
                 />
               </th>
-              <th className="p-3 text-left font-semibold">Student</th>
+              <th className="p-3 text-left font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(sortOrder === 'alpha' ? 'score_desc' : 'alpha')}
+                  className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                  title="Toggle alphabetical / score sort"
+                >
+                  <span>Student</span>
+                  {sortOrder === 'alpha' && <ArrowDown className="w-3.5 h-3.5 text-blue-600" />}
+                </button>
+              </th>
               <th className="p-3 font-semibold text-center">Status</th>
-              <th className="p-3 font-semibold text-center">Score</th>
+              <th className="p-3 font-semibold text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortOrder((prev) =>
+                      prev === 'score_desc' ? 'score_asc' : prev === 'score_asc' ? 'alpha' : 'score_desc'
+                    );
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none mx-auto"
+                  title="Sort by score: Highest -> Lowest -> Alphabetical"
+                >
+                  <span>Score</span>
+                  {sortOrder === 'score_desc' ? (
+                    <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                  ) : sortOrder === 'score_asc' ? (
+                    <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                  ) : (
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  )}
+                </button>
+              </th>
               <th className="p-3 font-semibold text-right">Action</th>
             </tr>
           </thead>
@@ -653,8 +787,11 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <Link
-                        to={`${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`}
-                        state={{ studentResult: item, evaluation }}
+                        to={{
+                          pathname: `${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`,
+                          search: location.search,
+                        }}
+                        state={{ studentResult: item, evaluation, returnSearch: location.search }}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 transition shadow-2xs"
                         title="View detailed student feedback and rubric breakdown"
                       >
@@ -681,60 +818,82 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
       </div>
 
       {/* Pagination Footer */}
-      {filteredResults.length > 0 && totalPages > 1 && (
-        <div className="px-4 py-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-slate-50/80">
-          <p className="text-[11px] sm:text-xs text-slate-500 font-medium">
-            Showing <span className="font-bold text-slate-800">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-            <span className="font-bold text-slate-800">{Math.min(currentPage * pageSize, filteredResults.length)}</span> of{' '}
-            <span className="font-bold text-slate-800">{filteredResults.length}</span> results
-          </p>
+      {filteredResults.length > 0 && (
+        <div className="px-4 py-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/80">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 w-full sm:w-auto">
+            <p className="text-[11px] sm:text-xs text-slate-500 font-medium">
+              Showing <span className="font-bold text-slate-800">{showingStart}</span> to{' '}
+              <span className="font-bold text-slate-800">{showingEnd}</span> of{' '}
+              <span className="font-bold text-slate-800">{filteredResults.length}</span> results
+            </p>
 
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className="rounded-lg h-7 px-2 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50"
-            >
-              <ChevronLeft className="h-3.5 w-3.5 mr-0.5" />
-              Prev
-            </Button>
-
-            <div className="flex items-center gap-1 mx-0.5">
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                .map((p, idx, arr) => (
-                  <Fragment key={p}>
-                    {idx > 0 && arr[idx - 1] !== p - 1 && (
-                      <span className="text-slate-300 text-xs px-0.5 select-none">...</span>
-                    )}
-                    <button
-                      onClick={() => setCurrentPage(p)}
-                      className={cn(
-                        'w-6 h-6 rounded-md text-xs font-bold transition-all flex items-center justify-center',
-                        currentPage === p
-                          ? 'bg-[#1e2653] text-white shadow-xs'
-                          : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100',
-                      )}
-                    >
-                      {p}
-                    </button>
-                  </Fragment>
-                ))}
+            <div className="flex items-center gap-1.5 pl-2.5 border-l border-slate-200">
+              <label htmlFor="student-table-pagesize" className="text-[11px] sm:text-xs text-slate-500 font-medium whitespace-nowrap">
+                Rows per page:
+              </label>
+              <select
+                id="student-table-pagesize"
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="h-7 px-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-[#1e2653] cursor-pointer"
+                aria-label="Select rows per page"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={-1}>All</option>
+              </select>
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-lg h-7 px-2 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50"
-            >
-              Next
-              <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
-            </Button>
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => handlePageChange(currentPage - 1)}
+                className="rounded-lg h-7 px-2 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 mr-0.5" />
+                Prev
+              </Button>
+
+              <div className="flex items-center gap-1 mx-0.5">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .map((p, idx, arr) => (
+                    <Fragment key={p}>
+                      {idx > 0 && arr[idx - 1] !== p - 1 && (
+                        <span className="text-slate-300 text-xs px-0.5 select-none">...</span>
+                      )}
+                      <button
+                        onClick={() => handlePageChange(p)}
+                        className={cn(
+                          'w-6 h-6 rounded-md text-xs font-bold transition-all flex items-center justify-center cursor-pointer',
+                          currentPage === p
+                            ? 'bg-[#1e2653] text-white shadow-xs'
+                            : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100',
+                        )}
+                      >
+                        {p}
+                      </button>
+                    </Fragment>
+                  ))}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= totalPages}
+                onClick={() => handlePageChange(currentPage + 1)}
+                className="rounded-lg h-7 px-2 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              >
+                Next
+                <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -62,47 +62,75 @@ function PaginationControls({
   page,
   totalPages,
   onPageChange,
+  pageSize,
+  onPageSizeChange,
+  pageSizeOptions = [10, 20, 50, 100, -1],
 }: {
   page: number;
   totalPages: number;
   onPageChange: (p: number) => void;
+  pageSize?: number;
+  onPageSizeChange?: (size: number) => void;
+  pageSizeOptions?: number[];
 }) {
   const pages = getPageNumbers(page, totalPages);
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 shrink-0">
-      <button
-        onClick={() => onPageChange(page - 1)}
-        disabled={page === 1}
-        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
-      >
-        Prev
-      </button>
+    <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 sm:gap-3 shrink-0">
+      {pageSize !== undefined && onPageSizeChange && (
+        <div className="flex items-center gap-1.5 pr-2 sm:border-r sm:border-slate-200">
+          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Rows:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            className="h-7 px-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+            aria-label="Select rows per page"
+          >
+            {pageSizeOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt === -1 ? 'All' : opt}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
-      {pages.map((p, i) => (
-        <button
-          key={i}
-          onClick={() => typeof p === 'number' && onPageChange(p)}
-          disabled={p === '...'}
-          className={`min-w-[28px] h-[30px] sm:min-w-[30px] sm:h-[30px] px-1.5 flex items-center justify-center rounded-lg border text-xs transition-colors font-medium ${
-            p === page
-              ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
-              : p === '...'
-              ? 'border-transparent text-slate-400 cursor-default'
-              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          {p}
-        </button>
-      ))}
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <button
+            onClick={() => onPageChange(page - 1)}
+            disabled={page <= 1}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
+          >
+            Prev
+          </button>
 
-      <button
-        onClick={() => onPageChange(page + 1)}
-        disabled={page === totalPages}
-        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
-      >
-        Next
-      </button>
+          {pages.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => typeof p === 'number' && onPageChange(p)}
+              disabled={p === '...'}
+              className={`min-w-[28px] h-[30px] sm:min-w-[30px] sm:h-[30px] px-1.5 flex items-center justify-center rounded-lg border text-xs transition-colors font-medium ${
+                p === page
+                  ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
+                  : p === '...'
+                  ? 'border-transparent text-slate-400 cursor-default'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+
+          <button
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= totalPages}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -116,7 +144,7 @@ export default function AdminColleges() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState<number>(20);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCollege, setEditingCollege] = useState<College | null>(null);
@@ -181,10 +209,10 @@ export default function AdminColleges() {
     );
   }, [colleges, search]);
 
-  const totalPages = Math.ceil(filteredColleges.length / pageSize);
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(filteredColleges.length / pageSize));
 
   const paginatedColleges = useMemo(() => {
-    return filteredColleges.slice((page - 1) * pageSize, page * pageSize);
+    return pageSize === -1 ? filteredColleges : filteredColleges.slice((page - 1) * pageSize, page * pageSize);
   }, [filteredColleges, page, pageSize]);
 
   useEffect(() => {
@@ -437,12 +465,22 @@ export default function AdminColleges() {
           </div>
 
           {/* Pagination Controls */}
-          {totalPages > 1 && (
+          {filteredColleges.length > 0 && (
             <div className='flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-6 py-3.5 border-t border-slate-100 text-xs text-slate-500'>
               <span className='text-center sm:text-left'>
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredColleges.length)} of {filteredColleges.length} colleges · page {page} of {totalPages}
+                Showing {pageSize === -1 ? 1 : (page - 1) * pageSize + 1}–{pageSize === -1 ? filteredColleges.length : Math.min(page * pageSize, filteredColleges.length)} of {filteredColleges.length} colleges · page {page} of {totalPages}
               </span>
-              <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={(newSize) => {
+                  setPageSize(newSize);
+                  setPage(1);
+                }}
+                pageSizeOptions={[10, 20, 50, 100, -1]}
+              />
             </div>
           )}
         </CardContent>

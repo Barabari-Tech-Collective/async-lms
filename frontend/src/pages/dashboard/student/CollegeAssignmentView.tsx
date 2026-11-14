@@ -125,6 +125,20 @@ export default function CollegeAssignmentView() {
     }, 0);
   }, [parsedRubric]);
 
+  const allowedTypes: SubmissionType[] = useMemo(() => {
+    const raw =
+      Array.isArray(assignment?.allowed_submission_types) &&
+      assignment.allowed_submission_types.length > 0
+        ? assignment.allowed_submission_types
+        : ALL_SUBMISSION_TYPES;
+    const valid = raw.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    const list: SubmissionType[] = valid.length > 0 ? [...valid] : [...ALL_SUBMISSION_TYPES];
+    if (!list.includes('file')) {
+      list.unshift('file');
+    }
+    return list;
+  }, [assignment?.allowed_submission_types]);
+
   const fetchAssignment = async () => {
     try {
       setLoading(true);
@@ -301,20 +315,6 @@ export default function CollegeAssignmentView() {
       </div>
     );
   }
-
-  const allowedTypes: SubmissionType[] = useMemo(() => {
-    const raw =
-      Array.isArray(assignment.allowed_submission_types) &&
-      assignment.allowed_submission_types.length > 0
-        ? assignment.allowed_submission_types
-        : ALL_SUBMISSION_TYPES;
-    const valid = raw.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
-    const list: SubmissionType[] = valid.length > 0 ? [...valid] : [...ALL_SUBMISSION_TYPES];
-    if (!list.includes('file')) {
-      list.unshift('file');
-    }
-    return list;
-  }, [assignment.allowed_submission_types]);
 
   const isSubmitted = Boolean(
     assignment.submission_link || assignment.submission_file_url

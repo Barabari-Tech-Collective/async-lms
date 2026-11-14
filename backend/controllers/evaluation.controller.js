@@ -16,19 +16,37 @@ const EVALUATOR_APIS = {
   SQL: 'SQL Database Evaluator',
 };
 
-// Render free-tier services can accept the TCP connection right after waking
-// but still reject the first request for a few seconds while the app finishes
-// booting. A single retry after a short delay absorbs that without needing an
-// even longer single timeout.
-async function postToEvaluatorWithRetry(url, payload, config) {
-  try {
-    return await axios.post(url, payload, config);
-  } catch (err) {
-    const isNetworkFailure = !err.response && err.request;
-    if (!isNetworkFailure) throw err;
-    console.warn('Evaluator API request failed with no response, retrying once in 5s:', err.message);
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    return axios.post(url, payload, config);
+// Robust retry for internal evaluator HTTP requests to absorb brief service restarts or wakeups.
+async function postToEvaluatorWithRetry(url, payload, config, maxRetries = 4) {
+  let attempt = 0;
+  // Normalize localhost to 127.0.0.1 to prevent Windows IPv6 (::1) dual-stack ECONNREFUSED
+  let targetUrl = url ? url.replace('//localhost:', '//127.0.0.1:') : url;
+
+  while (attempt < maxRetries) {
+    try {
+      return await axios.post(targetUrl, payload, config);
+    } catch (err) {
+      attempt++;
+      const isNetworkFailure =
+        !err.response &&
+        (err.request ||
+          err.code === 'ECONNREFUSED' ||
+          err.code === 'ECONNRESET' ||
+          err.message?.includes('ECONNREFUSED') ||
+          (Array.isArray(err.errors) && err.errors.some((e) => e?.code === 'ECONNREFUSED')));
+
+      if (!isNetworkFailure || attempt >= maxRetries) throw err;
+
+      if (targetUrl.includes('localhost')) {
+        targetUrl = targetUrl.replace('localhost', '127.0.0.1');
+      }
+
+      const delay = Math.min(attempt * 1500, 5000);
+      console.warn(
+        `Evaluator API request failed (${err.code || err.message || 'ECONNREFUSED'}), retrying in ${delay}ms (attempt ${attempt}/${maxRetries})...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 }
 
@@ -753,7 +771,7 @@ exports.runEvaluation = async (req, res) => {
       throw new Error('Rubric missing for REACT evaluator');
     }
 
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://127.0.0.1:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     console.log('Evaluator service api & key: ', evaluatorUrl, evaluatorApiKey);
@@ -1041,6 +1059,18 @@ exports.runEvaluation = async (req, res) => {
         }
 
         const manifestObj = typeof rawManifest === 'object' && rawManifest !== null ? { ...rawManifest } : {};
+        const parsedTestCases = Array.isArray(rawManifest) ? rawManifest : (rawManifest?.testCases || []);
+        const hasSqlManifestConfig =
+          parsedTestCases.length > 0 ||
+          Boolean(manifestObj.referenceQuery && String(manifestObj.referenceQuery).trim()) ||
+          Boolean((manifestObj.referenceScript || manifestObj.referenceSql || manifestObj.referenceDdl || '').trim());
+
+        if (!hasSqlManifestConfig) {
+          return res.status(400).json({
+            error: 'SQL evaluation test cases / manifest are missing for this assignment. Please generate or configure test cases before running evaluation.',
+          });
+        }
+
         if (!manifestObj.mode) {
           const combinedMeta = `${assignment.title || ''} ${JSON.stringify(assignment.rubric || '')} ${JSON.stringify(rawManifest || '')}`.toLowerCase();
           if (combinedMeta.includes('data model') || combinedMeta.includes('create table') || combinedMeta.includes('schema') || combinedMeta.includes('ddl') || combinedMeta.includes('foreign key')) {
@@ -1048,6 +1078,7 @@ exports.runEvaluation = async (req, res) => {
           }
         }
 
+        const forceReEvaluate = Boolean(req.body?.reEvaluate);
         const payload = {
           type: 'sql',
           submissions: await Promise.all(
@@ -1062,11 +1093,12 @@ exports.runEvaluation = async (req, res) => {
           ),
           rubric: formattedRubric,
           manifest: manifestObj,
-          testCases: Array.isArray(rawManifest) ? rawManifest : (rawManifest?.testCases || []),
+          testCases: parsedTestCases,
           assignmentId: targetId,
           assignmentTitle: assignment.title,
-          skipCache: true,
-          reEvaluate: true,
+          assignmentInstructions: assignment.instructions || assignment.description || '',
+          skipCache: forceReEvaluate,
+          reEvaluate: forceReEvaluate,
         };
 
         const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
@@ -1342,7 +1374,7 @@ exports.syncEvaluationStatus = async (req, res) => {
     );
 
     let newlyCompleted = 0;
-    const baseUrl = process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000';
+    const baseUrl = process.env.CENTRAL_EVALUATOR_URL || 'http://127.0.0.1:4000';
 
     // Batch Status Optimization: Query all job statuses in a single HTTP request (< 100ms)
     // rather than firing N individual sequential HTTP requests across hundreds of students.
@@ -2518,6 +2550,15 @@ CRITICAL RULES FOR SQL SCHEMA & TEST DATA (ZERO TOLERANCE FOR DEVIATION)
      * Set "setupSql": "" (the student's script inserts data).
      * Set "referenceQuery" to a verification query (e.g. "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();").
 
+2b. DML / DATABASE STATE CHANGE ASSIGNMENTS (UPDATE, DELETE, INSERT):
+   - If the assignment asks students to modify data (e.g. "Increase employee salaries by 10%", "Delete inactive users", "Update stock quantity"):
+     * Set "mode": "script".
+     * Set "schema": Provide the initial table DDL (CREATE TABLE IF NOT EXISTS ...).
+     * Set "setupSql": Provide realistic initial seed records (before modification).
+     * Set "referenceScript": Provide canonical teacher UPDATE/DELETE statement.
+     * In "testCases", set "assertionType": "database_state".
+     * Set "referenceQuery" to an inspection query (e.g. "SELECT id, name, salary FROM employees ORDER BY id;").
+
 3. DOMAIN-SPECIFIC SCHEMA ADAPTATION (QUERY & PRACTICE LAB MODES):
    - If the assignment asks students to write SELECT queries against tables (single query or multi-step practice lab):
      * CAREFULLY analyze the Assignment Instructions to discover the exact tables, column names, and data types specified:
@@ -2565,6 +2606,7 @@ MANIFEST SCHEMA TEMPLATE
     // CRITICAL: The testCases array MUST contain one test case for EVERY criterion in the Evaluation Rubric (2, 3, 4, 5, etc.)
     {
       "name": "<Exact Rubric Criterion 1 Name>",
+      "assertionType": "result_set", // "result_set" for queries, "database_state" for DML, "schema_definition" for DDL
       "kind": "visible",
       "weight": 30,
       "referenceQuery": "SELECT ...",
@@ -3609,7 +3651,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     client = null;
 
     // Now send to central evaluator
-    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://localhost:4000'}/evaluate`;
+    const evaluatorUrl = `${process.env.CENTRAL_EVALUATOR_URL || 'http://127.0.0.1:4000'}/evaluate`;
     const evaluatorApiKey = process.env.CENTRAL_EVALUATOR_API_KEY;
 
     let jobIdsAndLinks = [];
@@ -3945,7 +3987,7 @@ exports.reEvaluateSubmission = async (req, res) => {
               issues: [errMsg],
               breakdown: [],
             });
-            await client.query(
+            await pool.query(
               `UPDATE evaluation_results 
                SET status = 'failed', marks = 0, feedback = $1::jsonb 
                WHERE evaluation_id = $2 AND submission_id = $3`,
@@ -4002,7 +4044,7 @@ exports.reEvaluateSubmission = async (req, res) => {
       errorDetail: error.message || error.code || error.response?.status || 'Unknown'
     });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
 
@@ -4070,7 +4112,7 @@ exports.stopEvaluation = async (req, res) => {
     console.error('Stop evaluation error:', error);
     return res.status(500).json({ success: false, message: error.message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
 

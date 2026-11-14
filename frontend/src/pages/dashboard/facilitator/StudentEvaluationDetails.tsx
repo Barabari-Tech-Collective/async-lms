@@ -402,9 +402,9 @@ export default function StudentEvaluationDetails() {
 
   // Determine back navigation link based on current path
   const isFacilitator = location.pathname.includes('/facilitator/');
-  const backUrl = isFacilitator
-    ? `/dashboard/facilitator/results/${id}`
-    : `/dashboard/admin/results/${id}`;
+  const returnSearch = location.state?.returnSearch || location.search || '';
+  const basePath = isFacilitator ? '/dashboard/facilitator' : '/dashboard/admin';
+  const backUrl = `${basePath}/results/${id}${returnSearch}`;
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-16">
