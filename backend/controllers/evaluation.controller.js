@@ -201,21 +201,16 @@ async function getSqlDownloadUrl(sub) {
       return `https://drive.google.com/uc?export=download&id=${match[1]}`;
     }
   }
-  // Convert GitHub blob links to raw file content
+  // Convert GitHub blob links directly to raw file download URL
   if (link.includes('github.com') && link.includes('/blob/')) {
-    const match = link.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)(?:\/blob\/.*)?/i);
-    if (match && match[1]) {
-      return match[1];
+    const blobMatch = link.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i);
+    if (blobMatch) {
+      const [, owner, repo, branch, filePath] = blobMatch;
+      return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
     }
   }
   if (link.includes('raw.githubusercontent.com')) {
-    try {
-      const parsed = new URL(link);
-      const parts = parsed.pathname.split('/').filter(Boolean);
-      if (parts.length >= 2) {
-        return `https://github.com/${parts[0]}/${parts[1]}`;
-      }
-    } catch {}
+    return link;
   }
   if (link.includes('.github.io')) {
     try {
