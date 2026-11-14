@@ -419,6 +419,9 @@ function resolveEvaluatorType(evaluation, assignment = null) {
       ? (assignment?.rubric || evaluation?.rubric)
       : JSON.stringify(assignment?.rubric || evaluation?.rubric || '');
     const titleStr = (assignment?.title || evaluation?.assignment_name || '').toLowerCase();
+    const instrStr = (assignment?.instructions || evaluation?.instructions || '').toLowerCase();
+    const unitStr = (assignment?.unit_title || evaluation?.unit_title || assignment?.topic_title || '').toLowerCase();
+    const subjectStr = (assignment?.subject_name || evaluation?.subject_name || '').toLowerCase();
     
     // Also inspect feedback / breakdown if evaluation contains results or feedback
     let feedbackStr = '';
@@ -428,7 +431,7 @@ function resolveEvaluatorType(evaluation, assignment = null) {
       feedbackStr = typeof evaluation.feedback === 'string' ? evaluation.feedback : JSON.stringify(evaluation.feedback);
     }
 
-    const combined = (testCasesStr + ' ' + rubricStr + ' ' + titleStr + ' ' + feedbackStr).toLowerCase();
+    const combined = (testCasesStr + ' ' + rubricStr + ' ' + titleStr + ' ' + instrStr + ' ' + unitStr + ' ' + subjectStr + ' ' + feedbackStr).toLowerCase();
 
     if (
       combined.includes('formula_range_check') ||
@@ -444,6 +447,9 @@ function resolveEvaluatorType(evaluation, assignment = null) {
     ) {
       type = 'EXCEL';
     } else if (
+      subjectStr.includes('sql') ||
+      unitStr.includes('database') ||
+      unitStr.includes('sql') ||
       combined.includes('inner join') ||
       combined.includes('left join') ||
       combined.includes('right join') ||
@@ -457,6 +463,7 @@ function resolveEvaluatorType(evaluation, assignment = null) {
       combined.includes('data model') ||
       combined.includes('create table') ||
       combined.includes('alter table') ||
+      combined.includes('create index') ||
       combined.includes('foreign key') ||
       combined.includes('primary key') ||
       combined.includes('database') ||
