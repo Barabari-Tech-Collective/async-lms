@@ -3,6 +3,7 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 const { Pool } = require('pg');
+const MIGRATION_ADVISORY_LOCK_KEY = 738491;
 
 let dbHost = (process.env.PGHOST || '').trim();
 // Use Neon's connection pooler endpoint if using Neon to prevent cold-start ETIMEDOUT
@@ -51,8 +52,11 @@ pool.on('error', (err, client) => {
 
 (async () => {
   let client;
+  let migrationLockAcquired = false;
   try {
     client = await pool.connect();
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+    migrationLockAcquired = true;
     // Accessing the host from the pool's own options
     const connectedHost = pool.options.host;
     const connectedDb = pool.options.database;
@@ -753,6 +757,283 @@ pool.on('error', (err, client) => {
       ALTER TABLE project_submissions ADD COLUMN IF NOT EXISTS submission_file_name TEXT;
     `);
 
+    // ── Google Meet attendance schema ───────────────────────────────────────
+    // This migration is additive and leaves the legacy attendance tables unchanged.
+    // The staging database contains 2 tables that are class_attendence and class_attendence_sessions.
+
+    try {
+      await client.query('BEGIN');
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS student_google_identities (
+          id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          student_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          meet_user_id        TEXT UNIQUE,
+          google_email        TEXT,
+          status              TEXT NOT NULL DEFAULT 'pending'
+                              CHECK (status IN ('pending', 'verified', 'review_required', 'revoked')),
+          verification_method TEXT,
+          review_reason       TEXT,
+          verified_at         TIMESTAMPTZ,
+          revoked_at          TIMESTAMPTZ,
+          created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_student_active_google_identity
+          ON student_google_identities(student_id)
+          WHERE status <> 'revoked';
+        CREATE INDEX IF NOT EXISTS idx_student_google_identities_status
+          ON student_google_identities(status);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS classes (
+          id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          subject_id                    UUID NOT NULL REFERENCES subjects(id) ON DELETE RESTRICT,
+          facilitator_id                UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          title                         TEXT NOT NULL,
+          scheduled_start_at            TIMESTAMPTZ NOT NULL,
+          planned_end_at                TIMESTAMPTZ NOT NULL,
+          actual_end_at                 TIMESTAMPTZ,
+          attendance_threshold_percent  NUMERIC(5, 2) NOT NULL DEFAULT 70
+                                        CHECK (attendance_threshold_percent >= 0
+                                               AND attendance_threshold_percent <= 100),
+          grace_period_minutes          INTEGER NOT NULL DEFAULT 30
+                                        CHECK (grace_period_minutes >= 1),
+          status                        TEXT NOT NULL DEFAULT 'creating'
+                                        CHECK (status IN (
+                                          'creating', 'scheduled', 'active', 'ending',
+                                          'ended', 'sync_pending', 'processing',
+                                          'cancelled', 'failed'
+                                        )),
+          meet_space_name               TEXT,
+          meet_uri                      TEXT,
+          conference_record_name        TEXT,
+          idempotency_key               TEXT NOT NULL UNIQUE,
+          created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK (planned_end_at > scheduled_start_at),
+          CHECK (actual_end_at IS NULL OR actual_end_at >= scheduled_start_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_classes_subject_id
+          ON classes(subject_id);
+        CREATE INDEX IF NOT EXISTS idx_classes_facilitator_id
+          ON classes(facilitator_id);
+        CREATE INDEX IF NOT EXISTS idx_classes_status
+          ON classes(status);
+        CREATE INDEX IF NOT EXISTS idx_classes_scheduled_start
+          ON classes(scheduled_start_at);
+      `);
+
+      await client.query(`
+        ALTER TABLE classes
+          ADD COLUMN IF NOT EXISTS grace_period_minutes INTEGER NOT NULL DEFAULT 30;
+        ALTER TABLE classes
+          ALTER COLUMN grace_period_minutes SET DEFAULT 30;
+        UPDATE classes
+           SET grace_period_minutes = 30
+         WHERE grace_period_minutes < 1;
+        ALTER TABLE classes
+          DROP CONSTRAINT IF EXISTS classes_grace_period_minutes_check;
+        ALTER TABLE classes
+          ADD CONSTRAINT classes_grace_period_minutes_check
+          CHECK (grace_period_minutes >= 1);
+        ALTER TABLE classes
+          DROP COLUMN IF EXISTS policy_version;
+        UPDATE classes
+           SET status = CASE status
+             WHEN 'ready_for_review' THEN 'ended'
+             WHEN 'finalised' THEN 'ended'
+             WHEN 'cleanup_pending' THEN 'ended'
+             WHEN 'end_unknown' THEN 'failed'
+             ELSE status
+           END
+         WHERE status IN ('ready_for_review', 'finalised', 'cleanup_pending', 'end_unknown');
+        ALTER TABLE classes
+          DROP CONSTRAINT IF EXISTS classes_status_check;
+        ALTER TABLE classes
+          ADD CONSTRAINT classes_status_check
+          CHECK (status IN (
+            'creating', 'scheduled', 'active', 'ending',
+            'ended', 'sync_pending', 'processing',
+            'cancelled', 'failed'
+          ));
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS class_students (
+          class_id             UUID NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
+          student_id           UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          source_subject_id    UUID NOT NULL REFERENCES subjects(id) ON DELETE RESTRICT,
+          roster_status        TEXT NOT NULL DEFAULT 'eligible'
+                               CHECK (roster_status IN ('eligible', 'removed')),
+          roster_reason        TEXT,
+          added_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_at           TIMESTAMPTZ,
+          PRIMARY KEY (class_id, student_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_class_students_student_id
+          ON class_students(student_id);
+        CREATE INDEX IF NOT EXISTS idx_class_students_class_status_student
+          ON class_students(class_id, roster_status, student_id);
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS class_access_tickets (
+          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          class_id              UUID NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
+          student_id            UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          ticket_hash           TEXT NOT NULL UNIQUE,
+          issued_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at            TIMESTAMPTZ NOT NULL,
+          consumed_at           TIMESTAMPTZ,
+          state                 TEXT NOT NULL DEFAULT 'issued'
+                                CHECK (state IN ('issued', 'consumed', 'expired', 'rejected')),
+          rejection_reason      TEXT,
+          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK (expires_at > issued_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_class_access_tickets_lookup
+          ON class_access_tickets(class_id, student_id, state);
+        CREATE INDEX IF NOT EXISTS idx_class_access_tickets_expiry
+          ON class_access_tickets(expires_at);
+      `);
+      await client.query(`
+        ALTER TABLE class_access_tickets
+          DROP COLUMN IF EXISTS session_binding_hash;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS class_access_events (
+          id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          class_id          UUID REFERENCES classes(id) ON DELETE RESTRICT,
+          student_id        UUID REFERENCES users(id) ON DELETE RESTRICT,
+          ticket_id         UUID REFERENCES class_access_tickets(id) ON DELETE SET NULL,
+          event_type        TEXT NOT NULL,
+          reason            TEXT,
+          request_id        TEXT,
+          created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_class_access_events_class
+          ON class_access_events(class_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_class_access_events_student
+          ON class_access_events(student_id, created_at);
+      `);
+      await client.query(`
+        ALTER TABLE class_access_events
+          DROP COLUMN IF EXISTS ip_address,
+          DROP COLUMN IF EXISTS user_agent;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS meet_sessions (
+          id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          class_id                   UUID NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
+          conference_record_name     TEXT,
+          participant_name           TEXT,
+          participant_session_name   TEXT NOT NULL,
+          meet_user_id               TEXT,
+          matched_student_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+          participant_type           TEXT,
+          joined_at                  TIMESTAMPTZ NOT NULL,
+          left_at                    TIMESTAMPTZ,
+          synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (class_id, participant_session_name),
+          CHECK (left_at IS NULL OR left_at >= joined_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_meet_sessions_class
+          ON meet_sessions(class_id);
+        CREATE INDEX IF NOT EXISTS idx_meet_sessions_meet_user
+          ON meet_sessions(meet_user_id);
+        CREATE INDEX IF NOT EXISTS idx_meet_sessions_matched_student
+          ON meet_sessions(matched_student_id);
+        CREATE INDEX IF NOT EXISTS idx_meet_sessions_class_student_joined
+          ON meet_sessions(class_id, matched_student_id, joined_at);
+      `);
+      await client.query(`
+        ALTER TABLE meet_sessions
+          DROP COLUMN IF EXISTS raw_participant_data;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS attendance (
+          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          class_id              UUID NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
+          student_id            UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          attended_minutes      NUMERIC(10, 2) NOT NULL DEFAULT 0
+                                CHECK (attended_minutes >= 0),
+          attendance_percentage NUMERIC(5, 2)
+                                CHECK (attendance_percentage IS NULL
+                                       OR (attendance_percentage >= 0
+                                           AND attendance_percentage <= 100)),
+          attendance_status     TEXT
+                                CHECK (attendance_status IS NULL
+                                       OR attendance_status IN ('present', 'absent')),
+          calculated_at         TIMESTAMPTZ,
+          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (class_id, student_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_class
+          ON attendance(class_id);
+        CREATE INDEX IF NOT EXISTS idx_attendance_student
+          ON attendance(student_id);
+      `);
+      await client.query(`
+        ALTER TABLE attendance
+          DROP COLUMN IF EXISTS is_finalised,
+          DROP COLUMN IF EXISTS review_required,
+          DROP COLUMN IF EXISTS review_reason;
+        DROP TABLE IF EXISTS attendance_overrides;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS meet_jobs (
+          id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          class_id          UUID REFERENCES classes(id) ON DELETE RESTRICT,
+          operation         TEXT NOT NULL
+                            CHECK (operation IN (
+                              'create_meet_space', 'end_meet_space',
+                              'sync_meet_sessions', 'calculate_attendance',
+                              'cleanup_memberships'
+                            )),
+          state             TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (state IN (
+                              'pending', 'running', 'succeeded',
+                              'failed', 'retrying', 'cancelled'
+                            )),
+          attempt_count     INTEGER NOT NULL DEFAULT 0
+                            CHECK (attempt_count >= 0),
+          available_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          started_at        TIMESTAMPTZ,
+          completed_at      TIMESTAMPTZ,
+          idempotency_key   TEXT NOT NULL UNIQUE,
+          error_summary     TEXT,
+          created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_meet_jobs_ready
+          ON meet_jobs(state, available_at);
+        CREATE INDEX IF NOT EXISTS idx_meet_jobs_class
+          ON meet_jobs(class_id);
+      `);
+
+      await client.query('COMMIT');
+      console.log('[Migration] Google Meet attendance schema ready.');
+    } catch (attendanceMigrationError) {
+      await client.query('ROLLBACK');
+      throw attendanceMigrationError;
+    }
+
     // Ensure enrolled students receive course update notifications for recently updated subjects
     await client.query(`
       INSERT INTO notifications (user_id, type, title, body, link)
@@ -779,7 +1060,12 @@ pool.on('error', (err, client) => {
   } catch (error) {
     console.log('❌ Database connection Failed: ', error);
   } finally {
-    if (client) client.release(); // Always release the client back to the pool
+    if (client) {
+      if (migrationLockAcquired) {
+        await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+      }
+      client.release();
+    }
   }
 })();
 

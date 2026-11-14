@@ -79,6 +79,10 @@ jobs:
             echo "GOOGLE_AUTH_CLIENT_ID=${{ secrets.GOOGLE_AUTH_CLIENT_ID }}" >> .env
             echo "GOOGLE_AUTH_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}" >> .env
             echo "GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" >> .env
+            echo "GOOGLE_IDENTITY_CLIENT_ID=${{ secrets.GOOGLE_IDENTITY_CLIENT_ID }}" >> .env
+            echo "GOOGLE_IDENTITY_CLIENT_SECRET=${{ secrets.GOOGLE_IDENTITY_CLIENT_SECRET }}" >> .env
+            echo "GOOGLE_IDENTITY_CALLBACK_URL=${{ secrets.GOOGLE_IDENTITY_CALLBACK_URL }}" >> .env
+            echo "GOOGLE_IDENTITY_STATE_SECRET=${{ secrets.GOOGLE_IDENTITY_STATE_SECRET }}" >> .env
             echo "FRONTEND_URL=${{ secrets.FRONTEND_URL }}" >> .env
             echo "ORCHESTRATOR_URL=${{ secrets.ORCHESTRATOR_URL }}" >> .env
             echo "WORKER_CAPACITY=${{ secrets.WORKER_CAPACITY }}" >> .env
@@ -228,6 +232,10 @@ jobs:
             echo "GOOGLE_AUTH_CLIENT_ID=${{ secrets.GOOGLE_AUTH_CLIENT_ID }}" >> .env
             echo "GOOGLE_AUTH_CLIENT_SECRET=${{ secrets.GOOGLE_AUTH_CLIENT_SECRET }}" >> .env
             echo "GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" >> .env
+            echo "GOOGLE_IDENTITY_CLIENT_ID=${{ secrets.GOOGLE_IDENTITY_CLIENT_ID }}" >> .env
+            echo "GOOGLE_IDENTITY_CLIENT_SECRET=${{ secrets.GOOGLE_IDENTITY_CLIENT_SECRET }}" >> .env
+            echo "GOOGLE_IDENTITY_CALLBACK_URL=${{ secrets.GOOGLE_IDENTITY_CALLBACK_URL }}" >> .env
+            echo "GOOGLE_IDENTITY_STATE_SECRET=${{ secrets.GOOGLE_IDENTITY_STATE_SECRET }}" >> .env
             echo "FRONTEND_URL=${{ secrets.FRONTEND_URL }}" >> .env
             echo "CHATGPT_API_KEY=${{ secrets.CHATGPT_API_KEY }}" >> .env
             echo "WORKER_CAPACITY=${{ secrets.WORKER_CAPACITY }}" >> .env

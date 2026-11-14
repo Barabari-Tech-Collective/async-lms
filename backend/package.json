@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon --env-file=.env.development index.js",
     "start": "node index.js",
+    "meet-worker": "node meet-worker.js",
     "test": "node --test tests/*.spec.js"
   },
   "keywords": [],
