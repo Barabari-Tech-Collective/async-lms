@@ -7,12 +7,22 @@ import BatchTable from '@/components/common/results/BatchTable';
 import StudentTable from '@/components/common/results/StudentTable';
 import apiClient from '@/services/api';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Loader2, CheckCircle2, AlertCircle, Award, Eye } from 'lucide-react';
+import AdminAssignmentPreviewModal, { type AssignmentPreviewData } from '@/components/common/admin/AdminAssignmentPreviewModal';
 
 type Evaluation = {
   id: string;
   assignment_id: string;
+  college_assignment_id?: string;
+  project_id?: string;
   assignment_name?: string;
+  instructions?: string;
+  max_score?: number;
   evaluator_type?: string;
+  test_cases?: any;
+  rubric?: any;
+  allowed_submission_types?: any;
+  unit_title?: string;
 };
 const ResultsPage = () => {
   const navigate = useNavigate();
@@ -21,6 +31,7 @@ const ResultsPage = () => {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [filters, setFilters] = useState({
     college: '',
     domain: '',
@@ -37,9 +48,20 @@ const ResultsPage = () => {
       });
 
       setEvaluation(data.evaluation);
-      setResults(data.results);
+      setResults(data.results || []);
     } catch (err) {
-      console.error('Failed to fetch results', err);
+      console.error('Failed to fetch results by assignment, attempting direct evaluation lookup:', err);
+      try {
+        const directRes = await apiClient.get(`/evaluations/${id}`, {
+          params: { _t: Date.now() },
+        });
+        if (directRes.data?.evaluation) {
+          setEvaluation(directRes.data.evaluation);
+          setResults(directRes.data.results || []);
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback evaluation fetch failed:', fallbackErr);
+      }
     } finally {
       if (isInitial) setLoading(false);
     }
@@ -49,38 +71,102 @@ const ResultsPage = () => {
     if (id) fetchResults(true);
   }, [id]);
 
-  const filteredResults = (results || []).filter((r) => {
-    // If the backend doesn't supply these fields yet, we shouldn't filter by them
-    // or else the list will be empty when a filter is chosen.
-    if (filters.college && r.college_id && r.college_id !== filters.college)
-      return false;
-    if (
-      filters.batch &&
-      r.expected_graduation_year &&
-      r.expected_graduation_year.toString() !== filters.batch.toString()
-    )
-      return false;
-    return true;
-  });
+  const filteredResults = (results || [])
+    .filter((r) => {
+      // If the backend doesn't supply these fields yet, we shouldn't filter by them
+      // or else the list will be empty when a filter is chosen.
+      if (filters.college && r.college_id && r.college_id !== filters.college)
+        return false;
+      if (
+        filters.batch &&
+        r.expected_graduation_year &&
+        r.expected_graduation_year.toString() !== filters.batch.toString()
+      )
+        return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const nameA = (a.student_name || '').trim();
+      const nameB = (b.student_name || '').trim();
+      const cmp = nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return String(a.submission_id || a.id || '').localeCompare(String(b.submission_id || b.id || ''));
+    });
+
+  const totalSubmissions = results.length;
+  const isActivelyEvaluating = (r: any) =>
+    Boolean((r.status === 'pending' || r.status === 'evaluating' || r.status === 'running') && r.id);
+  const isCompleted = (r: any) => r.status === 'completed' || r.status === 'evaluated';
+  const isFailed = (r: any) => r.status === 'failed';
+  const isUnevaluated = (r: any) =>
+    r.status === 'not_evaluated' ||
+    r.status === 'not_started' ||
+    r.status === 'unevaluated' ||
+    r.status === 'cancelled' ||
+    r.status === 'stopped' ||
+    (!r.id && (r.status === 'pending' || !r.status));
+
+  const pendingSubmissions = results.filter(isActivelyEvaluating).length;
+  const failedSubmissions = results.filter(isFailed).length;
+  const completedSubmissions = results.filter(isCompleted).length;
+  const unevaluatedSubmissions = results.filter(isUnevaluated).length;
+  const processedSubmissions = completedSubmissions + failedSubmissions;
+  const progressPercent = totalSubmissions > 0 ? Math.round((processedSubmissions / totalSubmissions) * 100) : 0;
+
+  const previewData: AssignmentPreviewData | null = evaluation
+    ? {
+        id: evaluation.assignment_id || evaluation.college_assignment_id || evaluation.project_id || id,
+        title: evaluation.assignment_name || 'Assignment Preview',
+        instructions: evaluation.instructions || '',
+        max_score: Number(evaluation.max_score || 100),
+        evaluator_type: evaluation.evaluator_type || null,
+        test_cases: evaluation.test_cases || null,
+        rubric: evaluation.rubric || null,
+        allowed_submission_types: evaluation.allowed_submission_types,
+        unit_title: evaluation.unit_title,
+      }
+    : null;
+
+  const targetAssignmentId =
+    evaluation?.assignment_id ||
+    evaluation?.college_assignment_id ||
+    evaluation?.project_id ||
+    id;
 
   return (
     <div className='min-w-0'>
       <div className='px-1 sm:px-6 space-y-4 pb-12 min-w-0'>
-        {/* Back + Title */}
-        <div className='flex items-center gap-3 mt-2 sm:mt-4'>
-          <button
-            onClick={() => navigate(-1)}
-            className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold'
-          >
-            ← Back
-          </button>
+        {/* Back + Title + Preview Button */}
+        <div className='flex items-center justify-between gap-3 mt-2 sm:mt-4'>
+          <div className='flex items-center gap-3'>
+            <button
+              onClick={() => navigate(-1)}
+              className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold cursor-pointer'
+            >
+              ← Back
+            </button>
 
-          <h1 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Evaluation Results</h1>
+            <h1 className='text-lg sm:text-xl font-bold text-slate-900 tracking-tight'>Evaluation Results</h1>
+          </div>
+
+          <button
+            type='button'
+            onClick={() => setPreviewModalOpen(true)}
+            className='inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200/80 text-slate-700 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50/50 shadow-2xs font-semibold text-xs sm:text-sm transition-all cursor-pointer shrink-0'
+            title='Preview assignment instructions, rubrics, and test cases'
+          >
+            <Eye className='w-4 h-4 text-indigo-600' />
+            <span>Preview Assignment</span>
+          </button>
         </div>
 
         <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2.5'>
           {/* Assignment */}
-          <p className='text-xs sm:text-sm text-slate-500 font-medium truncate max-w-md'>{assignmentName}</p>
+          <div className='flex items-center gap-2 min-w-0'>
+            <p className='text-xs sm:text-sm text-slate-500 font-medium truncate max-w-md'>
+              Assignment: <span className='text-slate-800 font-semibold'>{assignmentName}</span>
+            </p>
+          </div>
           <TopHeader onFilterChange={setFilters} />
         </div>
 
@@ -126,6 +212,89 @@ const ResultsPage = () => {
           </div>
         ) : (
           <div className='space-y-4 sm:space-y-6 min-w-0'>
+            {/* Cohort Live Progress / Evaluation Summary Bar */}
+            {totalSubmissions > 0 && (
+              <div className='bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border border-blue-200/80 rounded-2xl p-4 sm:p-5 shadow-xs transition-all'>
+                <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3'>
+                  <div className='flex items-center gap-3'>
+                    <div className={`w-10 h-10 rounded-xl text-white flex items-center justify-center shadow-xs shrink-0 ${
+                      pendingSubmissions > 0
+                        ? 'bg-blue-600'
+                        : progressPercent === 100
+                        ? 'bg-emerald-600'
+                        : failedSubmissions > 0 && completedSubmissions === 0
+                        ? 'bg-red-600'
+                        : 'bg-indigo-600'
+                    }`}>
+                      {pendingSubmissions > 0 ? (
+                        <Loader2 className='w-5 h-5 animate-spin' />
+                      ) : progressPercent === 100 ? (
+                        <CheckCircle2 className='w-5 h-5' />
+                      ) : failedSubmissions > 0 && completedSubmissions === 0 ? (
+                        <AlertCircle className='w-5 h-5' />
+                      ) : (
+                        <Award className='w-5 h-5' />
+                      )}
+                    </div>
+                    <div>
+                      <h3 className='text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap'>
+                        {pendingSubmissions > 0
+                          ? 'Batch Evaluation in Progress'
+                          : progressPercent === 100
+                          ? 'Evaluation Completed'
+                          : 'Evaluation Progress'}
+
+                        <span className='text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full border border-emerald-200/60'>
+                          {completedSubmissions} evaluated
+                        </span>
+
+                        {pendingSubmissions > 0 && (
+                          <span className='text-[11px] font-semibold text-blue-700 bg-blue-100/80 px-2.5 py-0.5 rounded-full border border-blue-200/60'>
+                            {pendingSubmissions} running
+                          </span>
+                        )}
+
+                        {failedSubmissions > 0 && (
+                          <span className='text-[11px] font-semibold text-red-700 bg-red-100/80 px-2.5 py-0.5 rounded-full border border-red-200/60'>
+                            {failedSubmissions} failed
+                          </span>
+                        )}
+
+                        {unevaluatedSubmissions > 0 && (
+                          <span className='text-[11px] font-semibold text-orange-700 bg-orange-100/80 px-2.5 py-0.5 rounded-full border border-orange-200/60'>
+                            {unevaluatedSubmissions} not evaluated
+                          </span>
+                        )}
+                      </h3>
+                      <p className='text-xs text-slate-500 font-medium mt-0.5'>
+                        {processedSubmissions} of {totalSubmissions} evaluated ({progressPercent}%)
+                        {pendingSubmissions > 0 ? ' • Auto-syncing status in real-time' : ' • Cohort results summary'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className='text-right shrink-0'>
+                    <span className={`text-xl sm:text-2xl font-extrabold ${
+                      progressPercent === 100 ? 'text-emerald-700' : 'text-blue-700'
+                    }`}>
+                      {progressPercent}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress track */}
+                <div className='w-full bg-slate-200/80 rounded-full h-2.5 overflow-hidden'>
+                  <div
+                    className={`h-2.5 rounded-full transition-all duration-500 ease-out ${
+                      progressPercent === 100
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600'
+                    }`}
+                    style={{ width: `${Math.max(progressPercent > 0 ? 3 : 0, progressPercent)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Cards */}
             <StatsCard results={filteredResults} />
 
@@ -145,6 +314,14 @@ const ResultsPage = () => {
           </div>
         )}
       </div>
+
+      <AdminAssignmentPreviewModal
+        isOpen={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        assignmentId={targetAssignmentId}
+        assignmentData={previewData}
+        unitTitle={evaluation?.unit_title}
+      />
     </div>
   );
 };

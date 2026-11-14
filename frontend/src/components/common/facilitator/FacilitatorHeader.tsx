@@ -24,6 +24,7 @@ const TITLES: Record<string, string> = {
   '/dashboard/facilitator/analytics': 'Analytics',
   '/dashboard/facilitator/student-growth': 'Student Growth',
   '/dashboard/facilitator/reports': 'Reports',
+  '/dashboard/facilitator/requests': 'Course Requests',
   '/dashboard/facilitator/settings': 'Settings',
   '/dashboard/facilitator/ai-curriculum': 'AI Curriculum Builder',
 };
@@ -64,7 +65,7 @@ export default function FacilitatorHeader({
       <div className='flex items-center gap-2 sm:gap-4 min-w-0 flex-1 mr-2'>
         <button
           onClick={handleMenuClick}
-          className='p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-100 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0'
+          className='lg:hidden p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-100 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0'
           aria-label='Toggle Sidebar'
         >
           <Menu className='w-5 h-5' />

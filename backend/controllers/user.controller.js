@@ -14,12 +14,28 @@ exports.getUserSubjects = async (req, res) => {
         s.slug, 
         s.description, 
         s.level, 
+        -- Count active units for this subject
+        (SELECT COUNT(u.id)::int
+         FROM public.units u
+         JOIN public.topics t ON u.topic_id = t.id
+         WHERE t.subject_id = s.id AND u.is_deleted = false) as units_count,
         -- Count active subtopics for this subject
-        (SELECT COUNT(st.id) 
+        (SELECT COUNT(st.id)::int 
          FROM public.subtopics st 
          JOIN public.units u ON st.unit_id = u.id
          JOIN public.topics t ON u.topic_id = t.id 
          WHERE t.subject_id = s.id AND st.is_deleted = false) as total_lessons,
+        -- Count active assignments for this subject
+        (SELECT COUNT(a.id)::int
+         FROM public.assignments a
+         JOIN public.units u ON a.unit_id = u.id
+         JOIN public.topics t ON u.topic_id = t.id
+         WHERE t.subject_id = s.id AND a.is_deleted = false) as assignments_count,
+        -- Count active capstone projects for this subject
+        (SELECT COUNT(p.id)::int
+         FROM public.projects p
+         JOIN public.topics t ON p.topic_id = t.id
+         WHERE t.subject_id = s.id AND p.is_deleted = false) as capstones_count,
         COALESCE(us.is_completed, false)::boolean as is_completed,
         us.completed_at,
         us.certificate_id,

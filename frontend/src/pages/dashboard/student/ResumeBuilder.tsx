@@ -1,210 +1,616 @@
-import { useState, useRef, useCallback } from 'react';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
-  Loader2,
-  Download,
-  Wand2,
-  GripVertical,
-  CheckSquare,
-  Send,
-  FileText,
-  User,
-  GraduationCap,
-  Award,
-  Maximize2,
-  X,
-  SlidersHorizontal,
-} from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { cn } from '@/lib/utils';
 import apiClient from '@/services/api';
+import { useAppSelector } from '@/app/hooks';
+import { selectUser } from '@/features/auth/authSelectors';
 
-import type { ResumeData, ATSResult, Section } from './resume/types';
-import { DEFAULT_SECTIONS, calcLocalATS } from './resume/resumeUtils';
-import { ResumeDocument } from './resume/ResumeDocument';
-import { InputForm } from './resume/InputForm';
-import type { InputFormValues } from './resume/InputForm';
-
-// ── Score Bar ─────────────────────────────────────────────────────────────────
-
-function ScoreBar({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
-  return (
-    <div className='mb-2'>
-      <div className='flex justify-between text-[11px] text-slate-500 mb-1'>
-        <span>{label}</span>
-        <span className='font-semibold text-slate-700'>{value}%</span>
-      </div>
-      <div className='h-1.5 bg-slate-100 rounded-full overflow-hidden'>
-        <div
-          className={cn(
-            'h-full rounded-full transition-all duration-700',
-            color,
-          )}
-          style={{ width: `${value}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ── Sortable Section Item ─────────────────────────────────────────────────────
-
-function SortableSectionItem({ section }: { section: Section }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: section.id });
-  const Icon = section.icon;
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.4 : 1,
-      }}
-      className='flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-600 group'
-    >
-      <button
-        {...attributes}
-        {...listeners}
-        className='text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing'
-      >
-        <GripVertical size={14} />
-      </button>
-      <Icon size={14} className='text-slate-400' />
-      <span className='flex-1 text-[13px] font-medium'>{section.label}</span>
-      <div className='w-2 h-2 rounded-full bg-[#333d7c]' />
-    </div>
-  );
-}
-
-// ── Full Preview Modal ────────────────────────────────────────────────────────
-
-function FullPreviewModal({
-  data,
-  sections,
-  onClose,
-}: {
-  data: ResumeData;
-  sections: Section[];
-  onClose: () => void;
-}) {
-  return (
-    <div className='fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6'>
-      <div className='bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col'>
-        <div className='flex items-center justify-between px-6 py-3 border-b border-slate-100'>
-          <span className='font-semibold text-[#1e2653]'>Full Preview</span>
-          <button
-            onClick={onClose}
-            className='text-slate-400 hover:text-slate-600'
-          >
-            <X size={20} />
-          </button>
-        </div>
-        <div className='overflow-y-auto flex-1 p-10'>
-          <ResumeDocument data={data} sections={sections} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Action Button ─────────────────────────────────────────────────────────────
-
-function ActionBtn({
-  icon,
-  label,
-  onClick,
-  disabled,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className='flex items-center gap-1.5 text-xs sm:text-sm text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0 shadow-2xs'
-    >
-      {icon}
-      <span className='hidden sm:inline font-medium'>{label}</span>
-    </button>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
-const EMPTY_FORM: InputFormValues = {
-  jobTitle: '',
-  phone: '',
-  location: '',
-  linkedin: '',
-  careerObjective: '',
-  extraSkills: [''],
-  workExperience: [],
-};
+import type { ResumeDocument as ResumeDocType, ResumeRecord, ResumeListItem, Section } from './resume/types';
+import { getCategoryConfig } from './resume/types';
+import { DEFAULT_SECTIONS, createEmptyResume } from './resume/resumeUtils';
+import ResumeRecycleBinModal from './resume/ResumeRecycleBinModal';
+import type { RecycledResumeItem } from './resume/ResumeRecycleBinModal';
+import { ResumeDashboardView } from './resume/ResumeDashboardView';
+import { ResumeStepperEditor } from './resume/ResumeStepperEditor';
+import { ResumePreviewView } from './resume/ResumePreviewView';
 
 export default function ResumeBuilder() {
-  const [formValues, setFormValues] = useState<InputFormValues>(EMPTY_FORM);
-  const [resumeData, setResumeData] = useState<ResumeData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [showFullPreview, setShowFullPreview] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [atsResult, setAtsResult] = useState<ATSResult | null>(null);
-  const [jdText, setJdText] = useState('');
-  const [jdLoading, setJdLoading] = useState(false);
+  const user = useAppSelector(selectUser);
+
+  const [resumesList, setResumesList] = useState<ResumeListItem[]>([]);
+  const [resumeRecord, setResumeRecord] = useState<ResumeRecord | null>(null);
+  const [resumeDoc, setResumeDoc] = useState<ResumeDocType>(() => createEmptyResume(user));
+  const [initialLoading, setInitialLoading] = useState(true);
   const [sections, setSections] = useState<Section[]>(DEFAULT_SECTIONS);
-  const [eligibilityError, setEligibilityError] = useState<{ message: string; suggestion: any } | null>(null);
+  const [, setSaveStatus] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved');
+
+  // Multi-Resume Management & View State
+  const [viewMode, setViewMode] = useState<'dashboard' | 'editor' | 'preview'>('dashboard');
+  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [activeFilter, setActiveFilter] = useState<'drafted' | 'completed'>('drafted');
+  const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
+  const [recycleBinCount, setRecycleBinCount] = useState<number>(0);
+  const [exporting, setExporting] = useState(false);
+  const [polishingWithAI, setPolishingWithAI] = useState(false);
 
   const previewRef = useRef<HTMLDivElement>(null);
+  const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeRecordRef = useRef<ResumeRecord | null>(null);
+  const resumeDocRef = useRef<ResumeDocType>(resumeDoc);
 
-  const handleExportPDF = useCallback(() => {
-    if (!previewRef.current) return;
-    const printId = 'resume-print-target';
-    previewRef.current.id = printId;
+  // Keep ref in sync with latest document
+  resumeDocRef.current = resumeDoc;
+
+  const fetchRecycleBinCount = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/assistant/resumes/bin');
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        setRecycleBinCount(res.data.data.length);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  // 1. Initial Load: Fetch all resumes for the authenticated student
+  useEffect(() => {
+    let isMounted = true;
+    if (!user?.id) return;
+
+    // Purge legacy un-scoped draft
+    try {
+      localStorage.removeItem('codeguru_resume_draft');
+    } catch {}
+
+    async function loadSavedResume() {
+      try {
+        const res = await apiClient.get('/assistant/resumes');
+        if (res.data?.success && isMounted) {
+          const list = (res.data.data || []) as ResumeListItem[];
+          setResumesList(list);
+
+          if (list.length === 0) {
+            setResumeRecord(null);
+            resumeRecordRef.current = null;
+            const freshDoc = createEmptyResume(user);
+            setResumeDoc(freshDoc);
+            resumeDocRef.current = freshDoc;
+            setInitialLoading(false);
+            return;
+          }
+
+          // Pick primary resume or most recent
+          const target = list.find((r) => r.is_primary) || list[0];
+          const fullRes = await apiClient.get(`/assistant/resume/${target.id}`);
+          if (fullRes.data?.success && isMounted) {
+            const record = fullRes.data.data as ResumeRecord;
+            let finalDoc = record.document;
+
+            // Sanitize cross-student email differences
+            if (
+              user?.email &&
+              finalDoc?.personalInfo?.email &&
+              finalDoc.personalInfo.email.toLowerCase() !== user.email.toLowerCase()
+            ) {
+              finalDoc = {
+                ...finalDoc,
+                personalInfo: {
+                  ...finalDoc.personalInfo,
+                  fullName: user.full_name || finalDoc.personalInfo.fullName,
+                  email: user.email,
+                  avatarUrl: '',
+                },
+              };
+            }
+
+            setResumeRecord(record);
+            resumeRecordRef.current = record;
+            setResumeDoc(finalDoc);
+            resumeDocRef.current = finalDoc;
+
+            if (finalDoc.sectionOrder && Array.isArray(finalDoc.sectionOrder)) {
+              const order = [...finalDoc.sectionOrder];
+              if (!order.includes('events')) {
+                const expIdx = order.indexOf('experience');
+                if (expIdx !== -1) order.splice(expIdx + 1, 0, 'events');
+                else order.push('events');
+              }
+              setSections((prev) => {
+                return [...prev].sort((a, b) => {
+                  const idxA = order.indexOf(a.id);
+                  const idxB = order.indexOf(b.id);
+                  if (idxA === -1 && idxB === -1) return 0;
+                  if (idxA === -1) return 1;
+                  if (idxB === -1) return -1;
+                  return idxA - idxB;
+                });
+              });
+            }
+            setSaveStatus('saved');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load student resumes:', err);
+        setResumeRecord(null);
+        resumeRecordRef.current = null;
+        toast.error('Failed to connect to cloud storage.');
+      } finally {
+        if (isMounted) setInitialLoading(false);
+      }
+    }
+    loadSavedResume();
+    fetchRecycleBinCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, user?.email, user?.full_name, fetchRecycleBinCount]);
+
+  // 2. Autosave with Debounce & Version Sync for Active Resume
+  const triggerAutosave = useCallback((newDoc: ResumeDocType) => {
+    if (!resumeRecordRef.current?.id) return;
+
+    setSaveStatus('saving');
+    resumeDocRef.current = newDoc;
+
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+    }
+
+    autosaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const currentRecord = resumeRecordRef.current;
+        if (!currentRecord?.id) return;
+
+        const payload = {
+          title: currentRecord.title,
+          document: newDoc,
+          expectedVersion: currentRecord.version ?? null,
+        };
+
+        const res = await apiClient.put(`/assistant/resume/${currentRecord.id}`, payload);
+        if (res.data?.success) {
+          const savedRecord = res.data.data as ResumeRecord;
+          setResumeRecord(savedRecord);
+          resumeRecordRef.current = savedRecord;
+          setResumesList((prev) =>
+            prev.map((item) =>
+              item.id === savedRecord.id
+                ? { ...item, version: savedRecord.version, updated_at: savedRecord.updated_at }
+                : item
+            )
+          );
+          setSaveStatus('saved');
+        }
+      } catch (err: any) {
+        if (err.response?.status === 409) {
+          setSaveStatus('conflict');
+          toast.error('Draft conflict: Updated in another window.');
+        } else {
+          setSaveStatus('error');
+        }
+      }
+    }, 700);
+  }, []);
+
+  const handleUpdateDocument = useCallback(
+    (updated: ResumeDocType) => {
+      setResumeDoc(updated);
+      resumeDocRef.current = updated;
+      triggerAutosave(updated);
+    },
+    [triggerAutosave]
+  );
+
+  // 3. Switch active resume
+  const handleSelectResume = async (targetId: string) => {
+    if (targetId === resumeRecord?.id) return;
+    try {
+      const res = await apiClient.get(`/assistant/resume/${targetId}`);
+      if (res.data?.success && res.data.data) {
+        const rec = res.data.data as ResumeRecord;
+        setResumeRecord(rec);
+        resumeRecordRef.current = rec;
+        setResumeDoc(rec.document);
+        resumeDocRef.current = rec.document;
+
+        if (rec.document.sectionOrder && Array.isArray(rec.document.sectionOrder)) {
+          const order = [...rec.document.sectionOrder];
+          if (!order.includes('events')) {
+            const expIdx = order.indexOf('experience');
+            if (expIdx !== -1) order.splice(expIdx + 1, 0, 'events');
+            else order.push('events');
+          }
+          setSections((prev) => {
+            return [...prev].sort((a, b) => {
+              const idxA = order.indexOf(a.id);
+              const idxB = order.indexOf(b.id);
+              if (idxA === -1 && idxB === -1) return 0;
+              if (idxA === -1) return 1;
+              if (idxB === -1) return -1;
+              return idxA - idxB;
+            });
+          });
+        }
+        setSaveStatus('saved');
+      }
+    } catch {
+      toast.error('Failed to load resume.');
+    }
+  };
+
+  // 4. Duplicate resume
+  const handleDuplicateResume = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      const res = await apiClient.post(`/assistant/resume/${id}/duplicate`);
+      if (res.data?.success && res.data.data) {
+        const cloned = res.data.data as ResumeRecord;
+        const newListItem: ResumeListItem = {
+          id: cloned.id,
+          title: cloned.title,
+          version: cloned.version,
+          is_primary: cloned.is_primary || false,
+          template_id: cloned.document?.templateId,
+          created_at: cloned.created_at || new Date().toISOString(),
+          updated_at: cloned.updated_at,
+        };
+        setResumesList((prev) => [newListItem, ...prev]);
+        setResumeRecord(cloned);
+        resumeRecordRef.current = cloned;
+        setResumeDoc(cloned.document);
+        resumeDocRef.current = cloned.document;
+        toast.success(`Duplicated "${cloned.title}"!`);
+      }
+    } catch {
+      toast.error('Failed to duplicate resume.');
+    }
+  };
+
+  // 5. Set primary resume
+  const handleSetPrimary = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      const res = await apiClient.patch(`/assistant/resume/${id}/primary`);
+      if (res.data?.success) {
+        setResumesList((prev) =>
+          prev.map((item) => ({ ...item, is_primary: item.id === id }))
+        );
+        if (resumeRecord?.id === id) {
+          setResumeRecord((prev) => (prev ? { ...prev, is_primary: true } : null));
+        }
+        toast.success('Set as primary placement resume!');
+      }
+    } catch {
+      toast.error('Failed to set primary resume.');
+    }
+  };
+
+  // 5b. Rename resume
+  const handleRenameResume = async (id: string, newTitle: string): Promise<boolean> => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      toast.error('Resume name cannot be empty.');
+      return false;
+    }
+    try {
+      const res = await apiClient.patch(`/assistant/resume/${id}/rename`, { title: trimmed });
+      if (res.data?.success) {
+        setResumesList((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  title: trimmed,
+                  updated_at: res.data.data?.updated_at || new Date().toISOString(),
+                }
+              : item
+          )
+        );
+        if (resumeRecord?.id === id) {
+          setResumeRecord((prev) => (prev ? { ...prev, title: trimmed } : null));
+        }
+        toast.success(`Renamed to "${trimmed}"!`);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to rename resume.');
+      return false;
+    }
+  };
+
+  // 6. Delete resume (Soft delete to Recycle Bin)
+  const handleDeleteResume = async (idToDelete?: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const targetId = idToDelete || resumeRecord?.id;
+    if (!targetId) return;
+
+    const targetItem = resumesList.find((r) => r.id === targetId);
+    const targetTitle = targetItem?.title || resumeRecord?.title || 'this resume';
+
+    if (!window.confirm(`Move "${targetTitle}" to Recycle Bin? You can restore it anytime.`)) {
+      return;
+    }
+
+    try {
+      await apiClient.delete(`/assistant/resume/${targetId}`);
+      const updatedList = resumesList.filter((r) => r.id !== targetId);
+      setResumesList(updatedList);
+
+      if (updatedList.length === 0) {
+        setResumeRecord(null);
+        resumeRecordRef.current = null;
+        setResumeDoc(createEmptyResume(user));
+      } else if (targetId === resumeRecord?.id) {
+        const next = updatedList.find((r) => r.is_primary) || updatedList[0];
+        await handleSelectResume(next.id);
+      }
+
+      fetchRecycleBinCount();
+      toast.success(`Moved "${targetTitle}" to Recycle Bin.`);
+    } catch {
+      toast.error('Failed to move resume to Recycle Bin.');
+    }
+  };
+
+  const handleRestoredFromModal = async (restored: RecycledResumeItem) => {
+    try {
+      const listRes = await apiClient.get('/assistant/resumes');
+      if (listRes.data?.success) {
+        const freshList = listRes.data.data as ResumeListItem[];
+        setResumesList(freshList);
+        if (!resumeRecordRef.current || freshList.length === 1) {
+          await handleSelectResume(restored.id);
+        }
+      }
+      fetchRecycleBinCount();
+    } catch (err) {
+      console.error('Failed to sync after modal restore:', err);
+    }
+  };
+
+  const handleBinListUpdated = () => {
+    fetchRecycleBinCount();
+  };
+
+  // 7. Create from template
+  const handleCreateFromTemplate = async (templateId: string = 'ivy-standard') => {
+    const chosenCat = 'general';
+    const catCfg = getCategoryConfig(chosenCat);
+    const fresh = createEmptyResume(user, chosenCat, catCfg.defaultRole);
+    if (templateId !== 'blank') {
+      fresh.templateId = templateId;
+    }
+    (fresh as any).status = 'draft';
+
+    setResumeDoc(fresh);
+    resumeDocRef.current = fresh;
+    setCurrentStep(1);
+    setViewMode('editor');
+
+    try {
+      setSaveStatus('saving');
+      const titleToUse =
+        resumesList.length === 0 ? 'Primary Resume' : `Resume ${resumesList.length + 1}`;
+      const res = await apiClient.post('/assistant/resume/new', {
+        title: titleToUse,
+        document: fresh,
+        is_primary: resumesList.length === 0,
+      });
+      if (res.data?.success && res.data.data) {
+        const rec = res.data.data as ResumeRecord;
+        const newListItem: ResumeListItem = {
+          id: rec.id,
+          title: rec.title,
+          category: rec.document?.category || chosenCat,
+          target_role: rec.document?.targetRole,
+          version: rec.version,
+          is_primary: rec.is_primary || false,
+          template_id: rec.document?.templateId,
+          created_at: rec.created_at || new Date().toISOString(),
+          updated_at: rec.updated_at,
+        };
+        setResumesList((prev) => [newListItem, ...prev]);
+        setResumeRecord(rec);
+        resumeRecordRef.current = rec;
+        setSaveStatus('saved');
+      }
+    } catch (err) {
+      console.error('Error creating new draft resume:', err);
+    }
+  };
+
+  const handleSelectResumeFromDashboard = async (
+    id: string,
+    mode: 'preview' | 'editor' = 'preview'
+  ) => {
+    await handleSelectResume(id);
+    setViewMode(mode);
+    if (mode === 'editor') {
+      setCurrentStep(1);
+    }
+  };
+
+  const handleSaveCompleted = async () => {
+    if (!resumeRecord?.id) return;
+    const updatedDoc: ResumeDocType = {
+      ...resumeDoc,
+      status: 'completed' as const,
+    };
+    setResumeDoc(updatedDoc);
+    resumeDocRef.current = updatedDoc;
+
+    setResumesList((prev) =>
+      prev.map((r) =>
+        r.id === resumeRecord.id
+          ? ({ ...r, status: 'completed', is_completed: true } as any)
+          : r
+      )
+    );
+
+    try {
+      setSaveStatus('saving');
+      await apiClient.put(`/assistant/resume/${resumeRecord.id}`, {
+        title: resumeRecord.title,
+        document: updatedDoc,
+        expectedVersion: resumeRecord.version,
+      });
+      setSaveStatus('saved');
+      toast.success('Resume marked as Completed!');
+      setViewMode('dashboard');
+    } catch {
+      toast.error('Failed to update resume status.');
+    }
+  };
+
+  const handlePolishCurrentResumeWithAI = async () => {
+    if (polishingWithAI) return;
+    setPolishingWithAI(true);
+    try {
+      const payload = {
+        category: resumeDoc.category || 'general',
+        targetRole: resumeDoc.targetRole || resumeDoc.personalInfo?.headline,
+        personalInfo: resumeDoc.personalInfo,
+        careerObjective: resumeDoc.summary,
+        extraSkills: [
+          ...(resumeDoc.skills?.languages || []),
+          ...(resumeDoc.skills?.frameworks || []),
+          ...(resumeDoc.skills?.databases || []),
+          ...(resumeDoc.skills?.tools || []),
+        ],
+        workExperience: resumeDoc.experience || [],
+        events: resumeDoc.events || [],
+        manualProjects: resumeDoc.projects || [],
+        education: resumeDoc.education || [],
+      };
+
+      const res = await apiClient.post('/assistant/resume/generate', payload);
+      if (res.data?.success && res.data?.data) {
+        const generated = res.data.data as ResumeDocType;
+        const polishedDoc: ResumeDocType = {
+          ...generated,
+          templateId: resumeDoc.templateId || generated.templateId,
+          sectionOrder: resumeDoc.sectionOrder || generated.sectionOrder,
+          personalInfo: {
+            ...generated.personalInfo,
+            ...resumeDoc.personalInfo,
+            headline: generated.personalInfo?.headline || resumeDoc.personalInfo?.headline,
+            links: resumeDoc.personalInfo?.links?.length ? resumeDoc.personalInfo.links : generated.personalInfo?.links,
+            avatarUrl: resumeDoc.personalInfo?.avatarUrl || generated.personalInfo?.avatarUrl,
+          },
+        };
+
+        handleUpdateDocument(polishedDoc);
+        toast.success('Your resume has been polished with AI!');
+      } else {
+        toast.error('AI polish returned an incomplete response.');
+      }
+    } catch (err: any) {
+      console.error('Polish error:', err);
+      toast.error('AI polish encountered an issue. Please try again.');
+    } finally {
+      setPolishingWithAI(false);
+    }
+  };
+
+  const getCandidateFilename = useCallback(() => {
+    const fullName = (resumeDoc.personalInfo?.fullName || user?.full_name || 'Student').trim();
+    const title = (resumeRecord?.title || resumeDoc.targetRole || 'Resume').trim();
+    const safeName = `${fullName}_${title}`.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_');
+    return `${safeName}.pdf`;
+  }, [resumeDoc.personalInfo?.fullName, resumeDoc.targetRole, resumeRecord?.title, user?.full_name]);
+
+  const handlePrintPDF = useCallback(() => {
+    const targetElement =
+      previewRef.current ||
+      (document.querySelector('[data-resume-print-root]') as HTMLElement);
+    if (!targetElement) return;
 
     const style = document.createElement('style');
     style.id = 'resume-print-style';
     style.textContent = `
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
       @media print {
-        body > *:not([data-resume-print-root]) { display: none !important; }
-        [data-resume-print-root] { display: block !important; position: fixed; inset: 0; z-index: 99999; background: white; padding: 32px; overflow: visible; }
-        [data-resume-print-root] * { visibility: visible !important; }
-        @page { margin: 0.5in; }
+        html, body {
+          width: 210mm !important;
+          height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        body > *:not([data-resume-print-root]) {
+          display: none !important;
+        }
+        [data-resume-print-root] {
+          display: block !important;
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 210mm !important;
+          min-height: 297mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          box-sizing: border-box !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        [data-resume-print-root] > div {
+          border: none !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 210mm !important;
+          max-width: 210mm !important;
+          box-sizing: border-box !important;
+        }
+        [data-resume-print-root] [class*="max-w-"] {
+          max-width: 210mm !important;
+          width: 210mm !important;
+          margin: 0 !important;
+          border-left: none !important;
+          border-right: none !important;
+          border-bottom: none !important;
+          box-shadow: none !important;
+          box-sizing: border-box !important;
+        }
+        [data-resume-print-root] [class*="shadow-"] {
+          box-shadow: none !important;
+        }
+        [data-resume-print-root] .grid.grid-cols-12 {
+          display: grid !important;
+          grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+          width: 100% !important;
+        }
+        [data-resume-print-root] header .flex-row {
+          flex-direction: row !important;
+        }
+        .page-break-inside-avoid {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        h1, h2, h3, h4 {
+          break-after: avoid !important;
+          page-break-after: avoid !important;
+        }
+        .print\\:hidden,
+        button,
+        [title="Change profile photo"] {
+          display: none !important;
+        }
+        [title="Double-click to edit"] {
+          background-color: transparent !important;
+          cursor: default !important;
+          box-shadow: none !important;
+        }
+        a {
+          text-decoration: none !important;
+        }
       }
     `;
     document.head.appendChild(style);
@@ -212,429 +618,266 @@ export default function ResumeBuilder() {
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-resume-print-root', '');
     wrapper.style.cssText = 'display:none';
-    const clone = previewRef.current.cloneNode(true) as HTMLElement;
-    // Strip interactive hover/edit styles for print
-    clone.querySelectorAll('[title="Double-click to edit"]').forEach((el) => {
+    const clone = targetElement.cloneNode(true) as HTMLElement;
+
+    clone.querySelectorAll('.print\\:hidden, button, [title="Change profile photo"]').forEach((el) => {
+      el.remove();
+    });
+    clone.querySelectorAll('[title]').forEach((el) => {
       (el as HTMLElement).removeAttribute('title');
     });
+
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
 
     const cleanup = () => {
       document.getElementById('resume-print-style')?.remove();
       wrapper.remove();
-      previewRef.current && (previewRef.current.id = '');
     };
 
     window.addEventListener('afterprint', cleanup, { once: true });
     window.print();
   }, []);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  const handleDownloadPDF = useCallback(async () => {
+    const previewEl =
+      previewRef.current ||
+      (document.querySelector('[data-resume-print-root]') as HTMLElement);
+    if (!previewEl || exporting) return;
+    setExporting(true);
+    const toastId = toast.loading('Preparing downloadable PDF...');
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setSections((prev) => {
-        const oldIdx = prev.findIndex((s) => s.id === active.id);
-        const newIdx = prev.findIndex((s) => s.id === over.id);
-        return arrayMove(prev, oldIdx, newIdx);
-      });
-    }
-  }, []);
-
-  const handleGenerate = async (values: InputFormValues) => {
-    setLoading(true);
-    setFormValues(values);
-    try {
-      const res = await apiClient.post('/assistant/resume', {
-        careerObjective: values.careerObjective,
-        extraSkills: values.extraSkills.filter(Boolean),
-        workExperience: values.workExperience,
-      });
-
-      if (res.data.success === false && res.data.eligible === false) {
-        setEligibilityError({ message: res.data.message, suggestion: res.data.suggestion });
-        setShowForm(false);
-        return;
+    const exportStyle = document.createElement('style');
+    exportStyle.id = 'resume-export-style';
+    exportStyle.textContent = `
+      .exporting-pdf .print\\:hidden,
+      .exporting-pdf button,
+      .exporting-pdf [title="Change profile photo"] {
+        display: none !important;
       }
+      .exporting-pdf [title="Double-click to edit"] {
+        background-color: transparent !important;
+        cursor: default !important;
+        box-shadow: none !important;
+      }
+      .exporting-pdf img {
+        display: inline-block !important;
+      }
+      .exporting-pdf [data-section-heading] {
+        border-bottom: none !important;
+        padding-bottom: 0px !important;
+        margin-bottom: 6px !important;
+      }
+      .exporting-pdf [data-heading-line] {
+        display: block !important;
+        width: 100% !important;
+        height: 1px !important;
+        background-color: #000000 !important;
+        border: none !important;
+        margin-top: 0px !important;
+        margin-bottom: 5px !important;
+        padding: 0 !important;
+      }
+    `;
+    document.head.appendChild(exportStyle);
+    previewEl.classList.add('exporting-pdf');
 
-      setEligibilityError(null);
-      const data = res.data.data as ResumeData;
-      data.personalInfo = {
-        ...data.personalInfo,
-        phone: values.phone,
-        location: values.location,
-        linkedin: values.linkedin,
-        title: values.jobTitle,
+    try {
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdf = html2pdfModule.default || html2pdfModule;
+      const filename = getCandidateFilename();
+
+      const opt = {
+        margin: 0,
+        filename: filename,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollY: 0,
+          scrollX: 0,
+          backgroundColor: '#ffffff',
+          windowWidth: 800,
+          onclone: (clonedDoc: Document) => {
+            const printRoot = clonedDoc.querySelector('[data-resume-print-root]') as HTMLElement;
+            if (printRoot) {
+              printRoot.style.transform = 'none';
+              printRoot.style.transformOrigin = 'initial';
+              printRoot.style.margin = '0 auto';
+              printRoot.style.width = '800px';
+              printRoot.style.maxWidth = '800px';
+              printRoot.style.boxShadow = 'none';
+              printRoot.style.border = 'none';
+              printRoot.style.borderRadius = '0';
+              printRoot.style.overflow = 'visible';
+            }
+            clonedDoc.querySelectorAll('img').forEach((img) => {
+              (img as HTMLElement).style.display = 'inline-block';
+            });
+            if (document.fonts) {
+              document.fonts.forEach((font) => {
+                try {
+                  clonedDoc.fonts.add(font);
+                } catch {
+                  // ignore
+                }
+              });
+            }
+            clonedDoc.querySelectorAll('[title="Double-click to edit"]').forEach((el) => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.backgroundColor = 'transparent';
+              htmlEl.style.boxShadow = 'none';
+              htmlEl.removeAttribute('title');
+            });
+            clonedDoc.querySelectorAll('[data-section-heading]').forEach((el) => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.borderBottom = 'none';
+              htmlEl.style.paddingBottom = '0px';
+              htmlEl.style.marginBottom = '6px';
+            });
+            clonedDoc.querySelectorAll('[data-heading-line]').forEach((el) => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.display = 'block';
+              htmlEl.style.width = '100%';
+              htmlEl.style.height = '1px';
+              htmlEl.style.backgroundColor = '#000000';
+              htmlEl.style.border = 'none';
+              htmlEl.style.marginTop = '0px';
+              htmlEl.style.marginBottom = '5px';
+              htmlEl.style.padding = '0px';
+            });
+            const canvas = clonedDoc.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const convertColor = (colorStr: string): string => {
+              if (ctx) {
+                try {
+                  ctx.fillStyle = '#111827';
+                  ctx.fillStyle = colorStr;
+                  if (!ctx.fillStyle.startsWith('oklch') && !ctx.fillStyle.startsWith('oklab')) {
+                    return ctx.fillStyle;
+                  }
+                } catch {
+                  // fallback
+                }
+              }
+              const lMatch = colorStr.match(/oklch\(\s*([\d.]+)/);
+              if (lMatch) {
+                const L = parseFloat(lMatch[1]);
+                if (L < 0.25) return '#0f172a';
+                if (L < 0.45) return '#1e293b';
+                if (L < 0.65) return '#475569';
+                if (L < 0.85) return '#cbd5e1';
+                return '#f8fafc';
+              }
+              return '#1e293b';
+            };
+
+            clonedDoc.querySelectorAll('style').forEach((styleEl) => {
+              if (styleEl.textContent) {
+                styleEl.textContent = styleEl.textContent
+                  .replace(/oklch\([^)]+\)/g, (match) => convertColor(match))
+                  .replace(/oklab\([^)]+\)/g, (match) => convertColor(match))
+                  .replace(/color-mix\([^)]+\)/g, '#1e293b');
+              }
+            });
+          },
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait' as const,
+        },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       };
-      setResumeData(data);
-      setAtsResult(null);
-      setShowForm(false);
-      toast.success('Resume generated!');
-    } catch {
-      toast.error('Failed to generate resume. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleOptimizeJD = async () => {
-    if (!resumeData) return toast.error('Generate your resume first.');
-    if (!jdText.trim()) return toast.error('Paste a job description first.');
-    setJdLoading(true);
-    try {
-      const res = await apiClient.post('/assistant/resume/optimize', {
-        resumeData,
-        jobDescription: jdText,
-      });
-      const result = res.data.data as ATSResult;
-      setAtsResult(result);
-      if (result.optimizedSummary) {
-        setResumeData((prev) =>
-          prev ? { ...prev, summary: result.optimizedSummary! } : prev,
-        );
-      }
-      toast.success('Resume optimized for the JD!');
-    } catch {
-      toast.error('Optimization failed.');
-    } finally {
-      setJdLoading(false);
-    }
-  };
+      const runPdf = async () => {
+        const worker = html2pdf().set(opt).from(previewEl);
+        await worker.save();
+      };
 
-  const localATS = atsResult ?? calcLocalATS(resumeData);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('PDF generation timed out')), 9000)
+      );
+
+      await Promise.race([runPdf(), timeoutPromise]);
+      toast.success(`Downloaded ${filename}!`, { id: toastId });
+    } catch (err) {
+      console.warn('PDF download issue, opening print dialog:', err);
+      toast.dismiss(toastId);
+      toast('Opening print dialog to save PDF...', { icon: '🖨️' });
+      handlePrintPDF();
+    } finally {
+      previewEl.classList.remove('exporting-pdf');
+      document.getElementById('resume-export-style')?.remove();
+      setExporting(false);
+    }
+  }, [exporting, getCandidateFilename, handlePrintPDF]);
+
+  if (initialLoading) {
+    return (
+      <div className='min-h-[70vh] flex flex-col items-center justify-center gap-3'>
+        <Loader2 size={32} className='animate-spin text-[#1e2653]' />
+        <p className='text-sm text-slate-500 font-medium'>Loading your verified resume workspace...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className='flex flex-col h-full bg-[#f7f8fc]'>
-      {/* Header */}
-      <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 bg-white border-b border-slate-100 shrink-0'>
-        <div className='flex items-center justify-between gap-2'>
-          <div>
-            <h1 className='text-base sm:text-lg font-bold text-[#1e2653]'>Resume Workspace</h1>
-            <p className='text-[11px] sm:text-xs text-slate-400 mt-0.5'>
-              ATS-optimized resume builder with AI assistance
-            </p>
-          </div>
-
-          {/* Quick Primary Button on Mobile */}
-          <div className='sm:hidden shrink-0'>
-            <button
-              onClick={() => setShowForm(true)}
-              className='flex items-center gap-1.5 bg-[#333d7c] hover:bg-[#1e2653] text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors shadow-xs'
-            >
-              <Send size={12} />
-              {resumeData ? 'Regenerate' : 'Build Resume'}
-            </button>
-          </div>
-        </div>
-
-        {/* Action Toolbar */}
-        <div className='flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 [&::-webkit-scrollbar]:hidden'>
-          <button
-            onClick={() => setShowForm(true)}
-            className='hidden sm:flex items-center gap-1.5 sm:gap-2 bg-[#333d7c] hover:bg-[#1e2653] text-white text-xs sm:text-sm font-semibold px-3 sm:px-4 py-2 rounded-lg shrink-0 transition-colors shadow-xs'
-          >
-            <Send size={13} />
-            {resumeData ? 'Regenerate' : 'Build Resume'}
-          </button>
-
-          <button
-            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            className='lg:hidden flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg shrink-0 transition-colors'
-          >
-            <SlidersHorizontal size={13} />
-            ATS & Tools
-          </button>
-
-          {resumeData && (
-            <>
-              <ActionBtn
-                icon={<Maximize2 size={14} />}
-                label='Full Preview'
-                onClick={() => setShowFullPreview(true)}
-              />
-              <ActionBtn
-                icon={<CheckSquare size={14} />}
-                label='ATS Score'
-                onClick={() => setAtsResult(calcLocalATS(resumeData))}
-              />
-              <ActionBtn
-                icon={<Download size={14} />}
-                label='Download PDF'
-                onClick={handleExportPDF}
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className='flex flex-1 overflow-hidden relative'>
-        {/* Mobile Backdrop */}
-        {mobileSidebarOpen && (
-          <div
-            className='fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30 lg:hidden'
-            onClick={() => setMobileSidebarOpen(false)}
-          />
-        )}
-
-        {/* Left Sidebar */}
-        <aside
-          className={cn(
-            'w-72 shrink-0 bg-white border-r border-slate-100 flex flex-col overflow-y-auto transition-transform duration-300 z-40',
-            'fixed inset-y-0 left-0 lg:static lg:translate-x-0',
-            mobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
-          )}
-        >
-          <div className='flex items-center justify-between p-4 border-b border-slate-100 lg:hidden'>
-            <span className='font-bold text-[#1e2653] text-sm'>ATS & AI Tools</span>
-            <button
-              onClick={() => setMobileSidebarOpen(false)}
-              className='p-1 text-slate-400 hover:text-slate-600 rounded-lg'
-            >
-              <X size={18} />
-            </button>
-          </div>
-          {/* ATS Score */}
-          <div className='p-4 border-b border-slate-100'>
-            <div className='flex items-center justify-between mb-3'>
-              <span className='text-xs font-semibold text-slate-700'>
-                ATS Score
-              </span>
-              <div className='flex items-baseline gap-1'>
-                <span className='text-2xl font-black text-[#333d7c]'>
-                  {localATS.atsScore}
-                </span>
-                <span className='text-xs text-slate-400'>/100</span>
-              </div>
-            </div>
-            <ScoreBar
-              label='Keyword match'
-              value={localATS.keywordMatch}
-              color='bg-blue-400'
-            />
-            <ScoreBar
-              label='Content quality'
-              value={localATS.contentQuality}
-              color='bg-emerald-400'
-            />
-            <ScoreBar
-              label='Formatting'
-              value={localATS.formatting}
-              color='bg-green-400'
-            />
-
-            {atsResult?.suggestions?.length ||
-            atsResult?.missingKeywords?.length ? (
-              <div className='mt-3 space-y-1.5'>
-                {atsResult.missingKeywords.slice(0, 2).map((kw, i) => (
-                  <div
-                    key={i}
-                    className='flex items-start gap-2 text-[11px] text-amber-700'
-                  >
-                    <span className='mt-1 w-2 h-2 rounded-full bg-amber-400 shrink-0' />
-                    Add keyword: <span className='font-semibold'>{kw}</span>
-                  </div>
-                ))}
-                {atsResult.suggestions.slice(0, 2).map((s, i) => (
-                  <div
-                    key={i}
-                    className='flex items-start gap-2 text-[11px] text-amber-700'
-                  >
-                    <span className='mt-1 w-2 h-2 rounded-full bg-amber-400 shrink-0' />
-                    {s}
-                  </div>
-                ))}
-              </div>
-            ) : resumeData ? (
-              <div className='mt-3'>
-                <div className='flex items-start gap-2 text-[11px] text-amber-700'>
-                  <span className='mt-1 w-2 h-2 rounded-full bg-amber-400 shrink-0' />
-                  Paste a JD below to get tailored suggestions
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {/* AI Tools */}
-          <div className='p-4 border-b border-slate-100'>
-            <div className='flex items-center gap-1.5 mb-3'>
-              <Wand2 size={13} className='text-[#333d7c]' />
-              <span className='text-xs font-semibold text-slate-700'>
-                AI Tools
-              </span>
-            </div>
-            <label className='text-[11px] text-slate-500 mb-1 block'>
-              Job Description
-            </label>
-            <textarea
-              className='w-full border border-slate-200 rounded-lg px-2.5 py-2 text-[12px] resize-none focus:outline-none focus:ring-2 focus:ring-[#333d7c]/20 min-h-22.5'
-              placeholder='Paste job description here...'
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-            />
-            <button
-              onClick={handleOptimizeJD}
-              disabled={jdLoading || !jdText.trim()}
-              className='mt-2 w-full flex items-center justify-center gap-2 bg-[#333d7c] hover:bg-[#1e2653] text-white text-xs font-semibold py-2 rounded-lg disabled:opacity-50 transition-colors'
-            >
-              {jdLoading ? (
-                <Loader2 size={13} className='animate-spin' />
-              ) : (
-                <Wand2 size={13} />
-              )}
-              Optimize with JD
-            </button>
-          </div>
-
-          {/* Sections */}
-          <div className='p-4 flex-1'>
-            <div className='flex items-center justify-between mb-2'>
-              <span className='text-xs font-semibold text-slate-700'>
-                Sections
-              </span>
-              <span className='text-[10px] text-slate-400'>
-                Drag to reorder
-              </span>
-            </div>
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext
-                items={sections.map((s) => s.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className='space-y-0.5'>
-                  {sections.map((section) => (
-                    <SortableSectionItem key={section.id} section={section} />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-          </div>
-        </aside>
-
-        {/* Resume Canvas */}
-        <main className='flex-1 overflow-y-auto p-3.5 sm:p-6 md:p-8'>
-          {eligibilityError ? (
-            <div className='max-w-3xl mx-auto bg-white shadow-sm rounded-lg p-6 sm:p-10 min-h-[360px] flex flex-col items-center justify-center border border-slate-100'>
-              <div className='w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-red-50 flex items-center justify-center mb-4 sm:mb-5'>
-                <X size={32} className='text-red-500' />
-              </div>
-              <h2 className='text-lg sm:text-xl font-bold text-[#1e2653] mb-2 text-center'>
-                {eligibilityError.message}
-              </h2>
-              {typeof eligibilityError.suggestion === 'string' ? (
-                <p className='text-xs sm:text-sm text-slate-500 text-center max-w-md mb-6 sm:mb-8 mt-2'>
-                  {eligibilityError.suggestion}
-                </p>
-              ) : (
-                <div className='w-full max-w-md mt-4 sm:mt-6'>
-                  <h3 className='text-xs sm:text-sm font-semibold text-slate-700 mb-3 text-center'>Underperforming Projects</h3>
-                  <div className='space-y-2.5 sm:space-y-3'>
-                    {eligibilityError.suggestion.map((proj: any, idx: number) => (
-                      <div key={idx} className='flex justify-between items-center p-2.5 sm:p-3 bg-slate-50 rounded-lg border border-slate-100'>
-                        <span className='font-medium text-slate-700 text-xs sm:text-sm truncate pr-2'>{proj.name}</span>
-                        <span className='text-[10px] sm:text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-1 rounded-md shrink-0'>{proj.needed}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <button
-                onClick={() => setEligibilityError(null)}
-                className='mt-6 sm:mt-8 flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-5 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm transition-colors'
-              >
-                Go Back
-              </button>
-            </div>
-          ) : resumeData ? (
-            <div
-              className='max-w-3xl mx-auto bg-white shadow-sm rounded-lg p-4 sm:p-8 md:p-10 min-h-225 overflow-x-auto'
-              ref={previewRef}
-            >
-              <ResumeDocument
-                data={resumeData}
-                sections={sections}
-                onUpdate={setResumeData}
-              />
-            </div>
-          ) : (
-            <div className='max-w-3xl mx-auto flex flex-col items-center justify-center p-2 sm:p-4 my-auto py-4 sm:py-8'>
-              <div className='w-12 h-12 sm:w-20 sm:h-20 rounded-full bg-[#eef0fb] flex items-center justify-center mb-3 sm:mb-5'>
-                <FileText size={24} className='text-[#333d7c] sm:w-8 sm:h-8' />
-              </div>
-              <h2 className='text-base sm:text-xl font-bold text-[#1e2653] mb-1.5 sm:mb-2 text-center'>
-                Start building your resume
-              </h2>
-              <p className='text-xs sm:text-sm text-slate-400 text-center max-w-sm mb-4 sm:mb-8 leading-relaxed'>
-                Your profile, course completions, and earned badges will be
-                auto-fetched. Add a few extra details and let AI do the rest.
-              </p>
-              <div className='grid grid-cols-3 gap-2 sm:gap-4 mb-5 sm:mb-8 w-full max-w-lg'>
-                {[
-                  {
-                    icon: <User size={16} className='text-[#333d7c] sm:w-[18px] sm:h-[18px]' />,
-                    text: 'Profile auto-fetched',
-                  },
-                  {
-                    icon: (
-                      <GraduationCap size={16} className='text-[#333d7c] sm:w-[18px] sm:h-[18px]' />
-                    ),
-                    text: 'Courses & skills detected',
-                  },
-                  {
-                    icon: <Award size={16} className='text-[#333d7c] sm:w-[18px] sm:h-[18px]' />,
-                    text: 'Badges included',
-                  },
-                ].map((item, i) => (
-                  <div
-                    key={i}
-                    className='bg-white rounded-xl p-2.5 sm:p-4 shadow-sm flex flex-col items-center gap-1.5 sm:gap-2 text-center border border-slate-100'
-                  >
-                    <div className='w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-[#eef0fb] flex items-center justify-center'>
-                      {item.icon}
-                    </div>
-                    <span className='text-[10px] sm:text-xs text-slate-500 font-medium leading-tight'>{item.text}</span>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => setShowForm(true)}
-                className='flex items-center justify-center gap-2 bg-[#333d7c] hover:bg-[#1e2653] text-white font-semibold px-6 py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm transition-colors shadow-sm w-full sm:w-auto'
-              >
-                <Wand2 size={16} /> Build My Resume
-              </button>
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* Modals */}
-      {showForm && (
-        <InputForm
-          initialValues={formValues}
-          onSubmit={handleGenerate}
-          loading={loading}
-          onClose={() => setShowForm(false)}
+    <div className='w-full min-h-screen bg-[#F8FAFC] text-slate-900'>
+      {viewMode === 'dashboard' && (
+        <ResumeDashboardView
+          resumesList={resumesList}
+          activeResumeRecordId={resumeRecord?.id}
+          onSelectResume={handleSelectResumeFromDashboard}
+          onCreateNew={handleCreateFromTemplate}
+          onDeleteResume={(id, e) => handleDeleteResume(id, e)}
+          onDuplicateResume={(id, e) => handleDuplicateResume(id, e)}
+          onSetPrimary={(id, e) => handleSetPrimary(id, e)}
+          onRenameResume={handleRenameResume}
+          openRecycleBin={() => setShowRecycleBinModal(true)}
+          recycleBinCount={recycleBinCount}
+          activeFilter={activeFilter}
+          setActiveFilter={setActiveFilter}
+          activeResumeDoc={resumeDoc}
         />
       )}
 
-      {showFullPreview && resumeData && (
-        <FullPreviewModal
-          data={resumeData}
+      {viewMode === 'editor' && (
+        <ResumeStepperEditor
+          resumeDoc={resumeDoc}
+          onUpdate={handleUpdateDocument}
+          currentStep={currentStep}
+          setCurrentStep={setCurrentStep}
+          onBackToDashboard={() => setViewMode('dashboard')}
+          onGoToPreview={() => setViewMode('preview')}
           sections={sections}
-          onClose={() => setShowFullPreview(false)}
+          user={user}
         />
       )}
+
+      {viewMode === 'preview' && (
+        <ResumePreviewView
+          resumeDoc={resumeDoc}
+          onUpdate={handleUpdateDocument}
+          onBackToEditor={() => setViewMode('editor')}
+          onSaveCompleted={handleSaveCompleted}
+          onDownloadPdf={handleDownloadPDF}
+          onPolishWithAI={handlePolishCurrentResumeWithAI}
+          polishingWithAI={polishingWithAI}
+          downloadingPdf={exporting}
+          sections={sections}
+          resumeId={resumeRecord?.id}
+        />
+      )}
+
+      {/* Resume Recycle Bin Modal */}
+      <ResumeRecycleBinModal
+        open={showRecycleBinModal}
+        onClose={() => setShowRecycleBinModal(false)}
+        onRestored={handleRestoredFromModal}
+        onListUpdated={handleBinListUpdated}
+      />
     </div>
   );
 }

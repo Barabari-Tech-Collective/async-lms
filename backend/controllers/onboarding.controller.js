@@ -83,20 +83,28 @@ exports.selectSubjects = async (req, res) => {
   const userId = req.user.id;
   const { subjectIds } = req.body;
 
-  if (!Array.isArray(subjectIds) || subjectIds.length === 0) {
+  if (!Array.isArray(subjectIds) || subjectIds.length !== 1) {
     return res
       .status(400)
-      .json({ message: 'Please select at least one subject' });
+      .json({ message: 'Please select exactly one initial subject during onboarding. Additional subjects require instructor approval.' });
+  }
+
+  // Onboarding security guard: Only students still on the onboarding step can use this endpoint
+  const userCheck = await pool.query('SELECT role, onboarding_step FROM users WHERE id = $1', [userId]);
+  if (!userCheck.rows.length || userCheck.rows[0].role !== 'student' || userCheck.rows[0].onboarding_step !== 'program') {
+    return res.status(403).json({
+      message: 'Onboarding is already completed. Additional courses must be requested through facilitator approval.',
+    });
   }
 
   const existingRes = await pool.query(
-    'SELECT id FROM subjects WHERE id = ANY($1::uuid[])',
+    'SELECT id FROM subjects WHERE id = ANY($1::uuid[]) AND is_published = true AND is_deleted = false',
     [subjectIds],
   );
   if (existingRes.rows.length !== subjectIds.length) {
     return res
       .status(400)
-      .json({ message: 'One or more selected subjects do not exist' });
+      .json({ message: 'One or more selected subjects do not exist or are not published' });
   }
 
   const client = await pool.connect();

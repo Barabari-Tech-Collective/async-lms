@@ -16,6 +16,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { cn, getErrorMessage } from '@/lib/utils';
+import { formatDateTime, isPastDate } from '@/utils/dateUtils';
+import { ALL_SUBMISSION_TYPES } from '@/utils/types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,7 +101,7 @@ export default function AssignmentManagement() {
   const [collegeFilter, setCollegeFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<Tab>('Active');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState<number>(20);
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -210,9 +212,7 @@ export default function AssignmentManagement() {
 
           let isOverdue = false;
           if (item.due_date) {
-            const due = new Date(item.due_date);
-            due.setHours(23, 59, 59, 999);
-            isOverdue = due < new Date();
+            isOverdue = isPastDate(item.due_date);
           }
 
           let status: Assignment['status'] = 'Active';
@@ -242,15 +242,15 @@ export default function AssignmentManagement() {
             pendingCount,
             evaluatedCount,
             dueDate: item.due_date
-              ? new Date(item.due_date).toLocaleDateString()
+              ? formatDateTime(item.due_date)
               : 'No Due Date',
-            rawDueDate: item.due_date ? item.due_date.split('T')[0] : '',
+            rawDueDate: item.due_date || '',
             status,
             description: item.description || '',
             topicId: item.topic_id || '',
             assignmentDescription: item.assignment_description || '',
             evaluatorType: item.evaluator_type || '',
-            allowedSubmissionTypes: item.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url'],
+            allowedSubmissionTypes: item.allowed_submission_types || ALL_SUBMISSION_TYPES,
             testCases: item.test_cases || null,
             rubric: item.rubric || null,
             instructionFileUrl: item.instruction_file_url || '',
@@ -310,8 +310,9 @@ export default function AssignmentManagement() {
     return matchesSearch && matchesCollege && matchesTab;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = useMemo(() => {
+    if (pageSize === -1) return filtered;
     const start = (currentPage - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
   }, [filtered, currentPage, pageSize]);
@@ -760,60 +761,86 @@ export default function AssignmentManagement() {
           </div>
 
           {/* Pagination Footer */}
-          {filtered.length > 0 && totalPages > 1 && (
+          {filtered.length > 0 && (
             <div className='flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/70 border-t border-slate-100'>
-              <p className='text-[11px] sm:text-xs text-slate-500 font-medium'>
-                Showing <span className='font-bold text-slate-800'>{(currentPage - 1) * pageSize + 1}</span> to{' '}
-                <span className='font-bold text-slate-800'>{Math.min(currentPage * pageSize, filtered.length)}</span> of{' '}
-                <span className='font-bold text-slate-800'>{filtered.length}</span> assignments
-              </p>
+              <div className='flex flex-wrap items-center justify-center sm:justify-start gap-3 w-full sm:w-auto'>
+                <p className='text-[11px] sm:text-xs text-slate-500 font-medium'>
+                  Showing <span className='font-bold text-slate-800'>{pageSize === -1 ? 1 : (currentPage - 1) * pageSize + 1}</span> to{' '}
+                  <span className='font-bold text-slate-800'>{pageSize === -1 ? filtered.length : Math.min(currentPage * pageSize, filtered.length)}</span> of{' '}
+                  <span className='font-bold text-slate-800'>{filtered.length}</span> assignments
+                </p>
 
-              <div className='flex items-center gap-1.5'>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50'
-                >
-                  <ChevronLeft className='h-3.5 w-3.5 mr-1' />
-                  Prev
-                </Button>
-
-                <div className='flex items-center gap-1 mx-0.5'>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                    .map((p, idx, arr) => (
-                      <Fragment key={p}>
-                        {idx > 0 && arr[idx - 1] !== p - 1 && (
-                          <span className='text-slate-300 text-xs px-0.5 select-none'>...</span>
-                        )}
-                        <button
-                          onClick={() => setCurrentPage(p)}
-                          className={cn(
-                            'w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center',
-                            currentPage === p
-                              ? 'bg-[#1e2653] text-white shadow-xs'
-                              : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100',
-                          )}
-                        >
-                          {p}
-                        </button>
-                      </Fragment>
-                    ))}
+                <div className='flex items-center gap-1.5 pl-2.5 border-l border-slate-200'>
+                  <label htmlFor='assignment-pagesize' className='text-[11px] sm:text-xs text-slate-500 font-medium whitespace-nowrap'>
+                    Rows:
+                  </label>
+                  <select
+                    id='assignment-pagesize'
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className='h-7 px-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-[#1e2653] cursor-pointer'
+                    aria-label='Select rows per page'
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={-1}>All</option>
+                  </select>
                 </div>
-
-                <Button
-                  variant='outline'
-                  size='sm'
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50'
-                >
-                  Next
-                  <ChevronRight className='h-3.5 w-3.5 ml-1' />
-                </Button>
               </div>
+
+              {totalPages > 1 && (
+                <div className='flex items-center gap-1.5 shrink-0'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50 cursor-pointer disabled:opacity-40'
+                  >
+                    <ChevronLeft className='h-3.5 w-3.5 mr-1' />
+                    Prev
+                  </Button>
+
+                  <div className='flex items-center gap-1 mx-0.5'>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                      .map((p, idx, arr) => (
+                        <Fragment key={p}>
+                          {idx > 0 && arr[idx - 1] !== p - 1 && (
+                            <span className='text-slate-300 text-xs px-0.5 select-none'>...</span>
+                          )}
+                          <button
+                            onClick={() => setCurrentPage(p)}
+                            className={cn(
+                              'w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center cursor-pointer',
+                              currentPage === p
+                                ? 'bg-[#1e2653] text-white shadow-xs'
+                                : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100',
+                            )}
+                          >
+                            {p}
+                          </button>
+                        </Fragment>
+                      ))}
+                  </div>
+
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className='rounded-xl h-8 px-2.5 text-xs text-slate-700 bg-white shadow-2xs hover:bg-slate-50 cursor-pointer disabled:opacity-40'
+                  >
+                    Next
+                    <ChevronRight className='h-3.5 w-3.5 ml-1' />
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

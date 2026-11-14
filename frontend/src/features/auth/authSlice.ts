@@ -25,6 +25,11 @@ const authSlice = createSlice({
       sessionStorage.removeItem('lms_milestone_shown_session');
       localStorage.removeItem('lms_milestone_snoozed_until');
       try {
+        Object.keys(localStorage).forEach((key) => {
+          if (key.startsWith('codeguru_resume_draft')) {
+            localStorage.removeItem(key);
+          }
+        });
         queryClient.clear();
       } catch {}
     },

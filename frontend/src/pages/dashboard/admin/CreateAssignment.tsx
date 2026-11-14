@@ -14,6 +14,8 @@ import {
   markdownToHtml,
   htmlToMarkdown,
 } from '@/utils/contentFormat';
+import { toLocalDatetimeInputString, formatDateTime } from '@/utils/dateUtils';
+import { ALL_SUBMISSION_TYPES } from '@/utils/types';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -108,7 +110,9 @@ export default function CreateAssignment() {
     editData.collegeId ? [editData.collegeId] : []
   );
   const [topicId, setTopicId] = useState(editData.topicId || editData.domain || '');
-  const [deadline, setDeadline] = useState(editData.deadline || '');
+  const [deadline, setDeadline] = useState(
+    () => toLocalDatetimeInputString(editData.deadline) || editData.deadline || ''
+  );
 
   // Dynamic subjects (courses) and topics
   const [availableCourses, setAvailableCourses] = useState<{value: string, label: string, slug: string}[]>([]);
@@ -265,21 +269,7 @@ export default function CreateAssignment() {
         }
         if (d.topic_id) setTopicId(String(d.topic_id));
         if (d.due_date) {
-          try {
-            const dt = new Date(d.due_date);
-            if (!isNaN(dt.getTime())) {
-              const year = dt.getFullYear();
-              const month = String(dt.getMonth() + 1).padStart(2, '0');
-              const day = String(dt.getDate()).padStart(2, '0');
-              const hours = String(dt.getHours()).padStart(2, '0');
-              const minutes = String(dt.getMinutes()).padStart(2, '0');
-              setDeadline(`${year}-${month}-${day}T${hours}:${minutes}`);
-            } else {
-              setDeadline(d.due_date.slice(0, 16));
-            }
-          } catch {
-            setDeadline(d.due_date.slice(0, 16));
-          }
+          setDeadline(toLocalDatetimeInputString(d.due_date));
         }
         if (d.evaluator_type) setAiEvaluationType(d.evaluator_type);
         if (d.instruction_file_url) setInstructionUrl(d.instruction_file_url);
@@ -473,7 +463,7 @@ export default function CreateAssignment() {
       const res = await apiClient.post<{ success: boolean; rubric: string }>('/evaluations/generate-rubric', {
         title: title.trim(),
         instructions: instructionsText,
-        evaluatorType: aiEvaluationType || 'JS',
+        evaluatorType: aiEvaluationType || undefined,
       });
 
       if (res.data.success && res.data.rubric) {
@@ -502,14 +492,7 @@ export default function CreateAssignment() {
 
   // ─── Submission Settings ───
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<string[]>(
-    editData.allowed_submission_types || editData.allowedSubmissionTypes || [
-      'file',
-      'github',
-      'docs',
-      'figma',
-      'excel',
-      'url',
-    ]
+    editData.allowed_submission_types || editData.allowedSubmissionTypes || ALL_SUBMISSION_TYPES
   );
 
   const toggleSubmissionType = (typeId: string) => {
@@ -527,7 +510,7 @@ export default function CreateAssignment() {
   };
 
   const selectAllSubmissionTypes = () => {
-    setAllowedSubmissionTypes(['file', 'github', 'docs', 'figma', 'excel', 'url']);
+    setAllowedSubmissionTypes(ALL_SUBMISSION_TYPES);
   };
 
   // ─── Rubrics helpers ───
@@ -598,17 +581,17 @@ export default function CreateAssignment() {
       }
     }
 
-    // Test cases validation (Required for Excel, JavaScript and Python when evaluator selected)
+    // Test cases validation (Required for SQL, Excel, JavaScript and Python when evaluator selected)
     const upperAiType = (aiEvaluationType || '').toUpperCase();
-    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON') || upperAiType.includes('EXCEL'));
+    const isTestCasesRequired = hasEvaluator && (['JS', 'PYTHON', 'EXCEL', 'SQL'].includes(upperAiType) || upperAiType.includes('JAVASCRIPT') || upperAiType.includes('PYTHON') || upperAiType.includes('EXCEL') || upperAiType.includes('SQL'));
     if (isTestCasesRequired) {
       if (testCaseViewMode === 'builder') {
         if (testCases.length === 0) {
-          missing.push('Test Cases (Required for Excel, JavaScript & Python)');
+          missing.push('Test Cases (Required for SQL, Excel, JavaScript & Python)');
         }
       } else {
         if (!testCasesJson.trim()) {
-          missing.push('Test Cases / Spec (Required for Excel, JavaScript & Python)');
+          missing.push('Test Cases / Spec (Required for SQL, Excel, JavaScript & Python)');
         }
       }
     }
@@ -624,6 +607,14 @@ export default function CreateAssignment() {
         },
       );
       return;
+    }
+
+    if (deadline && !editId) {
+      const deadlineDate = new Date(deadline);
+      if (deadlineDate.getTime() < Date.now() - 60000) {
+        toast.error('Deadline cannot be in the past. Please choose a future date and time.');
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -715,7 +706,7 @@ export default function CreateAssignment() {
                   .join(', ')),
           collegeId: editId ? college : selectedColleges[0],
           topicId: availableTopics.find(t => t.value === topicId)?.label || topicId,
-          deadline,
+          deadline: deadline ? formatDateTime(deadline) : '',
           assignmentDescription,
           aiEvaluationType,
           weightage,
@@ -925,6 +916,7 @@ export default function CreateAssignment() {
                 <Input
                   type='datetime-local'
                   value={deadline}
+                  min={!editId ? toLocalDatetimeInputString(new Date()) : undefined}
                   onChange={(e) => setDeadline(e.target.value)}
                   className='text-xs sm:text-sm h-10'
                 />
@@ -1256,10 +1248,10 @@ export default function CreateAssignment() {
                     &gt;_
                   </div>
                   <CardTitle className='text-sm sm:text-base font-semibold text-slate-900'>
-                    Test Cases {['JS', 'PYTHON', 'EXCEL'].includes((aiEvaluationType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
+                    Test Cases {['JS', 'PYTHON', 'EXCEL', 'SQL'].includes((aiEvaluationType || '').toUpperCase()) ? <span className='text-red-500'>*</span> : <span className='text-xs font-normal text-slate-400'>(Optional for this evaluator)</span>}
                   </CardTitle>
                 </div>
-                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules {['JS', 'PYTHON', 'EXCEL'].includes((aiEvaluationType || '').toUpperCase()) ? `(Required for ${(aiEvaluationType || '').toUpperCase()})` : '(Optional for other evaluators)'}</p>
+                <p className='text-xs text-slate-500 mt-0.5'>Automated testing rules {['JS', 'PYTHON', 'EXCEL', 'SQL'].includes((aiEvaluationType || '').toUpperCase()) ? `(Required for ${(aiEvaluationType || '').toUpperCase()})` : '(Optional for other evaluators)'}</p>
                 {(aiEvaluationType || '').toUpperCase() === 'EXCEL' && !rubricJson.trim() && rubrics.length === 0 && (
                   <p className='text-[11px] text-amber-600 font-medium mt-1'>Generate the Rubric first so Excel test cases automatically bind to your criteria.</p>
                 )}
@@ -1524,6 +1516,22 @@ export default function CreateAssignment() {
                       <path d='M14 2V8H20L14 2Z' fill='#87CEAC' />
                       <rect x='7.5' y='11.5' width='9' height='7' rx='0.5' stroke='white' strokeWidth='1.2' fill='none' />
                       <path d='M7.5 14H16.5M12 11.5V18.5' stroke='white' strokeWidth='1.2' />
+                    </svg>
+                  ),
+                },
+                {
+                  id: 'drive',
+                  title: 'Google Drive',
+                  desc: 'Files or folders in Google Drive (Anyone with link)',
+                  iconBg: 'bg-emerald-50 border-emerald-100',
+                  renderIcon: () => (
+                    <svg className='w-5 h-5' viewBox='0 0 87.3 78'>
+                      <path d='M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z' fill='#0066DA'/>
+                      <path d='M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44C.4 50 0 51.55 0 53.1h27.5z' fill='#00AC47'/>
+                      <path d='M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 10.1z' fill='#EA4335'/>
+                      <path d='M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z' fill='#00832D'/>
+                      <path d='M59.8 53.1H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z' fill='#2684FC'/>
+                      <path d='M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.15 28.1H87.3c0-1.55-.4-3.1-1.2-4.5z' fill='#FFBA00'/>
                     </svg>
                   ),
                 },

@@ -48,6 +48,11 @@ const {
   deleteProject,
   verifyUser,
   createCurriculumDeveloper,
+  getAvailableCoursesForStudent,
+  addStudentCourse,
+  removeStudentCourse,
+  getEnrollmentRequests,
+  reviewEnrollmentRequest,
 } = require('../controllers/admin.controller');
 
 const {
@@ -260,5 +265,12 @@ router.get('/colleges/:id', verifyToken, isAdmin, getCollegeDetail);
 router.get('/students/:id', verifyToken, isAdmin, getStudentProfile);
 router.get('/facilitators/:id', verifyToken, isAdmin, getFacilitatorProfile);
 router.patch('/users/:id/verify', verifyToken, isAdmin, verifyUser);
+
+// ===== STUDENT ENROLLMENT MANAGEMENT =====
+router.get('/students/:studentId/available-courses', verifyToken, isAdmin, getAvailableCoursesForStudent);
+router.post('/students/:studentId/courses', verifyToken, isAdmin, addStudentCourse);
+router.delete('/students/:studentId/courses/:subjectId', verifyToken, isAdmin, removeStudentCourse);
+router.get('/enrollment-requests', verifyToken, isAdmin, getEnrollmentRequests);
+router.patch('/enrollment-requests/:requestId', verifyToken, isAdmin, reviewEnrollmentRequest);
 
 module.exports = router;

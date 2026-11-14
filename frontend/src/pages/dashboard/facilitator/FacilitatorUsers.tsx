@@ -50,6 +50,7 @@ function FacilitatorUsersSkeleton() {
   );
 }
 import StudentProfileDialog from '@/components/common/StudentProfileDialog';
+import EnrollmentRequestsPanel from '@/components/common/EnrollmentRequestsPanel';
 import toast from 'react-hot-toast';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -107,7 +108,8 @@ const FacilitatorStudents = () => {
   const [selectedCollege, setSelectedCollege] = useState<string>('all');
   const [profileId, setProfileId] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'all' | 'pending'>('all');
+  const [tab, setTab] = useState<'all' | 'pending' | 'requests'>('all');
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
   const [editStudent, setEditStudent] = useState<StudentRow | null>(null);
@@ -119,12 +121,16 @@ const FacilitatorStudents = () => {
   const fetchStudents = async () => {
     try {
       setLoading(true);
-      const [studentsRes, collegesRes] = await Promise.all([
+      const [studentsRes, collegesRes, requestsRes] = await Promise.all([
         apiClient.get<StudentRow[]>('/facilitator/students'),
         apiClient.get<{ success: boolean; data: CollegeOption[] }>('/facilitator/colleges'),
+        apiClient
+          .get<{ success: boolean; total: number }>('/facilitator/enrollment-requests?status=pending&limit=1')
+          .catch(() => ({ data: { total: 0 } })),
       ]);
       setStudents(studentsRes.data);
       setColleges(collegesRes.data.data);
+      setPendingRequestsCount(requestsRes.data?.total ?? 0);
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to load students'));
     } finally {
@@ -248,9 +254,27 @@ const FacilitatorStudents = () => {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setTab('requests')}
+            className={`px-3.5 sm:px-4 py-2 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 sm:flex-initial ${tab === 'requests' ? 'bg-white shadow-xs text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <span>Course Requests</span>
+            {pendingRequestsCount > 0 && (
+              <span className='bg-[#333D7C] text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none'>
+                {pendingRequestsCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
+      {tab === 'requests' ? (
+        <EnrollmentRequestsPanel
+          apiPrefix='facilitator'
+          onRequestCountChange={setPendingRequestsCount}
+        />
+      ) : (
+        <>
       <div className='flex flex-col gap-3 sm:gap-4 md:flex-row md:items-center md:justify-between'>
         <div className='flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full md:w-auto flex-1'>
           {/* Search bar + Recycle Bin in a single line */}
@@ -341,7 +365,10 @@ const FacilitatorStudents = () => {
                     </Badge>
                   )}
                   <span className='text-slate-300'>•</span>
-                  <Badge className='bg-indigo-50 text-indigo-700 border-none text-[10px] px-1.5 py-0'>
+                  <Badge
+                    onClick={() => setProfileId(student.id)}
+                    className='bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-none text-[10px] px-1.5 py-0 cursor-pointer'
+                  >
                     {student.enrolled_courses || 0} subjects
                   </Badge>
                 </div>
@@ -474,7 +501,10 @@ const FacilitatorStudents = () => {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge className='bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-none text-[11px] whitespace-nowrap'>
+                    <Badge
+                      onClick={() => setProfileId(student.id)}
+                      className='bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-none text-[11px] whitespace-nowrap cursor-pointer'
+                    >
                       {student.enrolled_courses || 0} subjects
                     </Badge>
                   </TableCell>
@@ -625,6 +655,8 @@ const FacilitatorStudents = () => {
           </div>
         )}
       </Card>
+      </>
+      )}
 
       <StudentProfileDialog
         studentId={profileId}

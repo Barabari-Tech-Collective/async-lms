@@ -1,8 +1,18 @@
 const router = require('express').Router();
 const multer = require('multer');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const verifyToken = require('../middlewares/verfiyToken');
 const isStudent = require('../middlewares/isStudent');
+const isStudentOrFacilitator = require('../middlewares/isStudentOrFacilitator');
+
+const verifyUrlLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many URL verification attempts. Please wait a minute and try again.' },
+});
 
 const ALLOWED_SUBMISSION_EXTENSIONS = new Set([
   '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
@@ -47,10 +57,13 @@ const {
   getStudentProjectsOverview,
   getAssignmentById,
   submitAssignment,
+  verifySubmissionUrl,
   getCapstone,
   submitCapstone,
   getStudentScorecard,
   enrollInSubject,
+  requestEnrollment,
+  getStudentEnrollmentRequests,
   getStudentAnalytics,
   getStudentModuleAnalytics,
   getActiveMilestoneDeadlines,
@@ -98,28 +111,28 @@ router.post(
 router.post(
   '/exercise/:exerciseId/workspace/init',
   verifyToken,
-  isStudent,
+  isStudentOrFacilitator,
   initExerciseWorkspace,
 );
 
 router.post(
   '/exercise/:exerciseId/workspace/save',
   verifyToken,
-  isStudent,
+  isStudentOrFacilitator,
   saveExerciseWorkspace,
 );
 
 router.post(
   '/exercise/:exerciseId/run',
   verifyToken,
-  isStudent,
+  isStudentOrFacilitator,
   runExercise,
 );
 
 router.post(
   '/exercise/:exerciseId/run-tests',
   verifyToken,
-  isStudent,
+  isStudentOrFacilitator,
   runExerciseTests,
 );
 
@@ -131,7 +144,14 @@ router.get(
   getStudentAssignmentsOverview,
 );
 router.get('/assignments', verifyToken, isStudent, getStudentAssignments);
-router.get('/assignments/:id', verifyToken, isStudent, getAssignmentById);
+router.get('/assignments/:id', verifyToken, isStudentOrFacilitator, getAssignmentById);
+router.post(
+  '/assignments/verify-url-access',
+  verifyToken,
+  isStudent,
+  verifyUrlLimiter,
+  verifySubmissionUrl,
+);
 router.post(
   '/assignments/:id/submit',
   verifyToken,
@@ -152,7 +172,7 @@ router.post('/projects', verifyToken, isStudent, createStudentProject);
 router.delete('/projects/:id', verifyToken, isStudent, deleteStudentProject);
 
 // ===== CAPSTONE PROJECTS =====
-router.get('/capstone/:projectId', verifyToken, isStudent, getCapstone);
+router.get('/capstone/:projectId', verifyToken, isStudentOrFacilitator, getCapstone);
 router.post(
   '/capstone/:projectId/submit',
   verifyToken,
@@ -162,6 +182,18 @@ router.post(
 );
 
 // ===== ENROLLMENT =====
+router.post(
+  '/enrollment-requests',
+  verifyToken,
+  isStudent,
+  requestEnrollment,
+);
+router.get(
+  '/enrollment-requests',
+  verifyToken,
+  isStudent,
+  getStudentEnrollmentRequests,
+);
 router.post(
   '/subjects/:subjectId/enroll',
   verifyToken,

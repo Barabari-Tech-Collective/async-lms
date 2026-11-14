@@ -1,8 +1,8 @@
 // Shared engagement analytics tab components used by both FacilitatorAnalytics and admin Analytics.
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Loader2, ListChecks, Search, ArrowUpRight, Users, CheckCircle2, XCircle, Clock, X, ChevronRight,
-  FileSpreadsheet, FileText, FolderGit2,
+  FileSpreadsheet, FileText, FolderGit2, ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import apiClient from '@/services/api';
@@ -328,47 +328,75 @@ export function PaginationControls({
   page,
   totalPages,
   onPageChange,
+  pageSize,
+  onPageSizeChange,
+  pageSizeOptions = [10, 20, 50, 100, -1],
 }: {
   page: number;
   totalPages: number;
   onPageChange: (p: number) => void;
+  pageSize?: number;
+  onPageSizeChange?: (size: number) => void;
+  pageSizeOptions?: number[];
 }) {
   const pages = getPageNumbers(page, totalPages);
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 shrink-0">
-      <button
-        onClick={() => onPageChange(page - 1)}
-        disabled={page === 1}
-        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
-      >
-        Prev
-      </button>
+    <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 sm:gap-3 shrink-0">
+      {pageSize !== undefined && onPageSizeChange && (
+        <div className="flex items-center gap-1.5 pr-2 sm:border-r sm:border-slate-200">
+          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Rows:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            className="h-7 px-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-indigo-600 cursor-pointer"
+            aria-label="Select rows per page"
+          >
+            {pageSizeOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt === -1 ? 'All' : opt}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
-      {pages.map((p, i) => (
-        <button
-          key={i}
-          onClick={() => typeof p === 'number' && onPageChange(p)}
-          disabled={p === '...'}
-          className={`min-w-[28px] h-[30px] sm:min-w-[30px] sm:h-[30px] px-1.5 flex items-center justify-center rounded-lg border text-xs transition-colors font-medium ${
-            p === page
-              ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
-              : p === '...'
-              ? 'border-transparent text-slate-400 cursor-default'
-              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          {p}
-        </button>
-      ))}
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <button
+            onClick={() => onPageChange(page - 1)}
+            disabled={page <= 1}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
+          >
+            Prev
+          </button>
 
-      <button
-        onClick={() => onPageChange(page + 1)}
-        disabled={page === totalPages}
-        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
-      >
-        Next
-      </button>
+          {pages.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => typeof p === 'number' && onPageChange(p)}
+              disabled={p === '...'}
+              className={`min-w-[28px] h-[30px] sm:min-w-[30px] sm:h-[30px] px-1.5 flex items-center justify-center rounded-lg border text-xs transition-colors font-medium ${
+                p === page
+                  ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                  : p === '...'
+                  ? 'border-transparent text-slate-400 cursor-default'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+
+          <button
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= totalPages}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-600 min-h-[30px]"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1102,11 +1130,11 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
   const [data, setData] = useState<AssignmentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [aPage, setAPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [sortOrder, setSortOrder] = useState<'alpha' | 'score_desc' | 'score_asc'>('alpha');
   const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
   const [search, setSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
-
-  const PAGE_SIZE = 10;
 
   // Fetch topics when subject changes
   useEffect(() => {
@@ -1191,8 +1219,29 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
     return true;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
-  const paginatedStudents = filteredStudents.slice((aPage - 1) * PAGE_SIZE, aPage * PAGE_SIZE);
+  const sortedStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => {
+      if (sortOrder === 'score_desc' || sortOrder === 'score_asc') {
+        const scoreA = a.score_pct != null ? a.score_pct : -1;
+        const scoreB = b.score_pct != null ? b.score_pct : -1;
+        if (scoreA !== scoreB) {
+          if (sortOrder === 'score_desc') {
+            return scoreB - scoreA;
+          } else {
+            if (scoreA === -1) return 1;
+            if (scoreB === -1) return -1;
+            return scoreA - scoreB;
+          }
+        }
+      }
+      const nameA = (a.name || '').trim();
+      const nameB = (b.name || '').trim();
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [filteredStudents, sortOrder]);
+
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(sortedStudents.length / pageSize));
+  const paginatedStudents = pageSize === -1 ? sortedStudents : sortedStudents.slice((aPage - 1) * pageSize, aPage * pageSize);
 
   const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
     { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
@@ -1286,28 +1335,46 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
 
           {/* Student Submissions Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Submissions</h3>
-              <div className="relative w-full sm:w-60 shrink-0">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search student name, email..."
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setAPage(1);
-                  }}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                />
-                {search && (
-                  <button
-                    onClick={() => { setSearch(''); setAPage(1); }}
-                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
+                <div className="relative w-full sm:w-60 shrink-0">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search student name, email..."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setAPage(1);
+                    }}
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[32px]"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => { setSearch(''); setAPage(1); }}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative shrink-0">
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => {
+                      setSortOrder(e.target.value as 'alpha' | 'score_desc' | 'score_asc');
+                      setAPage(1);
+                    }}
+                    className="w-full sm:w-auto text-xs font-semibold border border-slate-200 bg-white rounded-xl px-2.5 py-1.5 text-slate-700 min-h-[32px] focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                    aria-label="Sort assignment submissions"
                   >
-                    ×
-                  </button>
-                )}
+                    <option value="alpha">Sort: Name (A → Z)</option>
+                    <option value="score_desc">Sort: Score (Highest first)</option>
+                    <option value="score_asc">Sort: Score (Lowest first)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1425,10 +1492,44 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
-                        <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSortOrder((prev) => (prev === 'alpha' ? 'score_desc' : 'alpha'));
+                              setAPage(1);
+                            }}
+                            className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                            title="Toggle alphabetical / score sort"
+                          >
+                            <span>Student</span>
+                            {sortOrder === 'alpha' && <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />}
+                          </button>
+                        </th>
                         <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
                         <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
-                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSortOrder((prev) =>
+                                prev === 'score_desc' ? 'score_asc' : prev === 'score_asc' ? 'alpha' : 'score_desc'
+                              );
+                              setAPage(1);
+                            }}
+                            className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                            title="Sort by score: Highest -> Lowest -> Alphabetical"
+                          >
+                            <span>Score</span>
+                            {sortOrder === 'score_desc' ? (
+                              <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                            ) : sortOrder === 'score_asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                            )}
+                          </button>
+                        </th>
                         <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
                         <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
@@ -1480,10 +1581,22 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
                     </tbody>
                   </table>
                 </div>
-                {totalPages > 1 && (
+                {filteredStudents.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{filteredStudents.length} students · page {aPage} of {totalPages}</span>
-                    <PaginationControls page={aPage} totalPages={totalPages} onPageChange={setAPage} />
+                    <span>
+                      Showing {pageSize === -1 ? 1 : (aPage - 1) * pageSize + 1}–{pageSize === -1 ? filteredStudents.length : Math.min(aPage * pageSize, filteredStudents.length)} of {filteredStudents.length} students · page {aPage} of {totalPages}
+                    </span>
+                    <PaginationControls
+                      page={aPage}
+                      totalPages={totalPages}
+                      onPageChange={setAPage}
+                      pageSize={pageSize}
+                      onPageSizeChange={(newSize) => {
+                        setPageSize(newSize);
+                        setAPage(1);
+                      }}
+                      pageSizeOptions={[10, 20, 50, 100, -1]}
+                    />
                   </div>
                 )}
               </>
@@ -1523,11 +1636,11 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
   const [data, setData] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(false);
   const [pPage, setPPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [sortOrder, setSortOrder] = useState<'alpha' | 'score_desc' | 'score_asc'>('alpha');
   const [statusFilter, setStatusFilter] = useState<AnalyticsFilterType>('all');
   const [search, setSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
-
-  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (!subject) { setTopics([]); setTopic(''); return; }
@@ -1592,8 +1705,29 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
     return true;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
-  const paginatedStudents = filteredStudents.slice((pPage - 1) * PAGE_SIZE, pPage * PAGE_SIZE);
+  const sortedStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => {
+      if (sortOrder === 'score_desc' || sortOrder === 'score_asc') {
+        const scoreA = a.score_pct != null ? a.score_pct : -1;
+        const scoreB = b.score_pct != null ? b.score_pct : -1;
+        if (scoreA !== scoreB) {
+          if (sortOrder === 'score_desc') {
+            return scoreB - scoreA;
+          } else {
+            if (scoreA === -1) return 1;
+            if (scoreB === -1) return -1;
+            return scoreA - scoreB;
+          }
+        }
+      }
+      const nameA = (a.name || '').trim();
+      const nameB = (b.name || '').trim();
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [filteredStudents, sortOrder]);
+
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(sortedStudents.length / pageSize));
+  const paginatedStudents = pageSize === -1 ? sortedStudents : sortedStudents.slice((pPage - 1) * pageSize, pPage * pageSize);
 
   const filterTabs: { id: AnalyticsFilterType; label: string; count: number; activeColor: string }[] = [
     { id: 'all', label: 'All Enrolled', count: counts.all, activeColor: 'bg-slate-900 text-white' },
@@ -1682,28 +1816,46 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
 
           {/* Student Project Status Table */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
               <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Student Project Status</h3>
-              <div className="relative w-full sm:w-60 shrink-0">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search student name, email..."
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPPage(1);
-                  }}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                />
-                {search && (
-                  <button
-                    onClick={() => { setSearch(''); setPPage(1); }}
-                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
+                <div className="relative w-full sm:w-60 shrink-0">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search student name, email..."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPPage(1);
+                    }}
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[32px]"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => { setSearch(''); setPPage(1); }}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative shrink-0">
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => {
+                      setSortOrder(e.target.value as 'alpha' | 'score_desc' | 'score_asc');
+                      setPPage(1);
+                    }}
+                    className="w-full sm:w-auto text-xs font-semibold border border-slate-200 bg-white rounded-xl px-2.5 py-1.5 text-slate-700 min-h-[32px] focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                    aria-label="Sort project submissions"
                   >
-                    ×
-                  </button>
-                )}
+                    <option value="alpha">Sort: Name (A → Z)</option>
+                    <option value="score_desc">Sort: Score (Highest first)</option>
+                    <option value="score_asc">Sort: Score (Lowest first)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1821,10 +1973,44 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
                   <table className="w-full text-xs sm:text-sm">
                     <thead className="bg-slate-50 text-[11px] sm:text-xs text-slate-500 uppercase font-semibold">
                       <tr>
-                        <th className="text-left px-3.5 sm:px-5 py-3">Student</th>
+                        <th className="text-left px-3.5 sm:px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSortOrder((prev) => (prev === 'alpha' ? 'score_desc' : 'alpha'));
+                              setPPage(1);
+                            }}
+                            className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                            title="Toggle alphabetical / score sort"
+                          >
+                            <span>Student</span>
+                            {sortOrder === 'alpha' && <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />}
+                          </button>
+                        </th>
                         <th className="text-left px-3.5 sm:px-5 py-3">Email</th>
                         <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Attempted</th>
-                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Score</th>
+                        <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSortOrder((prev) =>
+                                prev === 'score_desc' ? 'score_asc' : prev === 'score_asc' ? 'alpha' : 'score_desc'
+                              );
+                              setPPage(1);
+                            }}
+                            className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                            title="Sort by score: Highest -> Lowest -> Alphabetical"
+                          >
+                            <span>Score</span>
+                            {sortOrder === 'score_desc' ? (
+                              <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                            ) : sortOrder === 'score_asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                            )}
+                          </button>
+                        </th>
                         <th className="text-center sm:text-left px-3.5 sm:px-5 py-3">Status</th>
                         <th className="text-right px-3.5 sm:px-5 py-3">Actions</th>
                       </tr>
@@ -1876,10 +2062,22 @@ export function ProjectsTab({ colleges, batches, subjects }: { colleges: College
                     </tbody>
                   </table>
                 </div>
-                {totalPages > 1 && (
+                {filteredStudents.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                    <span>{filteredStudents.length} students · page {pPage} of {totalPages}</span>
-                    <PaginationControls page={pPage} totalPages={totalPages} onPageChange={setPPage} />
+                    <span>
+                      Showing {pageSize === -1 ? 1 : (pPage - 1) * pageSize + 1}–{pageSize === -1 ? filteredStudents.length : Math.min(pPage * pageSize, filteredStudents.length)} of {filteredStudents.length} students · page {pPage} of {totalPages}
+                    </span>
+                    <PaginationControls
+                      page={pPage}
+                      totalPages={totalPages}
+                      onPageChange={setPPage}
+                      pageSize={pageSize}
+                      onPageSizeChange={(newSize) => {
+                        setPageSize(newSize);
+                        setPPage(1);
+                      }}
+                      pageSizeOptions={[10, 20, 50, 100, -1]}
+                    />
                   </div>
                 )}
               </>
@@ -1926,8 +2124,9 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [reportData, setReportData] = useState<BatchReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportSortOrder, setReportSortOrder] = useState<'alpha' | 'score_desc' | 'score_asc'>('alpha');
   const [studentPage, setStudentPage] = useState(1);
-  const studentPageSize = 10;
+  const [studentPageSize, setStudentPageSize] = useState<number>(20);
   const [exporting, setExporting] = useState(false);
   const [drawerStudent, setDrawerStudent] = useState<BatchReportStudent | null>(null);
   const [detailsModalStudent, setDetailsModalStudent] = useState<{ id: string; name: string } | null>(null);
@@ -2105,8 +2304,20 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
     return true;
   });
 
-  const totalStudentPages = Math.ceil(filteredStudents.length / studentPageSize);
-  const paginatedStudents = filteredStudents.slice((studentPage - 1) * studentPageSize, studentPage * studentPageSize);
+  const sortedReportStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => {
+      if (reportSortOrder === 'score_desc' || reportSortOrder === 'score_asc') {
+        const diff = (b.overall_subject_progress || 0) - (a.overall_subject_progress || 0);
+        if (diff !== 0) {
+          return reportSortOrder === 'score_desc' ? diff : -diff;
+        }
+      }
+      return (a.full_name || '').localeCompare(b.full_name || '', undefined, { sensitivity: 'base' });
+    });
+  }, [filteredStudents, reportSortOrder]);
+
+  const totalStudentPages = studentPageSize === -1 ? 1 : Math.max(1, Math.ceil(sortedReportStudents.length / studentPageSize));
+  const paginatedStudents = studentPageSize === -1 ? sortedReportStudents : sortedReportStudents.slice((studentPage - 1) * studentPageSize, studentPage * studentPageSize);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
@@ -2382,8 +2593,23 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                     Itemized delta completions and cumulative progress for {reportData?.meta.subject_name || 'Cohort'}.
                   </p>
                 </div>
-                <div className="text-xs text-slate-500 font-medium">
-                  Showing {filteredStudents.length} of {reportData?.students.length ?? 0} students
+                <div className="flex items-center gap-2.5">
+                  <div className="text-xs text-slate-500 font-medium">
+                    Showing {filteredStudents.length} of {reportData?.students.length ?? 0} students
+                  </div>
+                  <select
+                    value={reportSortOrder}
+                    onChange={(e) => {
+                      setReportSortOrder(e.target.value as 'alpha' | 'score_desc' | 'score_asc');
+                      setStudentPage(1);
+                    }}
+                    className="text-xs font-semibold border border-slate-200 bg-white rounded-lg px-2.5 py-1 text-slate-700 min-h-[30px] focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                    aria-label="Sort cohort activity report"
+                  >
+                    <option value="alpha">Sort: Name (A → Z)</option>
+                    <option value="score_desc">Sort: Progress (Highest first)</option>
+                    <option value="score_asc">Sort: Progress (Lowest first)</option>
+                  </select>
                 </div>
               </div>
 
@@ -2470,9 +2696,43 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase font-semibold border-b border-slate-100">
                         <tr>
-                          <th className="text-left px-5 py-3 w-2/5">Student</th>
+                          <th className="text-left px-5 py-3 w-2/5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReportSortOrder((prev) => (prev === 'alpha' ? 'score_desc' : 'alpha'));
+                                setStudentPage(1);
+                              }}
+                              className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                              title="Toggle alphabetical / progress sort"
+                            >
+                              <span>Student</span>
+                              {reportSortOrder === 'alpha' && <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />}
+                            </button>
+                          </th>
                           <th className="text-left px-5 py-3 w-1/4">Cohort Batch</th>
-                          <th className="text-left px-5 py-3 w-1/3">Course Progress</th>
+                          <th className="text-left px-5 py-3 w-1/3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReportSortOrder((prev) =>
+                                  prev === 'score_desc' ? 'score_asc' : prev === 'score_asc' ? 'alpha' : 'score_desc'
+                                );
+                                setStudentPage(1);
+                              }}
+                              className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                              title="Sort by progress: Highest -> Lowest -> Alphabetical"
+                            >
+                              <span>Course Progress</span>
+                              {reportSortOrder === 'score_desc' ? (
+                                <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                              ) : reportSortOrder === 'score_asc' ? (
+                                <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </button>
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -2553,12 +2813,22 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
                     </table>
                   </div>
 
-                  {totalStudentPages > 1 && (
+                  {filteredStudents.length > 0 && (
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
                       <span className="text-center sm:text-left">
-                        Showing {(studentPage - 1) * studentPageSize + 1}–{Math.min(studentPage * studentPageSize, filteredStudents.length)} of {filteredStudents.length} students · page {studentPage} of {totalStudentPages}
+                        Showing {studentPageSize === -1 ? 1 : (studentPage - 1) * studentPageSize + 1}–{studentPageSize === -1 ? filteredStudents.length : Math.min(studentPage * studentPageSize, filteredStudents.length)} of {filteredStudents.length} students · page {studentPage} of {totalStudentPages}
                       </span>
-                      <PaginationControls page={studentPage} totalPages={totalStudentPages} onPageChange={setStudentPage} />
+                      <PaginationControls
+                        page={studentPage}
+                        totalPages={totalStudentPages}
+                        onPageChange={setStudentPage}
+                        pageSize={studentPageSize}
+                        onPageSizeChange={(newSize) => {
+                          setStudentPageSize(newSize);
+                          setStudentPage(1);
+                        }}
+                        pageSizeOptions={[10, 20, 50, 100, -1]}
+                      />
                     </div>
                   )}
                 </>
@@ -2608,8 +2878,6 @@ export function BatchTab({ colleges, batches, subjects }: { colleges: College[];
 
 // ─── Tab: Student Performance ─────────────────────────────────────────────────
 
-const STUDENTS_PAGE_SIZE = 20;
-
 export function StudentsTab({ colleges, batches, subjects }: { colleges: College[]; batches: Batch[]; subjects: Subject[] }) {
   const [college, setCollege] = useState('');
   const [batch, setBatch] = useState('');
@@ -2621,6 +2889,8 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
   const [data, setData] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [sortOrder, setSortOrder] = useState<'alpha' | 'score_desc' | 'score_asc'>('alpha');
   const [loading, setLoading] = useState(false);
   const [aggregates, setAggregates] = useState({ quizzes_attempted: 0, assignments_submitted: 0, projects_completed: 0 });
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -2643,7 +2913,7 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
       .catch(() => setTopics([]));
   }, [subject]);
 
-  const load = useCallback(async (p = 1) => {
+  const load = useCallback(async (p = 1, currentSize = pageSize, currentSort = sortOrder) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -2654,8 +2924,9 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
       if (activeFilter) params.set('active_filter', activeFilter);
       if (inactiveFilter) params.set('inactive_filter', inactiveFilter);
       if (debouncedSearch) params.set('search', debouncedSearch);
+      if (currentSort !== 'alpha') params.set('sort_by', currentSort);
       params.set('page', String(p));
-      params.set('limit', String(STUDENTS_PAGE_SIZE));
+      params.set('limit', currentSize === -1 ? 'all' : String(currentSize));
       const res = await apiClient.get(`/facilitator/analytics/students?${params}`);
       setData(res.data.data ?? []);
       setTotal(res.data.total ?? 0);
@@ -2667,13 +2938,13 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
     } finally {
       setLoading(false);
     }
-  }, [college, batch, subject, topic, activeFilter, inactiveFilter, debouncedSearch]);
+  }, [college, batch, subject, topic, activeFilter, inactiveFilter, debouncedSearch, pageSize, sortOrder]);
 
   const handlePageChange = (p: number) => { setPage(p); load(p); };
 
   useEffect(() => { setPage(1); load(1); }, [load]);
 
-  const totalPages = Math.ceil(total / STUDENTS_PAGE_SIZE);
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 min-w-0">
@@ -2727,24 +2998,44 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs min-w-0">
         <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           <h3 className="text-xs sm:text-sm font-semibold text-slate-700">Per-Student Performance</h3>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search students..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[36px]"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs w-4 h-4 flex items-center justify-center rounded-full hover:bg-slate-100"
-                title="Clear search"
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search students..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[36px]"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs w-4 h-4 flex items-center justify-center rounded-full hover:bg-slate-100"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            <div className="relative shrink-0">
+              <select
+                value={sortOrder}
+                onChange={(e) => {
+                  const next = e.target.value as 'alpha' | 'score_desc' | 'score_asc';
+                  setSortOrder(next);
+                  setPage(1);
+                  load(1, pageSize, next);
+                }}
+                className="w-full sm:w-auto text-xs sm:text-sm font-medium border border-slate-200 bg-white rounded-lg px-3 py-2 text-slate-700 min-h-[36px] focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                aria-label="Sort student performance"
               >
-                ×
-              </button>
-            )}
+                <option value="alpha">Sort: Name (A → Z)</option>
+                <option value="score_desc">Sort: Progress (Highest first)</option>
+                <option value="score_asc">Sort: Progress (Lowest first)</option>
+              </select>
+            </div>
           </div>
         </div>
         
@@ -2808,10 +3099,88 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
               <table className="w-full text-xs sm:text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100 text-left text-[11px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   <tr>
-                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">Student</th>
-                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">Quizzes</th>
-                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">Assignment</th>
-                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">Project</th>
+                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = sortOrder === 'alpha' ? 'score_desc' : 'alpha';
+                          setSortOrder(next);
+                          setPage(1);
+                          load(1, pageSize, next);
+                        }}
+                        className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                        title="Toggle alphabetical / progress sort"
+                      >
+                        <span>Student</span>
+                        {sortOrder === 'alpha' && <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />}
+                      </button>
+                    </th>
+                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = sortOrder === 'score_desc' ? 'score_asc' : sortOrder === 'score_asc' ? 'alpha' : 'score_desc';
+                          setSortOrder(next);
+                          setPage(1);
+                          load(1, pageSize, next);
+                        }}
+                        className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                        title="Sort by overall progress: Highest -> Lowest -> Alphabetical"
+                      >
+                        <span>Quizzes</span>
+                        {sortOrder === 'score_desc' ? (
+                          <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : sortOrder === 'score_asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = sortOrder === 'score_desc' ? 'score_asc' : sortOrder === 'score_asc' ? 'alpha' : 'score_desc';
+                          setSortOrder(next);
+                          setPage(1);
+                          load(1, pageSize, next);
+                        }}
+                        className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                        title="Sort by overall progress: Highest -> Lowest -> Alphabetical"
+                      >
+                        <span>Assignment</span>
+                        {sortOrder === 'score_desc' ? (
+                          <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : sortOrder === 'score_asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-4 sm:px-5 py-3.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = sortOrder === 'score_desc' ? 'score_asc' : sortOrder === 'score_asc' ? 'alpha' : 'score_desc';
+                          setSortOrder(next);
+                          setPage(1);
+                          load(1, pageSize, next);
+                        }}
+                        className="inline-flex items-center gap-1.5 hover:text-slate-900 transition-colors cursor-pointer select-none"
+                        title="Sort by overall progress: Highest -> Lowest -> Alphabetical"
+                      >
+                        <span>Project</span>
+                        {sortOrder === 'score_desc' ? (
+                          <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : sortOrder === 'score_asc' ? (
+                          <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                        )}
+                      </button>
+                    </th>
                     <th className="px-4 sm:px-5 py-3.5 text-right whitespace-nowrap"></th>
                   </tr>
                 </thead>
@@ -2885,10 +3254,23 @@ export function StudentsTab({ colleges, batches, subjects }: { colleges: College
                 </tbody>
               </table>
             </div>
-            {totalPages > 1 && (
+            {total > 0 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-                <span>{total} students · page {page} of {totalPages}</span>
-                <PaginationControls page={page} totalPages={totalPages} onPageChange={handlePageChange} />
+                <span>
+                  Showing {pageSize === -1 ? 1 : (page - 1) * pageSize + 1}–{pageSize === -1 ? total : Math.min(page * pageSize, total)} of {total} students · page {page} of {totalPages}
+                </span>
+                <PaginationControls
+                  page={page}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                  pageSize={pageSize}
+                  onPageSizeChange={(newSize) => {
+                    setPageSize(newSize);
+                    setPage(1);
+                    load(1, newSize);
+                  }}
+                  pageSizeOptions={[10, 20, 50, 100, -1]}
+                />
               </div>
             )}
           </>
