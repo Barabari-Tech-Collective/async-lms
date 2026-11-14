@@ -3891,6 +3891,7 @@ exports.reEvaluateSubmission = async (req, res) => {
           testCases: Array.isArray(rawManifest) ? rawManifest : (rawManifest?.testCases || []),
           assignmentId: assignmentId,
           assignmentTitle: assignment?.title,
+          assignmentInstructions: assignment?.instructions || assignment?.description || '',
           skipCache: true,
           reEvaluate: true,
         };
