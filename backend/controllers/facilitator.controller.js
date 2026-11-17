@@ -1405,18 +1405,36 @@ exports.getAnalyticsQuizzes = async (req, res) => {
 
 exports.getCourseAssignments = async (req, res) => {
   try {
-    const { topic_id } = req.query;
-    if (!topic_id || topic_id === 'all' || topic_id.trim() === '' || !UUID_RE.test(topic_id.trim())) return res.json({ success: true, data: [] });
+    const { topic_id, subject_id } = req.query;
+    const hasTopic = topic_id && topic_id !== 'all' && topic_id.trim() !== '' && UUID_RE.test(topic_id.trim());
+    const hasSubject = subject_id && subject_id !== 'all' && subject_id.trim() !== '' && UUID_RE.test(subject_id.trim());
+
+    if (!hasTopic && !hasSubject) return res.json({ success: true, data: [] });
 
     const isFacilitator = req.user.role === 'facilitator';
     const subjectIds = req.user.subject_ids || [];
 
-    let subjectFilter = '';
-    const params = [topic_id.trim()];
     if (isFacilitator) {
       if (subjectIds.length === 0) return res.json({ success: true, data: [] });
+      if (hasSubject && !subjectIds.includes(subject_id.trim())) {
+        return res.json({ success: true, data: [] });
+      }
+    }
+
+    const params = [];
+    let whereClause = '';
+
+    if (hasTopic) {
+      params.push(topic_id.trim());
+      whereClause = `WHERE un.topic_id = $1::uuid`;
+    } else {
+      params.push(subject_id.trim());
+      whereClause = `WHERE t.subject_id = $1::uuid`;
+    }
+
+    if (isFacilitator && !hasSubject) {
       params.push(subjectIds);
-      subjectFilter = `AND t.subject_id = ANY($${params.length}::uuid[])`;
+      whereClause += ` AND t.subject_id = ANY($${params.length}::uuid[])`;
     }
 
     const { rows } = await pool.query(
@@ -1424,7 +1442,7 @@ exports.getCourseAssignments = async (req, res) => {
        FROM assignments a
        JOIN units un ON a.unit_id = un.id
        JOIN topics t ON t.id = un.topic_id
-       WHERE un.topic_id = $1::uuid ${subjectFilter}
+       ${whereClause}
        ORDER BY un.order_index, a.title`,
       params
     );

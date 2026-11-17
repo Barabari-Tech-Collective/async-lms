@@ -18,7 +18,7 @@ import { StudentCohortProgressDrawer } from './StudentCohortProgressDrawer';
 export type College = { id: string; name: string };
 export type Batch = { id: string; name: string };
 export type Subject = { id: string; name: string };
-export type Assignment = { id: string; title: string };
+export type Assignment = { id: string; title: string; topic_id?: string; course?: string; college_id?: string };
 
 export type QuizStudent = {
   id: string;
@@ -1136,29 +1136,43 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
   const [search, setSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<{ id: string; name: string; email: string } | null>(null);
 
-  // Fetch topics when subject changes
+  // Fetch topics when subject changes, and reset child filters
   useEffect(() => {
-    if (!subject) { setTopics([]); setTopic(''); return; }
+    setTopic('');
+    setAssignmentCompound('');
+    if (!subject) { setTopics([]); return; }
     apiClient.get(`/facilitator/analytics/topics?subject_id=${subject}`)
       .then(r => setTopics(r.data?.data ?? []))
       .catch(() => setTopics([]));
   }, [subject]);
 
-  // Fetch college assignments when college changes
+  // When topic changes, reset selected assignment
+  useEffect(() => {
+    setAssignmentCompound('');
+  }, [topic]);
+
+  // Fetch college assignments when college, subject, or topic changes
   useEffect(() => {
     if (!college) { setCollegeAssignments([]); return; }
-    apiClient.get(`/college-assignments/facilitator?college_id=${college}`)
+    const params = new URLSearchParams();
+    params.set('college_id', college);
+    if (subject) params.set('subject_id', subject);
+    if (topic) params.set('topic_id', topic);
+    apiClient.get(`/college-assignments/facilitator?${params}`)
       .then((r) => setCollegeAssignments(r.data?.data ?? []))
       .catch(() => setCollegeAssignments([]));
-  }, [college]);
+  }, [college, subject, topic]);
 
-  // Fetch course assignments when topic changes
+  // Fetch course assignments when subject or topic changes
   useEffect(() => {
-    if (!topic) { setCourseAssignments([]); return; }
-    apiClient.get(`/facilitator/analytics/course-assignments?topic_id=${topic}`)
+    if (!subject && !topic) { setCourseAssignments([]); return; }
+    const params = new URLSearchParams();
+    if (topic) params.set('topic_id', topic);
+    else if (subject) params.set('subject_id', subject);
+    apiClient.get(`/facilitator/analytics/course-assignments?${params}`)
       .then((r) => setCourseAssignments(r.data?.data ?? []))
       .catch(() => setCourseAssignments([]));
-  }, [topic]);
+  }, [subject, topic]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1191,10 +1205,29 @@ export function AssignmentsTab({ colleges, batches, subjects }: { colleges: Coll
     load();
   }, [load]);
 
-  const mergedAssignments = [
-    ...collegeAssignments.map(a => ({ id: `college|${a.id}`, name: `[College] ${a.title}` })),
-    ...courseAssignments.map(a => ({ id: `course|${a.id}`, name: `[Course] ${a.name}` }))
-  ];
+  const mergedAssignments = useMemo(() => {
+    const list: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+
+    for (const a of collegeAssignments) {
+      if (topic && a.topic_id && a.topic_id !== topic) continue;
+      const cid = `college|${a.id}`;
+      if (!seen.has(cid)) {
+        seen.add(cid);
+        list.push({ id: cid, name: `[College] ${a.title}` });
+      }
+    }
+
+    for (const a of courseAssignments) {
+      const cid = `course|${a.id}`;
+      if (!seen.has(cid)) {
+        seen.add(cid);
+        list.push({ id: cid, name: `[Course] ${a.name}` });
+      }
+    }
+
+    return list;
+  }, [collegeAssignments, courseAssignments, topic]);
 
   const students = data?.students || [];
 

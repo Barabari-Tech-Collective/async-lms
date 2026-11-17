@@ -252,8 +252,25 @@ exports.getMyCollegeAssignments = async (req, res) => {
 exports.manageAssignments = async (req, res) => {
   try {
     let query, values;
+    const { college_id, subject_id, topic_id } = req.query;
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     if (req.user.role === 'admin') {
+      let filterClause = '';
+      values = [];
+
+      if (college_id && college_id !== 'all' && UUID_REGEX.test(college_id.trim())) {
+        values.push(college_id.trim());
+        filterClause += ` AND ca.college_id = $${values.length}::uuid`;
+      }
+      if (topic_id && topic_id !== 'all' && UUID_REGEX.test(topic_id.trim())) {
+        values.push(topic_id.trim());
+        filterClause += ` AND ca.topic_id = $${values.length}::uuid`;
+      } else if (subject_id && subject_id !== 'all' && UUID_REGEX.test(subject_id.trim())) {
+        values.push(subject_id.trim());
+        filterClause += ` AND (ca.course = $${values.length} OR ca.course IN (SELECT slug FROM subjects WHERE id = $${values.length}::uuid) OR ca.course IN (SELECT name FROM subjects WHERE id = $${values.length}::uuid))`;
+      }
+
       query = `
         SELECT ca.id, ca.title, ca.description, ca.due_date,
                COALESCE(s.name, ca.course) AS course,
@@ -313,9 +330,24 @@ exports.manageAssignments = async (req, res) => {
           LIMIT 1
         ) e ON true
         WHERE ca.is_deleted = false AND (ca.college_id IS NULL OR (c.is_deleted = false AND c.deleted_at IS NULL))
+        ${filterClause}
         ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
-      values = [];
     } else {
+      let filterClause = '';
+      values = [req.user.id, req.user.college_ids || []];
+
+      if (college_id && college_id !== 'all' && UUID_REGEX.test(college_id.trim())) {
+        values.push(college_id.trim());
+        filterClause += ` AND ca.college_id = $${values.length}::uuid`;
+      }
+      if (topic_id && topic_id !== 'all' && UUID_REGEX.test(topic_id.trim())) {
+        values.push(topic_id.trim());
+        filterClause += ` AND ca.topic_id = $${values.length}::uuid`;
+      } else if (subject_id && subject_id !== 'all' && UUID_REGEX.test(subject_id.trim())) {
+        values.push(subject_id.trim());
+        filterClause += ` AND (ca.course = $${values.length} OR ca.course IN (SELECT slug FROM subjects WHERE id = $${values.length}::uuid) OR ca.course IN (SELECT name FROM subjects WHERE id = $${values.length}::uuid))`;
+      }
+
       // Facilitator: assignments they created OR assignments for their assigned colleges
       query = `
         SELECT ca.id, ca.title, ca.description, ca.due_date,
@@ -378,8 +410,8 @@ exports.manageAssignments = async (req, res) => {
         WHERE (ca.created_by = $1 OR ca.college_id = ANY($2::uuid[])) 
           AND ca.is_deleted = false 
           AND (ca.college_id IS NULL OR (c.is_deleted = false AND c.deleted_at IS NULL))
+          ${filterClause}
         ORDER BY ca.created_at DESC, c.name ASC, ca.due_date ASC NULLS LAST`;
-      values = [req.user.id, req.user.college_ids || []];
     }
 
     const { rows } = await pool.query(query, values);

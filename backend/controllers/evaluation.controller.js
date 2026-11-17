@@ -1422,10 +1422,10 @@ exports.syncEvaluationStatus = async (req, res) => {
       try {
         if (!job.status_url && !job.job_id) {
           // Job has no status URL — it was never queued.
-          // Auto-fail after 10 minutes so the UI stops polling.
+          // Auto-fail after 3 minutes so the UI stops polling.
           const createdAtTime = job.created_at ? new Date(job.created_at).getTime() : Date.now();
           const ageMinutes = (Date.now() - createdAtTime) / 60000;
-          if (ageMinutes > 10) {
+          if (ageMinutes > 3) {
             const failFeedback = JSON.stringify({
               summary: 'This submission was not sent to the grader (submitted after evaluation started). Please use "Evaluate Selected" to re-evaluate this student.',
               strengths: [],
@@ -1457,9 +1457,60 @@ exports.syncEvaluationStatus = async (req, res) => {
           } catch {}
         }
 
-        if (!jobData) continue;
+        const isNotFound = !jobData || jobData.state === 'not_found' || jobData.status === 'not_found';
+        if (isNotFound) {
+          // If the evaluator has no record of this job (it was purged by Redis or failed to register),
+          // check its age. Give a generous 15-minute window for large cohorts.
+          const createdAtTime = job.created_at ? new Date(job.created_at).getTime() : Date.now();
+          const ageMinutes = (Date.now() - createdAtTime) / 60000;
+          if (ageMinutes > 15) {
+            console.warn(`[Sync] Job ${job.job_id || job.id} not found in evaluator queue after ${ageMinutes.toFixed(1)} mins. Marking failed.`);
+            const failFeedback = JSON.stringify({
+              summary: 'Evaluation worker timed out or job expired from queue. Please use "Evaluate Selected" to re-evaluate this student.',
+              strengths: [],
+              issues: ['Evaluation job not found in queue or worker timed out'],
+              breakdown: [],
+            });
+            await pool.query(
+              `UPDATE evaluation_results SET status = 'failed', marks = 0, feedback = $1::jsonb WHERE id = $2`,
+              [failFeedback, job.id],
+            );
+            newlyCompleted++;
+          }
+          continue;
+        }
 
         const jobState = jobData.status || jobData.state;
+
+        // Queue Resilience: Distinguish between 'active' (worker executing) and 'waiting' (queued in line).
+        // In a cohort of 150+ submissions, healthy jobs naturally wait in BullMQ for 10-20 minutes.
+        // DO NOT prematurely fail jobs that are legitimately waiting in line!
+        // Only auto-fail if:
+        // 1) Job is 'active' (in execution) for > 5 minutes measured from execution start (worker hung / stalled)
+        // 2) Job has been in queue for > 35 minutes (queue completely dead)
+        if (jobState !== 'completed' && jobState !== 'failed') {
+          const createdAtTime = job.created_at ? new Date(job.created_at).getTime() : Date.now();
+          const ageMinutes = (Date.now() - createdAtTime) / 60000;
+          const activeDurationMinutes = jobData.processedOn ? (Date.now() - jobData.processedOn) / 60000 : null;
+          const isStalledActive = (jobState === 'active' && (activeDurationMinutes !== null ? activeDurationMinutes > 5 : ageMinutes > 35));
+          const isQueueDead = ageMinutes > 35;
+
+          if (isStalledActive || isQueueDead) {
+            console.warn(`[Sync] Job ${job.job_id || job.id} stuck in '${jobState}' state (age: ${ageMinutes.toFixed(1)}m, active: ${activeDurationMinutes !== null ? activeDurationMinutes.toFixed(1) + 'm' : 'unknown'}). Auto-failing.`);
+            const failFeedback = JSON.stringify({
+              summary: `Evaluation worker timed out after ${ageMinutes.toFixed(0)} minutes in state '${jobState}'. Please use "Evaluate Selected" to retry.`,
+              strengths: [],
+              issues: [`Evaluation worker timed out in state: ${jobState}`],
+              breakdown: [],
+            });
+            await pool.query(
+              `UPDATE evaluation_results SET status = 'failed', marks = 0, feedback = $1::jsonb WHERE id = $2`,
+              [failFeedback, job.id],
+            );
+            newlyCompleted++;
+          }
+          continue;
+        }
 
         if (jobState === 'completed' || jobState === 'failed') {
           console.log(`Job ${job.id} state: ${jobState}`);
@@ -3757,7 +3808,7 @@ exports.reEvaluateSubmission = async (req, res) => {
         }));
 
         let batchSucceeded = false;
-        const CHUNK_SIZE = 15;
+        const CHUNK_SIZE = 25;
         const submissionChunks = [];
         for (let i = 0; i < validSubmissions.length; i += CHUNK_SIZE) {
           submissionChunks.push(validSubmissions.slice(i, i + CHUNK_SIZE));
@@ -3797,7 +3848,7 @@ exports.reEvaluateSubmission = async (req, res) => {
             });
 
             if (submissionChunks.length > 1) {
-              await new Promise((r) => setTimeout(r, 200));
+              await new Promise((r) => setTimeout(r, 50));
             }
           }
           batchSucceeded = true;
