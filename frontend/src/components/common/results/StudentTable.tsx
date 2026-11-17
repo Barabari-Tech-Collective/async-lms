@@ -102,7 +102,17 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
 
   const getConciseFailureBadge = (item: any): string => {
     const reason = (getFailureReason(item) || '').toLowerCase();
-    if (reason.includes('permission') || reason.includes('access') || reason.includes('private') || reason.includes('restricted') || reason.includes('anyone with the link')) {
+    const isInternalException = reason.includes('exception') || reason.includes('cannot access local variable') || reason.includes('inspection failed');
+    if (!isInternalException && (
+      reason.includes('permission') ||
+      reason.includes('access denied') ||
+      reason.includes('access restricted') ||
+      reason.includes('unauthorized') ||
+      reason.includes('forbidden') ||
+      reason.includes('private') ||
+      reason.includes('restricted') ||
+      reason.includes('anyone with the link')
+    )) {
       return 'Permission Denied';
     }
     if (reason.includes('google drive') || reason.includes('drive.google') || reason.includes('download')) {
