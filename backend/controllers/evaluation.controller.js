@@ -3825,7 +3825,7 @@ exports.reEvaluateSubmission = async (req, res) => {
                 issues: [errMsg],
                 breakdown: [],
               });
-              await client.query(
+              await pool.query(
                 `UPDATE evaluation_results 
                  SET status = 'failed', marks = 0, feedback = $1::jsonb 
                  WHERE evaluation_id = $2 AND submission_id = $3`,
