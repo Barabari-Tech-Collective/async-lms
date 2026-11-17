@@ -3757,37 +3757,49 @@ exports.reEvaluateSubmission = async (req, res) => {
         }));
 
         let batchSucceeded = false;
+        const CHUNK_SIZE = 15;
+        const submissionChunks = [];
+        for (let i = 0; i < validSubmissions.length; i += CHUNK_SIZE) {
+          submissionChunks.push(validSubmissions.slice(i, i + CHUNK_SIZE));
+        }
+
         try {
-          const batchPayload = {
-            type: 'excel',
-            submissions: await Promise.all(
-              validSubmissions.map(async (s) => ({
-                submissionId: s.submission_id || s.id,
-                fileUrl: await getSpreadsheetDownloadUrl(s),
-                studentName: s.student_name,
-                studentId: s.user_id || s.student_id,
-              }))
-            ),
-            rubric: formattedRubric,
-            testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
-            assignmentId: assignmentId,
-            skipCache: true,
-            reEvaluate: true,
-          };
+          for (const chunk of submissionChunks) {
+            const batchPayload = {
+              type: 'excel',
+              submissions: await Promise.all(
+                chunk.map(async (s) => ({
+                  submissionId: s.submission_id || s.id,
+                  fileUrl: await getSpreadsheetDownloadUrl(s),
+                  studentName: s.student_name,
+                  studentId: s.user_id || s.student_id,
+                }))
+              ),
+              rubric: formattedRubric,
+              testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
+              assignmentId: assignmentId,
+              skipCache: true,
+              reEvaluate: true,
+            };
 
-          const response = await postToEvaluatorWithRetry(evaluatorUrl, batchPayload, {
-            headers: { 'x-api-key': evaluatorApiKey },
-            timeout: 45000,
-          });
-
-          const jobs = response.data.jobs || [response.data];
-          jobs.forEach((job, index) => {
-            jobIdsAndLinks.push({
-              jobId: job.jobId || job.id,
-              statusUrl: job.statusUrl,
-              submissionId: validSubmissions[index].submission_id || validSubmissions[index].id,
+            const response = await postToEvaluatorWithRetry(evaluatorUrl, batchPayload, {
+              headers: { 'x-api-key': evaluatorApiKey },
+              timeout: 45000,
             });
-          });
+
+            const jobs = response.data.jobs || [response.data];
+            jobs.forEach((job, index) => {
+              jobIdsAndLinks.push({
+                jobId: job.jobId || job.id,
+                statusUrl: job.statusUrl,
+                submissionId: chunk[index].submission_id || chunk[index].id,
+              });
+            });
+
+            if (submissionChunks.length > 1) {
+              await new Promise((r) => setTimeout(r, 200));
+            }
+          }
           batchSucceeded = true;
         } catch (batchErr) {
           console.warn('Batch Excel re-evaluation dispatch failed, falling back to isolated per-submission dispatch:', batchErr.message);
