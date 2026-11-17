@@ -10,11 +10,9 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b-2 border-teal-600 pb-0.5 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '2px solid #0d9488',
-        paddingBottom: '2px',
-        marginBottom: '6px',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
@@ -27,13 +25,25 @@ function SectionHeading({ title }: { title: string }) {
           letterSpacing: '0.12em',
           color: '#134e4a',
           textTransform: 'uppercase',
-          lineHeight: '1.35',
+          lineHeight: '1.25',
           margin: 0,
           padding: 0,
+          display: 'block',
         }}
       >
         {title}
       </h2>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '0px',
+          borderTop: '2px solid #0d9488',
+          marginTop: '6px',
+          marginBottom: '8px',
+        }}
+      />
     </div>
   );
 }
@@ -153,9 +163,7 @@ export function PhotoModernTemplate({
     projects: () =>
       data.projects?.length > 0 ? (
         <section className='mb-3'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-3 font-mono'>
-            KEY PROJECTS & DEPLOYMENTS
-          </h2>
+          <SectionHeading title='KEY PROJECTS & DEPLOYMENTS' />
           <div className='space-y-2'>
             {data.projects.map((proj, pIdx) => (
               <div key={proj.id || pIdx} className='border-l-2 border-teal-600 pl-3 py-0.5 page-break-inside-avoid'>
@@ -215,9 +223,7 @@ export function PhotoModernTemplate({
     experience: () =>
       data.experience && data.experience.length > 0 ? (
         <section className='mb-3'>
-          <h2 className='text-[11.5px] font-black tracking-widest text-teal-800 uppercase border-b-2 border-teal-600 pb-1 mb-3 font-mono'>
-            PROFESSIONAL EXPERIENCE
-          </h2>
+          <SectionHeading title='PROFESSIONAL EXPERIENCE' />
           <div className='space-y-4'>
             {data.experience.map((exp, expIdx) => (
               <div key={exp.id || expIdx} className='border-l-2 border-teal-600 pl-3 py-0.5 page-break-inside-avoid'>

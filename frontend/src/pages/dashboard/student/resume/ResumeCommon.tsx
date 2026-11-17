@@ -9,6 +9,8 @@ import {
   X,
   Camera,
   User,
+  Pencil,
+  AlertCircle,
 } from 'lucide-react';
 import type {
   ResumePersonalInfo,
@@ -254,21 +256,44 @@ export function AvatarPhoto({
     .map((p) => p[0].toUpperCase())
     .join('');
 
+  useEffect(() => {
+    if (!url || typeof url !== 'string' || url.trim().length <= 10) return;
+    setImgError(false);
+    const testImg = new Image();
+    testImg.onload = () => setImgError(false);
+    testImg.onerror = () => setImgError(true);
+    testImg.src = url;
+  }, [url]);
+
   const hasPhoto = Boolean(url && typeof url === 'string' && url.trim().length > 10 && !imgError);
 
   return (
     <div className={`relative group shrink-0 ${className}`}>
       <div
+        data-avatar-container
         className={`${sizeClasses[size]} rounded-full overflow-hidden border-2 shadow-xs bg-slate-100 flex items-center justify-center transition-all`}
-        style={{ borderColor: borderColor }}
+        style={{
+          borderColor: borderColor,
+          ...(hasPhoto
+            ? {
+                backgroundImage: `url("${url}")`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center center',
+                backgroundRepeat: 'no-repeat',
+              }
+            : {}),
+        }}
       >
         {hasPhoto ? (
           <img
             src={url}
             alt={name || 'Profile'}
-            className='w-full h-full object-cover'
+            data-avatar-hidden-img
+            className='w-0 h-0 opacity-0 pointer-events-none select-none overflow-hidden absolute'
+            style={{ display: 'none' }}
             onError={() => setImgError(true)}
             loading='eager'
+            crossOrigin='anonymous'
           />
         ) : (
           <div className='w-full h-full bg-slate-200 text-slate-600 font-bold flex items-center justify-center'>
@@ -414,7 +439,8 @@ export function ContactLinksRow({
           }`}
           title='Edit Contact Details & Links'
         >
-          <span>✏️ Edit Links</span>
+          <Pencil size={11} className='shrink-0' />
+          <span>Edit Links</span>
         </button>
       )}
     </div>
@@ -593,8 +619,9 @@ export function ContactPhotoModal({
               className='w-full border border-slate-200 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-[#333d7c]'
             />
             {linkedin.includes('/feed') && (
-              <p className='text-[10.5px] text-amber-600 font-medium mt-0.5'>
-                ⚠️ Feed URL detected. Use your public profile URL: https://linkedin.com/in/username
+              <p className='text-[10.5px] text-amber-600 font-medium mt-0.5 flex items-center gap-1'>
+                <AlertCircle size={11} className='shrink-0' />
+                <span>Feed URL detected. Use your public profile URL: https://linkedin.com/in/username</span>
               </p>
             )}
           </div>

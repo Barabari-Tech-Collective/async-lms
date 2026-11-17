@@ -8,6 +8,7 @@ import {
   MapPin,
   Linkedin,
   Globe,
+  Pencil,
 } from 'lucide-react';
 import type { ResumeDocument, Section } from '../types';
 import { formatHref, getResolvedSectionOrder } from '../resumeUtils';
@@ -33,11 +34,9 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b border-slate-200 pb-0.5 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '1px solid #e2e8f0',
-        paddingBottom: '2px',
-        marginBottom: '6px',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
@@ -57,6 +56,17 @@ function SectionHeading({ title }: { title: string }) {
       >
         {title}
       </h2>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '0px',
+          borderTop: '1px solid #e2e8f0',
+          marginTop: '6px',
+          marginBottom: '8px',
+        }}
+      />
     </div>
   );
 }
@@ -244,9 +254,10 @@ export function AtlanticSidebarTemplate({
                 <button
                   type='button'
                   onClick={onEditLinks}
-                  className='mt-2 inline-flex items-center gap-1 text-[10.5px] font-bold text-sky-300 hover:text-white bg-white/10 px-2.5 py-1 rounded-md transition-colors print:hidden'
+                  className='mt-2 inline-flex items-center gap-1.5 text-[10.5px] font-bold text-sky-300 hover:text-white bg-white/10 px-2.5 py-1 rounded-md transition-colors print:hidden'
                 >
-                  ✏️ Edit Links & Photo
+                  <Pencil size={11} />
+                  <span>Edit Links & Photo</span>
                 </button>
               )}
             </div>

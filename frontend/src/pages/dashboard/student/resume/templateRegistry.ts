@@ -83,19 +83,6 @@ export const RESUME_TEMPLATES: ResumeTemplateMeta[] = [
     badgeText: '1-Page Density',
   },
   {
-    id: 'creative-cobalt',
-    name: 'Cobalt Edge',
-    flowcvName: 'Cobalt Edge',
-    headline: 'Vibrant Frontend & Portfolio Showcase',
-    recommendedFor: 'Design & Creative',
-    description:
-      'Vibrant cobalt & indigo accents with modern rounded pill tags for tools/frameworks. Highlights live demo URLs, Figma prototypes, and portfolio links for UI/UX & Frontend devs.',
-    layoutType: 'single-column',
-    fontFamily: 'sans',
-    accentColor: '#2563eb',
-    badgeText: 'UI/UX & Frontend',
-  },
-  {
     id: 'minimal-slate',
     name: 'Clean Slate',
     flowcvName: 'Clean Slate',

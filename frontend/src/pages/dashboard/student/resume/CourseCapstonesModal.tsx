@@ -10,6 +10,9 @@ import {
   Award,
   GraduationCap,
   Loader2,
+  BarChart3,
+  Globe,
+  Coffee,
 } from 'lucide-react';
 import type { ResumeProject, CourseCapstoneItem } from './types';
 import { detectRoleTrack, TRACK_METADATA } from './resumeRoleMatcher';
@@ -201,13 +204,14 @@ export const CourseCapstonesModal: React.FC<CourseCapstonesModalProps> = ({
           {/* Category Tabs */}
           <div className='flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none'>
             {[
-              { id: 'recommended', label: '🎯 Recommended for You' },
-              { id: 'tech', label: '💻 Web & Full-Stack' },
-              { id: 'java', label: '☕ Java Programming' },
-              { id: 'data', label: '📊 Excel & Data Analysis' },
-              { id: 'enrolled', label: '📚 In My Enrolled Courses' },
-              { id: 'all', label: `🌐 All CodeGuru Projects (${capstones.length})` },
+              { id: 'recommended', label: 'Recommended for You', icon: Sparkles },
+              { id: 'tech', label: 'Web & Full-Stack', icon: Code2 },
+              { id: 'java', label: 'Java Programming', icon: Coffee },
+              { id: 'data', label: 'Excel & Data Analysis', icon: BarChart3 },
+              { id: 'enrolled', label: 'In My Enrolled Courses', icon: BookOpen },
+              { id: 'all', label: `All CodeGuru Projects (${capstones.length})`, icon: Globe },
             ].map((tab) => {
+              const IconComp = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
@@ -215,13 +219,14 @@ export const CourseCapstonesModal: React.FC<CourseCapstonesModalProps> = ({
                   type='button'
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    'px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-all cursor-pointer',
+                    'px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-all cursor-pointer inline-flex items-center gap-1.5',
                     isActive
                       ? 'bg-[#1F285B] text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
                   )}
                 >
-                  {tab.label}
+                  <IconComp size={13} className={isActive ? 'text-white' : 'text-slate-500'} />
+                  <span>{tab.label}</span>
                 </button>
               );
             })}

@@ -341,7 +341,7 @@ export const CATEGORY_CONFIGS: Record<ResumeCategory, CategoryConfig> = {
       'Design Systems Specialist',
       'Graphic / Visual Designer',
     ],
-    recommendedTemplate: 'creative-cobalt',
+    recommendedTemplate: 'photo-modern',
     accentColor: '#9333ea',
     badgeBg: 'bg-purple-50',
     badgeText: 'text-purple-800',
@@ -560,6 +560,7 @@ export interface ResumeListItem {
   updated_at: string;
   status?: 'draft' | 'completed';
   is_completed?: boolean;
+  document?: ResumeDocument;
 }
 
 export interface ResumeRecord {

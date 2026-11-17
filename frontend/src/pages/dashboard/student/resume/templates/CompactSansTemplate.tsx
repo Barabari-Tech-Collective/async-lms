@@ -10,11 +10,9 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b border-slate-400 pb-0.5 mb-1.5'
+      className='mb-1.5'
       style={{
-        borderBottom: '1px solid #475569',
-        paddingBottom: '2px',
-        marginBottom: '6px',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
@@ -27,13 +25,25 @@ function SectionHeading({ title }: { title: string }) {
           letterSpacing: '0.12em',
           color: '#0f172a',
           textTransform: 'uppercase',
-          lineHeight: '1.35',
+          lineHeight: '1.25',
           margin: 0,
           padding: 0,
+          display: 'block',
         }}
       >
         {title}
       </h2>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '0px',
+          borderTop: '1px solid #475569',
+          marginTop: '6px',
+          marginBottom: '8px',
+        }}
+      />
     </div>
   );
 }
@@ -182,9 +192,7 @@ export function CompactSansTemplate({
           if (!data.projects?.length) return null;
           return (
             <section key='projects' className='mb-3'>
-              <h2 className='text-[10.5px] font-black tracking-widest text-slate-900 uppercase border-b border-slate-300 pb-0.5 mb-2 font-mono'>
-                PROJECTS
-              </h2>
+              <SectionHeading title='PROJECTS' />
               <div className='space-y-2.5'>
                 {data.projects.map((proj, pIdx) => (
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>
@@ -340,9 +348,7 @@ export function CompactSansTemplate({
           if (!data.events?.length) return null;
           return (
             <section key='events' className='mb-4'>
-              <h2 className='text-[11px] font-black tracking-widest text-slate-800 uppercase border-b border-slate-300 pb-0.5 mb-1.5 font-mono'>
-                WORKSHOPS & EVENTS
-              </h2>
+              <SectionHeading title='WORKSHOPS & EVENTS' />
               <div className='space-y-2 text-[11.5px]'>
                 {data.events.map((evt, eIdx) => (
                   <div key={evt.id || eIdx} className='page-break-inside-avoid'>

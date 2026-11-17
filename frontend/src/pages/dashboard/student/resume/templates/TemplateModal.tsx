@@ -2,11 +2,12 @@ import { useState } from 'react';
 import {
   Check,
   X,
-  Zap,
   Eye,
+  Palette,
 } from 'lucide-react';
 import { RESUME_TEMPLATES } from '../templateRegistry';
 import { TemplateQuickPreviewModal } from './TemplateQuickPreviewModal';
+import { A4ScaledDocumentThumbnail } from './A4ScaledDocumentThumbnail';
 
 interface TemplateModalProps {
   isOpen: boolean;
@@ -73,7 +74,7 @@ export function TemplateModal({
           <div>
             <div className='flex items-center gap-2'>
               <div className='w-8 h-8 rounded-lg bg-[#333d7c]/10 text-[#333d7c] flex items-center justify-center font-bold'>
-                🎨
+                <Palette size={16} className='text-[#333d7c]' />
               </div>
               <div>
                 <h2 className='font-bold text-[#1e2653] text-base sm:text-lg'>
@@ -128,155 +129,35 @@ export function TemplateModal({
                       : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  {/* Miniature Visual Layout Mockup */}
-                  <div
-                    className='h-32 p-3 border-b flex flex-col justify-between transition-colors'
-                    style={{
-                      backgroundColor:
-                        tpl.layoutType === 'two-column-sidebar'
-                          ? '#f8fafc'
-                          : tpl.id === 'executive-serif'
-                          ? '#fafaf9'
-                          : tpl.id === 'editorial-rule'
-                          ? '#fefce8'
-                          : '#f1f5f9',
-                    }}
-                  >
-                    {/* Top bar indicators */}
-                    <div className='flex items-center justify-between'>
-                      <span className='px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white/90 text-slate-700 shadow-2xs'>
-                        {tpl.name}
-                      </span>
-                      <div className='flex items-center gap-1.5'>
-                        <button
-                          type='button'
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPreviewTemplateId(tpl.id);
-                          }}
-                          className='px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/90 hover:bg-white text-slate-700 hover:text-[#1e2653] shadow-2xs transition-colors inline-flex items-center gap-1'
-                          title='Quick Preview full sheet'
-                        >
-                          <Eye size={11} />
-                          <span>Preview</span>
-                        </button>
-                        {isSelected ? (
-                          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#333d7c] text-white shadow-2xs'>
-                            <Check size={11} />
-                            Active
-                          </span>
-                        ) : tpl.popular ? (
-                          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-500 text-white shadow-2xs'>
-                            <Zap size={10} />
-                            Popular
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {/* Miniature Wireframe */}
-                    <div className='bg-white rounded-md border border-slate-200/80 p-2 shadow-2xs flex-1 my-1.5 flex gap-2 overflow-hidden text-[6px] select-none'>
-                      {tpl.layoutType === 'two-column-sidebar' ? (
-                        <>
-                          <div className='w-1/3 bg-[#1e2653] rounded p-1 flex flex-col gap-0.5 text-white'>
-                            <div className='w-3.5 h-3.5 rounded-full bg-white/30 border border-white/50 mx-auto' />
-                            <div className='text-center font-bold text-[5px] text-white/90 truncate'>Alex Chen</div>
-                            <div className='w-full h-[0.5px] bg-white/30 my-0.5' />
-                            <div className='text-[4.5px] font-bold text-white/80 uppercase'>Skills</div>
-                            <div className='space-y-0.5'>
-                              <div className='h-1 bg-white/40 rounded-xs w-full' />
-                              <div className='h-1 bg-white/40 rounded-xs w-4/5' />
-                            </div>
-                          </div>
-                          <div className='w-2/3 flex flex-col gap-0.5 py-0.5'>
-                            <div className='font-bold text-[6px] text-slate-800 border-b border-slate-200 pb-0.5'>
-                              PROJECTS
-                            </div>
-                            <div className='font-semibold text-[5.5px] text-slate-700 flex justify-between'>
-                              <span>CodeGuru LMS</span>
-                              <span className='text-[4.5px] text-slate-400'>2026</span>
-                            </div>
-                            <div className='h-1 bg-slate-200 rounded-xs w-full' />
-                            <div className='font-bold text-[6px] text-slate-800 border-b border-slate-200 pb-0.5 mt-0.5'>
-                              EDUCATION
-                            </div>
-                            <div className='h-1 bg-slate-200 rounded-xs w-4/5' />
-                          </div>
-                        </>
-                      ) : tpl.layoutType === 'photo-centric' ? (
-                        <div className='w-full flex flex-col gap-1'>
-                          <div className='flex items-center gap-1.5 pb-0.5 border-b border-slate-100'>
-                            <div className='w-4 h-4 rounded-full bg-teal-600 shrink-0 flex items-center justify-center text-[5px] font-bold text-white'>
-                              AC
-                            </div>
-                            <div className='flex-1 min-w-0'>
-                              <div className='font-bold text-[6.5px] text-slate-800 truncate'>Alex Chen</div>
-                              <div className='text-[5px] text-teal-700 truncate'>Tech Consultant</div>
-                            </div>
-                          </div>
-                          <div className='font-bold text-[5.5px] text-slate-800 uppercase tracking-wider'>
-                            CAPSTONE & PROJECTS
-                          </div>
-                          <div className='h-1 bg-slate-200 rounded-xs w-full' />
-                          <div className='h-1 bg-slate-200 rounded-xs w-4/5' />
-                        </div>
-                      ) : tpl.id === 'executive-serif' || tpl.id === 'ivy-standard' ? (
-                        <div className='w-full flex flex-col items-center gap-0.5 font-serif'>
-                          <div className='font-bold text-[7px] text-slate-900 uppercase tracking-wider'>
-                            ALEX CHEN
-                          </div>
-                          <div className='text-[4.5px] text-slate-500'>Email • Phone • Location</div>
-                          <div className='w-full border-b border-slate-800 my-0.5' />
-                          <div className='w-full flex justify-between text-[5.5px] font-bold text-slate-800 border-b border-slate-200 pb-0.5'>
-                            <span>EDUCATION</span>
-                            <span className='font-normal text-[4.5px]'>2022-2026</span>
-                          </div>
-                          <div className='w-full flex justify-between text-[5.5px] font-bold text-slate-800 border-b border-slate-200 pb-0.5 mt-0.5'>
-                            <span>PROJECTS</span>
-                            <span className='font-normal text-[4.5px]'>CodeGuru</span>
-                          </div>
-                          <div className='h-1 bg-slate-200 rounded-xs w-full' />
-                        </div>
-                      ) : tpl.id === 'editorial-rule' ? (
-                        <div className='w-full flex flex-col gap-0.5'>
-                          <div className='w-full h-1 bg-amber-700 rounded-xs' />
-                          <div className='font-bold text-[6.5px] text-slate-900'>Alex Chen</div>
-                          <div className='bg-amber-50 border border-amber-200/60 rounded px-1 py-0.5 text-[4.5px] text-amber-900'>
-                            Executive Summary: 40% performance improvement...
-                          </div>
-                          <div className='font-bold text-[5.5px] text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-0.5'>
-                            KEY METRICS & PROJECTS
-                          </div>
-                          <div className='h-1 bg-slate-200 rounded-xs w-full' />
-                        </div>
-                      ) : (
-                        <div className='w-full flex flex-col gap-0.5'>
-                          <div className='flex justify-between items-baseline border-b pb-0.5' style={{ borderColor: `${tpl.accentColor}40` }}>
-                            <div className='font-bold text-[6.5px] text-slate-900'>Alex Chen</div>
-                            <div className='text-[4.5px] font-bold' style={{ color: tpl.accentColor }}>ATS 98%</div>
-                          </div>
-                          <div className='font-bold text-[5.5px] text-slate-800 uppercase tracking-wider'>
-                            {tpl.id === 'first-job-fresh' ? 'EDUCATION & CAPSTONES' : 'SKILLS & PROJECTS'}
-                          </div>
-                          <div className='flex gap-0.5'>
-                            {['React', 'Node.js', 'SQL'].map((s) => (
-                              <span key={s} className='px-1 py-0.2 rounded-2xs text-[4.5px] bg-slate-100 border text-slate-700'>
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                          <div className='h-1 bg-slate-200 rounded-xs w-full mt-0.5' />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Format style pill */}
-                    <div className='flex items-center justify-between text-[10px] text-slate-500'>
-                      <span className='font-medium'>{tpl.headline}</span>
-                      <span
-                        className='w-2.5 h-2.5 rounded-full border border-white'
-                        style={{ backgroundColor: tpl.accentColor }}
+                  {/* Miniature Real Document Sheet - Google Docs Style */}
+                  <div className='h-52 p-3 bg-slate-50/80 border-b border-slate-100 flex items-center justify-center relative overflow-hidden'>
+                    <div className='rounded-[2px] border border-slate-300 shadow-xs overflow-hidden bg-white group-hover:border-[#1a73e8] transition-colors'>
+                      <A4ScaledDocumentThumbnail
+                        templateId={tpl.id}
+                        width={132}
+                        height={186}
                       />
+                    </div>
+                    {/* Action buttons */}
+                    <div className='absolute top-2 right-2 flex items-center gap-1.5'>
+                      <button
+                        type='button'
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewTemplateId(tpl.id);
+                        }}
+                        className='px-2 py-1 rounded text-[10px] font-semibold bg-white/95 hover:bg-white text-slate-700 hover:text-[#1e2653] shadow-xs border border-slate-200 transition-colors inline-flex items-center gap-1 cursor-pointer'
+                        title='Quick Preview full sheet'
+                      >
+                        <Eye size={11} />
+                        <span>Preview</span>
+                      </button>
+                      {isSelected && (
+                        <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#333d7c] text-white shadow-2xs'>
+                          <Check size={11} />
+                          Active
+                        </span>
+                      )}
                     </div>
                   </div>
 

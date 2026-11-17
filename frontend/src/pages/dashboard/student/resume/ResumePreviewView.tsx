@@ -25,6 +25,11 @@ import {
   MessageSquare,
   FileDown,
   MoreHorizontal,
+  Smartphone,
+  ZoomIn,
+  Scissors,
+  Link2,
+  Wand2,
 } from 'lucide-react';
 import { useRef } from 'react';
 import type { ResumeDocument as ResumeDocType, Section, ResumeMatchResult } from './types';
@@ -164,7 +169,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
           document: updated,
         });
         toast.success(nextVal ? 'Public link enabled! Anyone with link can view.' : 'Resume made private. Public link disabled.');
-      } catch (err) {
+      } catch {
         toast.error('Failed to update sharing preference');
       }
     }
@@ -207,7 +212,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
   const currentTemplate = getTemplateMeta(resumeDoc.templateId);
 
   return (
-    <div className='min-h-screen bg-[#F8FAFC] text-slate-800 pb-24 font-sans antialiased'>
+    <div className='relative min-h-screen bg-[#F8FAFC] text-slate-800 pb-24 font-sans antialiased'>
       {/* ── TOP STICKY TOOLBAR ─────────────────────────────────────────── */}
       <header className='sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs px-4 sm:px-6 py-2.5'>
         <div className='max-w-[1360px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3'>
@@ -263,10 +268,28 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
             </button>
           </div>
 
-          {/* Right: Actions (Desktop full bar + Mobile consolidated) */}
+          {/* Right: Status Badge & Mobile Actions */}
           <div className='flex items-center gap-2 self-end md:self-auto shrink-0 relative'>
-            {/* Mobile More Actions Menu Dropdown */}
-            <div className='inline-flex md:hidden items-center gap-1.5'>
+            {isMultiPage ? (
+              <span
+                className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs'
+                title='Content overflows onto Page 2'
+              >
+                <AlertCircle size={12} className='text-amber-600 shrink-0' />
+                <span>{pageCount} Pages</span>
+              </span>
+            ) : (
+              <span
+                className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs'
+                title='Fits within 1 single A4 sheet!'
+              >
+                <CheckCircle2 size={12} className='text-emerald-600 shrink-0' />
+                <span>1 Page (Fits A4 Sheet)</span>
+              </span>
+            )}
+
+            {/* Mobile Actions Drawer toggle (visible only on mobile) */}
+            <div className='inline-flex sm:hidden items-center gap-1.5'>
               <div className='relative'>
                 <button
                   type='button'
@@ -322,7 +345,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                       className='w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2'
                     >
                       <Briefcase size={13.5} className='text-indigo-600' />
-                      <span>JD Match</span>
+                      <span>Skill Match Analysis</span>
                     </button>
                     <button
                       type='button'
@@ -347,100 +370,151 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                       <Check size={13.5} className='text-emerald-600' />
                       <span>Mark Completed</span>
                     </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowMobileMore(false);
+                        onDownloadPdf();
+                      }}
+                      disabled={downloadingPdf}
+                      className='w-full px-3 py-2 text-left text-xs font-bold text-white bg-[#1e2653] hover:bg-[#252d5e] flex items-center gap-2'
+                    >
+                      <FileDown size={13.5} />
+                      <span>Download PDF</span>
+                    </button>
                   </div>
                 )}
               </div>
             </div>
-
-            {/* Desktop Full Actions (Hidden on Mobile) */}
-            <div className='hidden md:flex items-center gap-2'>
-            {/* Check Skill / JD Match */}
-            <button
-              type='button'
-              onClick={() => setShowJDModal(true)}
-              className='h-8 px-2.5 sm:px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer'
-              title='Check ATS alignment against a Job Description'
-            >
-              <Briefcase size={13.5} className='text-indigo-600 shrink-0' />
-              <span className='hidden lg:inline'>JD Match</span>
-            </button>
-
-            {/* Polish with AI */}
-            <button
-              type='button'
-              onClick={onPolishWithAI}
-              disabled={polishingWithAI}
-              className='h-8 px-2.5 sm:px-3 text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer disabled:opacity-60'
-              title='Polish summary and STAR bullet points with AI'
-            >
-              {polishingWithAI ? (
-                <Loader2 size={13.5} className='animate-spin text-indigo-700 shrink-0' />
-              ) : (
-                <Sparkles size={13.5} className='text-indigo-600 shrink-0' />
-              )}
-              <span className='hidden sm:inline'>AI Polish</span>
-            </button>
-
-            {/* Share */}
-            <button
-              type='button'
-              onClick={handleShare}
-              className='h-8 px-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer'
-              title='Share or Copy link'
-            >
-              <Share2 size={13.5} className='text-slate-600 shrink-0' />
-              <span className='hidden xl:inline'>Share</span>
-            </button>
-
-            {/* Edit Details */}
-            <button
-              type='button'
-              onClick={onBackToEditor}
-              className='h-8 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer'
-            >
-              <Pencil size={13} className='text-slate-500 shrink-0' />
-              <span>Edit</span>
-            </button>
-
-            {/* Save Completed */}
-            <button
-              type='button'
-              onClick={onSaveCompleted}
-              className='h-8 px-3 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer'
-              title='Save and mark resume as Completed'
-            >
-              <Check size={13.5} className='text-emerald-600 shrink-0' />
-              <span>Mark Done</span>
-            </button>
-
-            </div>
-
-            {/* Download PDF Primary Button */}
-            <button
-              type='button'
-              onClick={onDownloadPdf}
-              disabled={downloadingPdf}
-              className='h-8 px-3.5 text-xs font-bold text-white bg-[#1e2653] hover:bg-[#252d5e] active:scale-[0.98] rounded-lg inline-flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-60'
-              title='Download print-ready A4 PDF'
-            >
-              {downloadingPdf ? (
-                <>
-                  <Loader2 size={13.5} className='animate-spin text-white shrink-0' />
-                  <span>Preparing...</span>
-                </>
-              ) : (
-                <>
-                  <Download size={13.5} className='shrink-0' />
-                  <span>Download PDF</span>
-                </>
-              )}
-            </button>
           </div>
         </div>
       </header>
 
+      {/* ── LEFT FLOATING ACTION DOCK (Positioned 16-24px from left sidebar/corner) ── */}
+      <div
+        className='absolute left-5 top-36 bottom-8 pointer-events-none z-30 print:hidden hidden md:block'
+        style={{ left: '20px' }}
+      >
+        <aside
+          aria-label='Resume Quick Actions'
+          className='sticky top-24 pointer-events-auto flex flex-col items-center gap-3.5 select-none'
+        >
+          {/* 1. Download PDF */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={onDownloadPdf}
+              disabled={downloadingPdf}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer disabled:opacity-60'
+              aria-label='Download PDF'
+            >
+              {downloadingPdf ? (
+                <Loader2 size={19} className='animate-spin text-[#1e2653]' />
+              ) : (
+                <FileDown size={19} className='text-[#1e2653]' />
+              )}
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Download PDF</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+
+          {/* 2. Share Link */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={handleShare}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer'
+              aria-label='Share Link'
+            >
+              <Link2 size={19} className='text-[#1e2653]' />
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Share Link</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+
+          {/* 3. Polish with AI */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={onPolishWithAI}
+              disabled={polishingWithAI}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer disabled:opacity-60'
+              aria-label='Polish with AI'
+            >
+              {polishingWithAI ? (
+                <Loader2 size={19} className='animate-spin text-indigo-700' />
+              ) : (
+                <Wand2 size={19} className='text-[#1e2653]' />
+              )}
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Polish with AI</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+
+          {/* 4. Skill Match Analysis */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={() => setShowJDModal(true)}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer'
+              aria-label='Skill Match Analysis'
+            >
+              <Briefcase size={19} className='text-[#1e2653]' />
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Skill Match Analysis</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+
+          {/* 5. Edit Details */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={onBackToEditor}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer'
+              aria-label='Edit Resume'
+            >
+              <Pencil size={18} className='text-[#1e2653]' />
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Edit Resume Details</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+
+          {/* 6. Mark Completed */}
+          <div className='relative group flex items-center'>
+            <button
+              type='button'
+              onClick={onSaveCompleted}
+              className='w-11 h-11 rounded-full bg-[#E8EEFB] hover:bg-[#D5E3FB] active:scale-95 border border-[#C5D5F2] shadow-sm hover:shadow flex items-center justify-center transition-all hover:scale-105 cursor-pointer'
+              aria-label='Mark Completed'
+            >
+              <Check size={19} className='text-emerald-700' />
+            </button>
+            {/* Tooltip on Hover */}
+            <div className='absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 -translate-x-1.5 transition-all duration-200 z-50'>
+              <span>Mark as Completed</span>
+              <div className='absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-900 rotate-45' />
+            </div>
+          </div>
+        </aside>
+      </div>
+
       {/* ── MAIN A4 DOCUMENT CANVAS ───────────────────────────────────── */}
-      <main className='max-w-[1240px] mx-auto pt-6 px-4 sm:px-6'>
+      <main className='w-full pt-6 px-3 sm:px-6 relative'>
         <div className='flex items-center justify-between mb-3 text-xs text-slate-500 px-1 flex-wrap gap-2'>
           <span className='flex items-center gap-1.5'>
             <span className='w-2 h-2 rounded-full bg-emerald-500 inline-block' />
@@ -478,16 +552,28 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               onClick={() => setMobileFitScale((prev) => !prev)}
               className='px-2.5 py-1 text-[11px] font-semibold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-2xs hover:bg-slate-50 transition-colors flex items-center gap-1.5'
             >
-              <span>{mobileFitScale ? '📱 Fit to Screen (Scale ' + Math.round(appliedScale * 100) + '%)' : '🔍 100% Zoom (Pan)'}</span>
+              {mobileFitScale ? (
+                <>
+                  <Smartphone size={13} className='text-slate-600' />
+                  <span>Fit to Screen (Scale {Math.round(appliedScale * 100)}%)</span>
+                </>
+              ) : (
+                <>
+                  <ZoomIn size={13} className='text-slate-600' />
+                  <span>100% Zoom (Pan)</span>
+                </>
+              )}
             </button>
           </div>
         )}
 
         {/* Clean, Non-Overlapped A4 Sheet with Real-Time Multi-Page Break Line */}
-        <div ref={previewContainerRef} className='w-full flex justify-center pb-8 overflow-x-auto custom-scrollbar'>
-          <div
-            data-resume-print-root
-            ref={previewDocRef}
+        <div ref={previewContainerRef} className='relative w-full pb-8 overflow-x-auto custom-scrollbar px-2'>
+          {/* ── 100% DEAD-CENTER RESUME SHEET (Isolated flex container) ── */}
+          <div className='w-full flex justify-center items-start'>
+            <div
+              data-resume-print-root
+              ref={previewDocRef}
             style={{
               width: appliedScale < 1 ? '800px' : undefined,
               transform: appliedScale < 1 ? 'scale(' + appliedScale + ')' : undefined,
@@ -506,12 +592,14 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
             {/* Visual Page Break 1 -> Page 2 Indicator */}
             {isMultiPage && (
               <div
+                data-pagebreak-indicator=''
                 style={{ top: `${A4_HEIGHT_PX}px` }}
                 className='absolute left-0 right-0 z-20 pointer-events-none flex items-center justify-center print:hidden'
               >
                 <div className='w-full border-t-2 border-dashed border-rose-400 absolute' />
                 <span className='relative bg-rose-50 text-rose-800 border border-rose-300 px-3 py-0.5 rounded-full text-[11px] font-bold shadow-xs flex items-center gap-1 select-none'>
-                  ✂️ End of Page 1 · Content below starts on Page 2
+                  <Scissors size={12} className='rotate-90 text-rose-700' />
+                  <span>End of Page 1 · Content below starts on Page 2</span>
                 </span>
               </div>
             )}
@@ -519,15 +607,18 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
             {/* Visual Page Break 2 -> Page 3 Indicator (if 3+ pages) */}
             {docHeight > A4_HEIGHT_PX * 2 && (
               <div
+                data-pagebreak-indicator=''
                 style={{ top: `${A4_HEIGHT_PX * 2}px` }}
                 className='absolute left-0 right-0 z-20 pointer-events-none flex items-center justify-center print:hidden'
               >
                 <div className='w-full border-t-2 border-dashed border-rose-400 absolute' />
                 <span className='relative bg-rose-50 text-rose-800 border border-rose-300 px-3 py-0.5 rounded-full text-[11px] font-bold shadow-xs flex items-center gap-1 select-none'>
-                  ✂️ End of Page 2 · Content below starts on Page 3
+                  <Scissors size={12} className='rotate-90 text-rose-700' />
+                  <span>End of Page 2 · Content below starts on Page 3</span>
                 </span>
               </div>
             )}
+            </div>
           </div>
         </div>
 
@@ -573,7 +664,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               <div className='flex items-center gap-2'>
                 <Briefcase size={18} className='text-[#223498]' />
                 <h3 className='text-base font-bold text-slate-800'>
-                  Role & Job Match Analysis
+                  Skill Match Analysis
                 </h3>
               </div>
               <button
@@ -626,12 +717,12 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               {jdLoading ? (
                 <>
                   <Loader2 size={14} className='animate-spin' />
-                  <span>Analyzing Role Alignment...</span>
+                  <span>Analyzing Skill Match...</span>
                 </>
               ) : (
                 <>
                   <Search size={14} />
-                  <span>Analyze Alignment</span>
+                  <span>Analyze Skill Match</span>
                 </>
               )}
             </button>
@@ -640,7 +731,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
               <div className='mt-5 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4 animate-in fade-in-50'>
                 <div className='flex items-center justify-between'>
                   <span className='text-xs font-bold text-slate-700'>
-                    Role Match Alignment:
+                    Skill Match Analysis:
                   </span>
                   <span className='text-sm font-black text-[#223498] bg-[#DEE8FB] px-2.5 py-0.5 rounded-full'>
                     {matchResult.matchPercentage ?? (matchResult as any).matchScore ?? 0}%
@@ -650,7 +741,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                 {matchResult.matchedKeywords?.length > 0 && (
                   <div>
                     <span className='block text-[11px] font-bold text-emerald-800 mb-1.5'>
-                      ✓ Matched in your Resume:
+                      <span className='inline-flex items-center gap-1.5'><CheckCircle2 size={12} className='text-emerald-700 shrink-0' /> Matched in your Resume:</span>
                     </span>
                     <div className='flex flex-wrap gap-1.5'>
                       {matchResult.matchedKeywords.map((kw, i) => (
@@ -668,7 +759,7 @@ export const ResumePreviewView: React.FC<ResumePreviewViewProps> = ({
                 {matchResult.missingKeywords?.length > 0 && (
                   <div>
                     <span className='block text-[11px] font-bold text-amber-800 mb-1.5'>
-                      ⚠ Missing for this Role:
+                      <span className='inline-flex items-center gap-1.5'><AlertCircle size={12} className='text-amber-700 shrink-0' /> Missing for this Role:</span>
                     </span>
                     <div className='flex flex-wrap gap-1.5'>
                       {matchResult.missingKeywords.map((kw, i) => (

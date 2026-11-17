@@ -16,6 +16,8 @@ import {
   Lightbulb,
   X,
   Loader2,
+  Scissors,
+  Edit3,
 } from 'lucide-react';
 import apiClient from '@/services/api';
 import type {
@@ -849,7 +851,10 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
 
                     {atsAnalysis.readabilityTips.length > 0 && (
                       <div className='bg-slate-50 p-2.5 rounded-lg border border-slate-200/70 text-[11px] text-slate-600 leading-relaxed'>
-                        <span className='font-bold text-slate-800 block mb-0.5'>💡 Recommendation:</span>
+                        <span className='font-bold text-slate-800 flex items-center gap-1.5 mb-0.5'>
+                          <Lightbulb size={13} className='text-amber-500 shrink-0' />
+                          <span>Recommendation:</span>
+                        </span>
                         {atsAnalysis.readabilityTips[0]}
                       </div>
                     )}
@@ -2497,8 +2502,9 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                             className='absolute left-0 right-0 z-20 pointer-events-none flex items-center justify-center print:hidden'
                           >
                             <div className='w-full border-t-2 border-dashed border-rose-500 absolute shadow-xs' />
-                            <span className='relative bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-bold shadow-md flex items-center gap-1 select-none uppercase tracking-wide'>
-                              ✂️ End of Page 1 · Content below starts on Page 2
+                            <span className='relative bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-bold shadow-md flex items-center gap-1.5 select-none uppercase tracking-wide'>
+                              <Scissors size={12} className='rotate-90' />
+                              <span>End of Page 1 · Content below starts on Page 2</span>
                             </span>
                           </div>
                         )}
@@ -2510,8 +2516,9 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                             className='absolute left-0 right-0 z-20 pointer-events-none flex items-center justify-center print:hidden'
                           >
                             <div className='w-full border-t-2 border-dashed border-rose-500 absolute shadow-xs' />
-                            <span className='relative bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-bold shadow-md flex items-center gap-1 select-none uppercase tracking-wide'>
-                              ✂️ End of Page 2 · Content below starts on Page 3
+                            <span className='relative bg-rose-600 text-white px-3 py-1 rounded-full text-[10px] font-bold shadow-md flex items-center gap-1.5 select-none uppercase tracking-wide'>
+                              <Scissors size={12} className='rotate-90' />
+                              <span>End of Page 2 · Content below starts on Page 3</span>
                             </span>
                           </div>
                         )}
@@ -2568,12 +2575,18 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
               </div>
 
               <div className='bg-amber-50/50 border border-amber-200/50 rounded-xl p-3 text-[11.5px] text-amber-900 leading-relaxed'>
-                <span className='font-bold block mb-0.5'>💡 Recruiter Insight:</span>
+                <span className='font-bold flex items-center gap-1.5 mb-0.5'>
+                  <Lightbulb size={13} className='text-amber-600 shrink-0' />
+                  <span>Recruiter Insight:</span>
+                </span>
                 {GUIDE_CONTENT[exampleModal.type].tip}
               </div>
 
-              <p className='text-[11px] text-slate-500'>
-                ✍️ <span className='font-semibold'>Note:</span> Write what you built or accomplished in your own words. You can then click <span className='font-semibold text-indigo-700'>✨ Polish with AI</span> to enhance the phrasing without losing your original facts!
+              <p className='text-[11px] text-slate-500 flex items-start gap-1.5 leading-relaxed'>
+                <Edit3 size={13} className='text-slate-400 shrink-0 mt-0.5' />
+                <span>
+                  <span className='font-semibold text-slate-700'>Note:</span> Write what you built or accomplished in your own words. You can then click <span className='font-semibold text-indigo-700 inline-flex items-center gap-1'><Sparkles size={11} className='text-indigo-600 inline' /> Polish with AI</span> to enhance the phrasing without losing your original facts!
+                </span>
               </p>
             </div>
 
@@ -2630,8 +2643,9 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
 
               {/* Polished Card */}
               <div>
-                <span className='text-[11px] font-bold text-emerald-700 uppercase tracking-wider block mb-1'>
-                  ✨ Polished Placement-Ready Version
+                <span className='text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5 mb-1'>
+                  <Sparkles size={12} className='text-emerald-600' />
+                  <span>Polished Placement-Ready Version</span>
                 </span>
                 <div className='bg-emerald-50/40 border border-emerald-200 rounded-xl p-3.5 text-slate-900 font-medium leading-relaxed font-sans shadow-2xs'>
                   {polishDiff.proposedText}
@@ -2660,7 +2674,7 @@ export const ResumeStepperEditor: React.FC<ResumeStepperEditorProps> = ({
                 onClick={() => {
                   polishDiff.onApply(polishDiff.proposedText);
                   setPolishDiff(null);
-                  toast.success('✨ Applied polished description!');
+                  toast.success('Applied polished description!');
                 }}
                 className='px-4.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5'
               >

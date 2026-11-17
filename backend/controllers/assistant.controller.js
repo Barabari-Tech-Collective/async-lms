@@ -467,7 +467,7 @@ exports.getAllResumes = async (req, res) => {
   const userId = req.user.id;
   try {
     const result = await pool.query(
-      `SELECT id, title, schema_version, version, is_primary,
+      `SELECT id, title, schema_version, version, is_primary, document,
               document->>'templateId' as template_id,
               document->>'category' as category,
               document->>'targetRole' as target_role,

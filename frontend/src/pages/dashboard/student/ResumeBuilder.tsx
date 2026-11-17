@@ -175,7 +175,7 @@ export default function ResumeBuilder() {
           setResumesList((prev) =>
             prev.map((item) =>
               item.id === savedRecord.id
-                ? { ...item, version: savedRecord.version, updated_at: savedRecord.updated_at }
+                ? { ...item, version: savedRecord.version, updated_at: savedRecord.updated_at, document: savedRecord.document || newDoc }
                 : item
             )
           );
@@ -407,6 +407,7 @@ export default function ResumeBuilder() {
           version: rec.version,
           is_primary: rec.is_primary || false,
           template_id: rec.document?.templateId,
+          document: rec.document || fresh,
           created_at: rec.created_at || new Date().toISOString(),
           updated_at: rec.updated_at,
         };
@@ -520,125 +521,6 @@ export default function ResumeBuilder() {
     return `${safeName}.pdf`;
   }, [resumeDoc.personalInfo?.fullName, resumeDoc.targetRole, resumeRecord?.title, user?.full_name]);
 
-  const handlePrintPDF = useCallback(() => {
-    const targetElement =
-      previewRef.current ||
-      (document.querySelector('[data-resume-print-root]') as HTMLElement);
-    if (!targetElement) return;
-
-    const style = document.createElement('style');
-    style.id = 'resume-print-style';
-    style.textContent = `
-      @page {
-        size: A4 portrait;
-        margin: 0;
-      }
-      @media print {
-        html, body {
-          width: 210mm !important;
-          height: auto !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          background: #ffffff !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        body > *:not([data-resume-print-root]) {
-          display: none !important;
-        }
-        [data-resume-print-root] {
-          display: block !important;
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          width: 210mm !important;
-          min-height: 297mm !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          background: #ffffff !important;
-          box-sizing: border-box !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        [data-resume-print-root] > div {
-          border: none !important;
-          border-radius: 0 !important;
-          box-shadow: none !important;
-          margin: 0 !important;
-          width: 210mm !important;
-          max-width: 210mm !important;
-          box-sizing: border-box !important;
-        }
-        [data-resume-print-root] [class*="max-w-"] {
-          max-width: 210mm !important;
-          width: 210mm !important;
-          margin: 0 !important;
-          border-left: none !important;
-          border-right: none !important;
-          border-bottom: none !important;
-          box-shadow: none !important;
-          box-sizing: border-box !important;
-        }
-        [data-resume-print-root] [class*="shadow-"] {
-          box-shadow: none !important;
-        }
-        [data-resume-print-root] .grid.grid-cols-12 {
-          display: grid !important;
-          grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
-          width: 100% !important;
-        }
-        [data-resume-print-root] header .flex-row {
-          flex-direction: row !important;
-        }
-        .page-break-inside-avoid {
-          break-inside: avoid !important;
-          page-break-inside: avoid !important;
-        }
-        h1, h2, h3, h4 {
-          break-after: avoid !important;
-          page-break-after: avoid !important;
-        }
-        .print\\:hidden,
-        button,
-        [title="Change profile photo"] {
-          display: none !important;
-        }
-        [title="Double-click to edit"] {
-          background-color: transparent !important;
-          cursor: default !important;
-          box-shadow: none !important;
-        }
-        a {
-          text-decoration: none !important;
-        }
-      }
-    `;
-    document.head.appendChild(style);
-
-    const wrapper = document.createElement('div');
-    wrapper.setAttribute('data-resume-print-root', '');
-    wrapper.style.cssText = 'display:none';
-    const clone = targetElement.cloneNode(true) as HTMLElement;
-
-    clone.querySelectorAll('.print\\:hidden, button, [title="Change profile photo"]').forEach((el) => {
-      el.remove();
-    });
-    clone.querySelectorAll('[title]').forEach((el) => {
-      (el as HTMLElement).removeAttribute('title');
-    });
-
-    wrapper.appendChild(clone);
-    document.body.appendChild(wrapper);
-
-    const cleanup = () => {
-      document.getElementById('resume-print-style')?.remove();
-      wrapper.remove();
-    };
-
-    window.addEventListener('afterprint', cleanup, { once: true });
-    window.print();
-  }, []);
-
   const handleDownloadPDF = useCallback(async () => {
     const previewEl =
       previewRef.current ||
@@ -647,12 +529,39 @@ export default function ResumeBuilder() {
     setExporting(true);
     const toastId = toast.loading('Preparing downloadable PDF...');
 
+    // Wait for document fonts to be ready
+    try {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Wait for any images (e.g. avatars, logos) inside previewEl to load
+    try {
+      const images = Array.from(previewEl.querySelectorAll('img'));
+      await Promise.all(
+        images.map((img) => {
+          if (img.complete) return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+          });
+        })
+      );
+    } catch {
+      // ignore
+    }
+
     const exportStyle = document.createElement('style');
     exportStyle.id = 'resume-export-style';
     exportStyle.textContent = `
       .exporting-pdf .print\\:hidden,
       .exporting-pdf button,
-      .exporting-pdf [title="Change profile photo"] {
+      .exporting-pdf [title="Change profile photo"],
+      .exporting-pdf [data-pagebreak-indicator],
+      .exporting-pdf [data-avatar-hidden-img] {
         display: none !important;
       }
       .exporting-pdf [title="Double-click to edit"] {
@@ -660,29 +569,113 @@ export default function ResumeBuilder() {
         cursor: default !important;
         box-shadow: none !important;
       }
-      .exporting-pdf img {
+      .exporting-pdf img:not([data-avatar-hidden-img]) {
         display: inline-block !important;
       }
-      .exporting-pdf [data-section-heading] {
-        border-bottom: none !important;
-        padding-bottom: 0px !important;
-        margin-bottom: 6px !important;
-      }
-      .exporting-pdf [data-heading-line] {
-        display: block !important;
-        width: 100% !important;
-        height: 1px !important;
-        background-color: #000000 !important;
-        border: none !important;
-        margin-top: 0px !important;
-        margin-bottom: 5px !important;
-        padding: 0 !important;
+      .exporting-pdf [data-avatar-container] {
+        background-size: cover !important;
+        background-position: center center !important;
+        background-repeat: no-repeat !important;
       }
     `;
     document.head.appendChild(exportStyle);
     previewEl.classList.add('exporting-pdf');
 
+    // Create an offscreen 1x1 canvas to accurately convert ANY CSS color (oklch, oklab, color-mix, vars)
+    // to standard 8-bit sRGB (rgb/rgba) that html2canvas can parse 100% reliably.
+    const colorCanvas = document.createElement('canvas');
+    colorCanvas.width = 1;
+    colorCanvas.height = 1;
+    const colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });
+    const colorCache = new Map<string, string>();
+
+    const toRgbColor = (cssColor: string): string => {
+      if (!cssColor || cssColor === 'transparent' || cssColor === 'inherit' || cssColor === 'initial') {
+        return cssColor;
+      }
+      if (/^#([0-9a-f]{3,8})$/i.test(cssColor)) return cssColor;
+      if (/^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/i.test(cssColor)) return cssColor;
+      const cached = colorCache.get(cssColor);
+      if (cached) return cached;
+      if (!colorCtx) return '#000000';
+      try {
+        colorCtx.clearRect(0, 0, 1, 1);
+        colorCtx.fillStyle = cssColor;
+        colorCtx.fillRect(0, 0, 1, 1);
+        const [r, g, b, a] = colorCtx.getImageData(0, 0, 1, 1).data;
+        const res =
+          a === 0
+            ? 'transparent'
+            : a === 255
+            ? `rgb(${r}, ${g}, ${b})`
+            : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+        colorCache.set(cssColor, res);
+        return res;
+      } catch {
+        return '#000000';
+      }
+    };
+
+    const convertColorString = (val: string): string => {
+      if (!val || typeof val !== 'string') return val;
+      if (val.includes('oklch') || val.includes('oklab') || val.includes('color-mix')) {
+        return val
+          .replace(/oklch\([^)]+\)/g, (m) => toRgbColor(m))
+          .replace(/oklab\([^)]+\)/g, (m) => toRgbColor(m))
+          .replace(/color-mix\([^)]+\)/g, '#1e293b');
+      }
+      return val;
+    };
+
+    const wrapGetComputedStyle = (
+      origFn: typeof window.getComputedStyle,
+      owningWin: Window
+    ) => {
+      return function (elt: Element, pseudoElt?: string | null) {
+        let style: CSSStyleDeclaration;
+        const eltWin = elt?.ownerDocument?.defaultView;
+        if (eltWin && eltWin !== owningWin && typeof eltWin.getComputedStyle === 'function') {
+          try {
+            style = eltWin.getComputedStyle(elt, pseudoElt);
+          } catch {
+            style = origFn.call(owningWin, elt, pseudoElt);
+          }
+        } else {
+          style = origFn.call(owningWin, elt, pseudoElt);
+        }
+
+        return new Proxy(style, {
+          get(target, prop) {
+            const val = Reflect.get(target, prop, target);
+            if (typeof val === 'function') {
+              if (prop === 'getPropertyValue') {
+                return function (propName: string) {
+                  const rawVal = target.getPropertyValue(propName);
+                  return convertColorString(rawVal);
+                };
+              }
+              return val.bind(target);
+            }
+            if (typeof val === 'string') {
+              return convertColorString(val);
+            }
+            return val;
+          },
+        });
+      };
+    };
+
+    // Pre-flight setup: Monkey-patch parent window.getComputedStyle & set solid background
+    // html2canvas calls unqualified getComputedStyle(ownerDocument.body) BEFORE and DURING rendering!
+    const originalWindowGetComputedStyle = window.getComputedStyle;
+    const prevDocBg = document.documentElement.style.backgroundColor;
+    const prevBodyBg = document.body.style.backgroundColor;
+
     try {
+      window.getComputedStyle = wrapGetComputedStyle(originalWindowGetComputedStyle, window);
+      document.documentElement.style.backgroundColor = '#ffffff';
+      document.body.style.backgroundColor = '#ffffff';
+
       const html2pdfModule = await import('html2pdf.js');
       const html2pdf = html2pdfModule.default || html2pdfModule;
       const filename = getCandidateFilename();
@@ -690,31 +683,155 @@ export default function ResumeBuilder() {
       const opt = {
         margin: 0,
         filename: filename,
-        image: { type: 'jpeg' as const, quality: 0.98 },
+        image: { type: 'jpeg' as const, quality: 0.99 },
         html2canvas: {
-          scale: 2,
+          scale: 2.5,
           useCORS: true,
+          allowTaint: true,
+          imageTimeout: 5000,
           logging: false,
           scrollY: 0,
           scrollX: 0,
           backgroundColor: '#ffffff',
           windowWidth: 800,
           onclone: (clonedDoc: Document) => {
+            // ── LAYER 1: Explicitly set solid background & colors on root & body ──
+            if (clonedDoc.documentElement) {
+              clonedDoc.documentElement.style.backgroundColor = '#ffffff';
+              clonedDoc.documentElement.style.color = '#000000';
+            }
+            if (clonedDoc.body) {
+              clonedDoc.body.style.backgroundColor = '#ffffff';
+              clonedDoc.body.style.color = '#000000';
+            }
+
+            // ── LAYER 2: Intercept cloned window's getComputedStyle with Proxy ──
+            const clonedWin = clonedDoc.defaultView;
+            if (clonedWin && clonedWin !== window) {
+              clonedWin.getComputedStyle = wrapGetComputedStyle(clonedWin.getComputedStyle, clonedWin);
+            }
+
+            // ── LAYER 3: Replace all oklch / oklab in all <style> tags in clonedDoc ──
+            clonedDoc.querySelectorAll('style').forEach((styleEl) => {
+              if (
+                styleEl.textContent &&
+                (styleEl.textContent.includes('oklch') ||
+                  styleEl.textContent.includes('oklab') ||
+                  styleEl.textContent.includes('color-mix'))
+              ) {
+                styleEl.textContent = styleEl.textContent
+                  .replace(/oklch\([^)]+\)/g, (match) => toRgbColor(match))
+                  .replace(/oklab\([^)]+\)/g, (match) => toRgbColor(match))
+                  .replace(/color-mix\([^)]+\)/g, '#1e293b');
+              }
+            });
+
+            // ── LAYER 4: Replace any oklch in inline styles across the cloned document ──
+            clonedDoc.querySelectorAll<HTMLElement>('*').forEach((el) => {
+              const inline = el.getAttribute('style');
+              if (
+                inline &&
+                (inline.includes('oklch') || inline.includes('oklab') || inline.includes('color-mix'))
+              ) {
+                el.setAttribute(
+                  'style',
+                  inline
+                    .replace(/oklch\([^)]+\)/g, (m) => toRgbColor(m))
+                    .replace(/oklab\([^)]+\)/g, (m) => toRgbColor(m))
+                    .replace(/color-mix\([^)]+\)/g, '#1e293b')
+                );
+              }
+            });
+
+            // ── LAYER 5: Configure printRoot A4 dimensions & clean layout ──
             const printRoot = clonedDoc.querySelector('[data-resume-print-root]') as HTMLElement;
             if (printRoot) {
               printRoot.style.transform = 'none';
               printRoot.style.transformOrigin = 'initial';
               printRoot.style.margin = '0 auto';
+              printRoot.style.marginBottom = '0px';
+              printRoot.style.marginTop = '0px';
               printRoot.style.width = '800px';
               printRoot.style.maxWidth = '800px';
               printRoot.style.boxShadow = 'none';
               printRoot.style.border = 'none';
               printRoot.style.borderRadius = '0';
               printRoot.style.overflow = 'visible';
+              printRoot.style.backgroundColor = '#ffffff';
+
+              const innerWrapper = printRoot.firstElementChild as HTMLElement;
+              if (innerWrapper) {
+                innerWrapper.style.boxShadow = 'none';
+                innerWrapper.style.border = 'none';
+              }
+
+              // Apply solid RGB inline styles to all elements inside printRoot
+              const allElements = printRoot.querySelectorAll<HTMLElement>('*');
+              allElements.forEach((el) => {
+                const computed = window.getComputedStyle(el);
+
+                // Text color
+                if (computed.color && computed.color !== 'rgba(0, 0, 0, 0)' && computed.color !== 'transparent') {
+                  el.style.color = toRgbColor(computed.color);
+                }
+
+                // Background color
+                if (
+                  computed.backgroundColor &&
+                  computed.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+                  computed.backgroundColor !== 'transparent'
+                ) {
+                  el.style.backgroundColor = toRgbColor(computed.backgroundColor);
+                }
+
+                // Border colors
+                if (computed.borderTopColor && computed.borderTopWidth !== '0px') {
+                  el.style.borderTopColor = toRgbColor(computed.borderTopColor);
+                }
+                if (computed.borderBottomColor && computed.borderBottomWidth !== '0px') {
+                  el.style.borderBottomColor = toRgbColor(computed.borderBottomColor);
+                }
+                if (computed.borderLeftColor && computed.borderLeftWidth !== '0px') {
+                  el.style.borderLeftColor = toRgbColor(computed.borderLeftColor);
+                }
+                if (computed.borderRightColor && computed.borderRightWidth !== '0px') {
+                  el.style.borderRightColor = toRgbColor(computed.borderRightColor);
+                }
+
+                // Box shadow oklch removal
+                if (computed.boxShadow && computed.boxShadow !== 'none' && computed.boxShadow.includes('oklch')) {
+                  el.style.boxShadow = computed.boxShadow.replace(/oklch\([^)]+\)/g, (m) => toRgbColor(m));
+                }
+
+                // Clean up editing UI
+                if (el.hasAttribute('title') && el.getAttribute('title')?.includes('Double-click')) {
+                  el.removeAttribute('title');
+                  el.style.backgroundColor = 'transparent';
+                  el.style.boxShadow = 'none';
+                  el.style.cursor = 'default';
+                }
+              });
+
+              // Also resolve SVGs
+              printRoot.querySelectorAll<SVGElement>('svg, svg *').forEach((svgEl) => {
+                const computed = window.getComputedStyle(svgEl);
+                if (computed.fill && computed.fill !== 'none') {
+                  (svgEl as unknown as HTMLElement).style.fill = toRgbColor(computed.fill);
+                }
+                if (computed.stroke && computed.stroke !== 'none') {
+                  (svgEl as unknown as HTMLElement).style.stroke = toRgbColor(computed.stroke);
+                }
+              });
             }
-            clonedDoc.querySelectorAll('img').forEach((img) => {
-              (img as HTMLElement).style.display = 'inline-block';
+
+            // Sync Google Fonts links into clonedDoc
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+              const href = link.getAttribute('href');
+              if (href && (href.includes('fonts.googleapis.com') || href.includes('fonts.gstatic.com'))) {
+                clonedDoc.head.appendChild(link.cloneNode(true));
+              }
             });
+
             if (document.fonts) {
               document.fonts.forEach((font) => {
                 try {
@@ -724,61 +841,95 @@ export default function ResumeBuilder() {
                 }
               });
             }
-            clonedDoc.querySelectorAll('[title="Double-click to edit"]').forEach((el) => {
-              const htmlEl = el as HTMLElement;
-              htmlEl.style.backgroundColor = 'transparent';
-              htmlEl.style.boxShadow = 'none';
-              htmlEl.removeAttribute('title');
-            });
-            clonedDoc.querySelectorAll('[data-section-heading]').forEach((el) => {
-              const htmlEl = el as HTMLElement;
-              htmlEl.style.borderBottom = 'none';
-              htmlEl.style.paddingBottom = '0px';
-              htmlEl.style.marginBottom = '6px';
-            });
-            clonedDoc.querySelectorAll('[data-heading-line]').forEach((el) => {
-              const htmlEl = el as HTMLElement;
-              htmlEl.style.display = 'block';
-              htmlEl.style.width = '100%';
-              htmlEl.style.height = '1px';
-              htmlEl.style.backgroundColor = '#000000';
-              htmlEl.style.border = 'none';
-              htmlEl.style.marginTop = '0px';
-              htmlEl.style.marginBottom = '5px';
-              htmlEl.style.padding = '0px';
-            });
-            const canvas = clonedDoc.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const convertColor = (colorStr: string): string => {
-              if (ctx) {
-                try {
-                  ctx.fillStyle = '#111827';
-                  ctx.fillStyle = colorStr;
-                  if (!ctx.fillStyle.startsWith('oklch') && !ctx.fillStyle.startsWith('oklab')) {
-                    return ctx.fillStyle;
-                  }
-                } catch {
-                  // fallback
-                }
-              }
-              const lMatch = colorStr.match(/oklch\(\s*([\d.]+)/);
-              if (lMatch) {
-                const L = parseFloat(lMatch[1]);
-                if (L < 0.25) return '#0f172a';
-                if (L < 0.45) return '#1e293b';
-                if (L < 0.65) return '#475569';
-                if (L < 0.85) return '#cbd5e1';
-                return '#f8fafc';
-              }
-              return '#1e293b';
-            };
 
-            clonedDoc.querySelectorAll('style').forEach((styleEl) => {
-              if (styleEl.textContent) {
-                styleEl.textContent = styleEl.textContent
-                  .replace(/oklch\([^)]+\)/g, (match) => convertColor(match))
-                  .replace(/oklab\([^)]+\)/g, (match) => convertColor(match))
-                  .replace(/color-mix\([^)]+\)/g, '#1e293b');
+            // Remove all interactive buttons and hidden elements
+            clonedDoc
+              .querySelectorAll('button, .print\\:hidden, [data-pagebreak-indicator], [title="Change profile photo"]')
+              .forEach((el) => {
+                (el as HTMLElement).style.display = 'none';
+              });
+
+            // ── LAYER 6: Avatar & Image Rendering Integrity ──
+            // 6A. Ensure all avatar containers preserve exact circular cover background without distortion
+            clonedDoc.querySelectorAll<HTMLElement>('[data-avatar-container]').forEach((avatarEl) => {
+              const liveAvatarEl = previewEl.querySelector<HTMLElement>('[data-avatar-container]');
+              const bgImg =
+                avatarEl.style.backgroundImage ||
+                (liveAvatarEl ? window.getComputedStyle(liveAvatarEl).backgroundImage : '');
+              if (bgImg && bgImg !== 'none') {
+                avatarEl.style.backgroundImage = bgImg;
+                avatarEl.style.backgroundSize = 'cover';
+                avatarEl.style.backgroundPosition = 'center center';
+                avatarEl.style.backgroundRepeat = 'no-repeat';
+              }
+              // Hide any internal hidden img elements so html2canvas doesn't draw an uncropped img
+              avatarEl.querySelectorAll('img').forEach((img) => {
+                (img as HTMLElement).style.display = 'none';
+              });
+            });
+
+            // 6B. Standalone images (logos, badges): ensure proper display without squishing
+            const liveImages = Array.from(previewEl.querySelectorAll<HTMLImageElement>('img'));
+            const clonedImages = Array.from(clonedDoc.querySelectorAll<HTMLImageElement>('img'));
+
+            clonedImages.forEach((img, idx) => {
+              if (
+                img.hasAttribute('data-avatar-hidden-img') ||
+                img.closest('[data-avatar-container]')
+              ) {
+                (img as HTMLElement).style.display = 'none';
+                return;
+              }
+
+              (img as HTMLElement).style.display = 'inline-block';
+
+              const liveImg = liveImages[idx];
+              if (!liveImg) return;
+
+              const nw = liveImg.naturalWidth;
+              const nh = liveImg.naturalHeight;
+              if (!nw || !nh) return;
+
+              const parent = liveImg.parentElement;
+              const targetW = liveImg.offsetWidth || parent?.offsetWidth || 80;
+              const targetH = liveImg.offsetHeight || parent?.offsetHeight || 80;
+              if (!targetW || !targetH) return;
+
+              const targetAspect = targetW / targetH;
+              const naturalAspect = nw / nh;
+
+              // If natural aspect ratio differs from target container aspect ratio, center-crop to avoid squishing
+              if (Math.abs(naturalAspect - targetAspect) > 0.02) {
+                try {
+                  let sx = 0;
+                  let sy = 0;
+                  let sw = nw;
+                  let sh = nh;
+
+                  if (naturalAspect > targetAspect) {
+                    // Image is wider than container: crop equal amounts left & right
+                    sw = nh * targetAspect;
+                    sx = (nw - sw) / 2;
+                  } else {
+                    // Image is taller than container: crop equal amounts top & bottom
+                    sh = nw / targetAspect;
+                    sy = (nh - sh) / 2;
+                  }
+
+                  const cropCanvas = document.createElement('canvas');
+                  cropCanvas.width = Math.round(sw);
+                  cropCanvas.height = Math.round(sh);
+                  const cropCtx = cropCanvas.getContext('2d');
+                  if (cropCtx) {
+                    cropCtx.imageSmoothingEnabled = true;
+                    cropCtx.imageSmoothingQuality = 'high';
+                    cropCtx.drawImage(liveImg, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
+                    img.src = cropCanvas.toDataURL('image/png');
+                    img.style.objectFit = 'fill';
+                  }
+                } catch (cropErr) {
+                  console.warn('Image aspect ratio crop error:', cropErr);
+                }
               }
             });
           },
@@ -793,26 +944,47 @@ export default function ResumeBuilder() {
 
       const runPdf = async () => {
         const worker = html2pdf().set(opt).from(previewEl);
-        await worker.save();
+        try {
+          const pdfBlob = (await worker.outputPdf('blob')) as Blob;
+          if (pdfBlob && pdfBlob.size > 0) {
+            const blobUrl = URL.createObjectURL(pdfBlob);
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            link.href = blobUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+              link.remove();
+              URL.revokeObjectURL(blobUrl);
+            }, 3000);
+            return;
+          }
+        } catch (blobErr) {
+          console.warn('Direct blob output fallback to save:', blobErr);
+        }
+        await worker.save(filename);
       };
 
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('PDF generation timed out')), 9000)
+        setTimeout(() => reject(new Error('PDF generation timed out')), 30000)
       );
 
       await Promise.race([runPdf(), timeoutPromise]);
       toast.success(`Downloaded ${filename}!`, { id: toastId });
-    } catch (err) {
-      console.warn('PDF download issue, opening print dialog:', err);
-      toast.dismiss(toastId);
-      toast('Opening print dialog to save PDF...', { icon: '🖨️' });
-      handlePrintPDF();
+    } catch (err: unknown) {
+      console.error('PDF download error:', err);
+      const errMsg = err instanceof Error ? err.message : 'Please try again.';
+      toast.error(`Download failed: ${errMsg}`, { id: toastId });
     } finally {
+      window.getComputedStyle = originalWindowGetComputedStyle;
+      document.documentElement.style.backgroundColor = prevDocBg;
+      document.body.style.backgroundColor = prevBodyBg;
       previewEl.classList.remove('exporting-pdf');
       document.getElementById('resume-export-style')?.remove();
       setExporting(false);
     }
-  }, [exporting, getCandidateFilename, handlePrintPDF]);
+  }, [exporting, getCandidateFilename]);
 
   if (initialLoading) {
     return (

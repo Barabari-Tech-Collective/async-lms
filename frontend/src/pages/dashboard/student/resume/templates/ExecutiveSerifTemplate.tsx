@@ -12,50 +12,36 @@ function SectionHeading({ title }: { title: string }) {
       data-section-heading=''
       className='mb-2'
       style={{
-        marginBottom: '6px',
-        paddingBottom: '0px',
-        borderBottom: 'none',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
     >
-      <div
+      <h2
+        className='text-left text-[11px] font-bold tracking-[0.14em] text-stone-900 uppercase font-serif'
         style={{
-          display: 'block',
-          width: '100%',
-          lineHeight: '1.2',
-          paddingBottom: '5px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.14em',
+          color: '#1c1917',
+          textTransform: 'uppercase',
+          lineHeight: '1.25',
           margin: 0,
+          padding: 0,
+          display: 'block',
         }}
       >
-        <h2
-          className='text-left text-[11px] font-bold tracking-[0.14em] text-stone-900 uppercase font-serif'
-          style={{
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '0.14em',
-            color: '#1c1917',
-            textTransform: 'uppercase',
-            lineHeight: '1.2',
-            margin: 0,
-            padding: 0,
-            display: 'block',
-          }}
-        >
-          {title}
-        </h2>
-      </div>
+        {title}
+      </h2>
       <div
         data-heading-line=''
         style={{
           display: 'block',
           width: '100%',
-          height: '1px',
-          backgroundColor: '#292524',
-          marginTop: '0px',
-          marginBottom: '5px',
-          border: 'none',
-          padding: 0,
+          height: '0px',
+          borderTop: '1px solid #292524',
+          marginTop: '6px',
+          marginBottom: '8px',
         }}
       />
     </div>
@@ -197,9 +183,7 @@ export function ExecutiveSerifTemplate({
           if (!data.projects?.length) return null;
           return (
             <section key='projects' className='mb-3'>
-              <h2 className='text-left text-[12px] font-bold tracking-[0.14em] text-stone-900 uppercase pb-0.5 mb-2.5 border-b border-stone-800 font-serif'>
-                Projects
-              </h2>
+              <SectionHeading title='PROJECTS' />
               <div className='space-y-2'>
                 {data.projects.map((proj, pIdx) => (
                   <div key={proj.id || pIdx} className='page-break-inside-avoid'>

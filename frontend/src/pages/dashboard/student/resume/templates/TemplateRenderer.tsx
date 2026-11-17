@@ -5,7 +5,6 @@ import { AtlanticSidebarTemplate } from './AtlanticSidebarTemplate';
 import { ClassicCorporateTemplate } from './ClassicCorporateTemplate';
 import { ExecutiveSerifTemplate } from './ExecutiveSerifTemplate';
 import { CompactSansTemplate } from './CompactSansTemplate';
-import { CobaltEdgeTemplate } from './CobaltEdgeTemplate';
 import { CleanSlateTemplate } from './CleanSlateTemplate';
 import { PhotoModernTemplate } from './PhotoModernTemplate';
 import { EditorialRuleTemplate } from './EditorialRuleTemplate';
@@ -25,8 +24,6 @@ export function TemplateRenderer(props: TemplateProps) {
       return <ExecutiveSerifTemplate {...props} />;
     case 'compact-sans':
       return <CompactSansTemplate {...props} />;
-    case 'creative-cobalt':
-      return <CobaltEdgeTemplate {...props} />;
     case 'minimal-slate':
       return <CleanSlateTemplate {...props} />;
     case 'photo-modern':

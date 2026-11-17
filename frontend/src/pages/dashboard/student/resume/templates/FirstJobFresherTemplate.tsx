@@ -21,32 +21,49 @@ function SectionHeading({ title, icon }: { title: string; icon?: React.ReactNode
   return (
     <div
       data-section-heading=''
-      className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-0.5 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '2px solid #047857',
-        paddingBottom: '2px',
-        marginBottom: '6px',
-        display: 'flex',
-        alignItems: 'center',
+        marginBottom: '4px',
+        display: 'block',
         width: '100%',
       }}
     >
-      {icon}
-      <h2
-        className='text-[11px] font-bold tracking-wider text-slate-900 uppercase font-sans'
+      <div
         style={{
-          fontSize: '11px',
-          fontWeight: 'bold',
-          letterSpacing: '0.12em',
-          color: '#0f172a',
-          textTransform: 'uppercase',
-          lineHeight: '1.35',
-          margin: 0,
-          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
         }}
       >
-        {title}
-      </h2>
+        {icon}
+        <h2
+          className='text-[11px] font-bold tracking-wider text-slate-900 uppercase font-sans'
+          style={{
+            fontSize: '11px',
+            fontWeight: 'bold',
+            letterSpacing: '0.12em',
+            color: '#0f172a',
+            textTransform: 'uppercase',
+            lineHeight: '1.25',
+            margin: 0,
+            padding: 0,
+            display: 'block',
+          }}
+        >
+          {title}
+        </h2>
+      </div>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '0px',
+          borderTop: '2px solid #047857',
+          marginTop: '6px',
+          marginBottom: '8px',
+        }}
+      />
     </div>
   );
 }
@@ -260,12 +277,7 @@ export function FirstJobFresherTemplate({
           }
           return (
             <section key='skills' className='mb-3 page-break-inside-avoid'>
-              <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-3'>
-                <Lightbulb size={14} className='text-emerald-700' />
-                <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  TECHNICAL SKILLS & COMPETENCIES
-                </h2>
-              </div>
+              <SectionHeading title='TECHNICAL SKILLS & COMPETENCIES' icon={<Lightbulb size={14} className='text-emerald-700' />} />
               <div className='space-y-1.5 text-[12px] text-slate-800'>
                 {data.skills?.languages?.length > 0 && (
                   <div className='flex items-baseline'>
@@ -300,9 +312,7 @@ export function FirstJobFresherTemplate({
           if (!data.summary) return null;
           return (
             <section key='summary' className='mb-3 page-break-inside-avoid'>
-              <h2 className='text-[11.5px] font-black tracking-wider text-slate-900 uppercase border-b border-slate-200 pb-1 mb-2 font-mono'>
-                CAREER OBJECTIVE
-              </h2>
+              <SectionHeading title='CAREER OBJECTIVE' />
               <div className='group relative text-slate-700 text-[12px] leading-relaxed'>
                 <InlineTextarea
                   value={data.summary}
@@ -336,12 +346,7 @@ export function FirstJobFresherTemplate({
           if (!data.experience?.length) return null;
           return (
             <section key='experience' className='mb-3'>
-              <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-2'>
-                <Briefcase size={14} className='text-emerald-700' />
-                <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  WORK EXPERIENCE & INTERNSHIPS
-                </h2>
-              </div>
+              <SectionHeading title='WORK EXPERIENCE & INTERNSHIPS' icon={<Briefcase size={14} className='text-emerald-700' />} />
               <div className='space-y-1.5'>
                 {data.experience.map((exp, xIdx) => (
                   <div key={exp.id || xIdx} className='page-break-inside-avoid'>
@@ -378,12 +383,7 @@ export function FirstJobFresherTemplate({
           if (!data.certifications?.length) return null;
           return (
             <section key='certifications' className='mb-3'>
-              <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-2'>
-                <Award size={14} className='text-emerald-700' />
-                <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  CERTIFICATIONS & LMS ACHIEVEMENTS
-                </h2>
-              </div>
+              <SectionHeading title='CERTIFICATIONS & LMS ACHIEVEMENTS' icon={<Award size={14} className='text-emerald-700' />} />
               <div className='space-y-1.5 text-[11.5px]'>
                 {data.certifications.map((cert, cIdx) => (
                   <div key={cert.id || cIdx} className='flex items-center justify-between page-break-inside-avoid'>
@@ -413,12 +413,7 @@ export function FirstJobFresherTemplate({
           if (!data.events?.length) return null;
           return (
             <section key='events' className='mb-3'>
-              <div className='flex items-center gap-1.5 border-b-2 border-emerald-700 pb-1 mb-2'>
-                <Calendar size={14} className='text-emerald-700' />
-                <h2 className='text-[12px] font-black tracking-wider text-slate-900 uppercase font-mono'>
-                  WORKSHOPS, HACKATHONS & EVENTS
-                </h2>
-              </div>
+              <SectionHeading title='WORKSHOPS, HACKATHONS & EVENTS' icon={<Calendar size={14} className='text-emerald-700' />} />
               <div className='space-y-1.5'>
                 {data.events.map((evt, eIdx) => (
                   <div key={evt.id || eIdx} className='page-break-inside-avoid'>

@@ -165,43 +165,43 @@ const FacilitatorCourseCard: React.FC<FacilitatorCourseCardProps> = ({
   return (
     <div
       onClick={onPreview}
-      className='bg-white border-[2.5px] border-white rounded-[14px] shadow-[0px_4px_16px_rgba(0,0,0,0.04)] hover:shadow-[0px_8px_24px_rgba(0,0,0,0.08)] transition-all duration-300 flex flex-col justify-between p-1 pb-3 w-full select-none cursor-pointer hover:-translate-y-0.5'
+      className='bg-white border-[2.5px] border-white rounded-[14px] shadow-[0px_4px_16px_rgba(0,0,0,0.04)] hover:shadow-[0px_8px_24px_rgba(0,0,0,0.08)] transition-all duration-300 flex flex-col justify-between p-1 pb-3 w-full min-h-[251px] select-none cursor-pointer hover:-translate-y-0.5'
     >
       {/* Top Inner Colored Container (Figma Frame 16) */}
       <div
-        className={`${theme.cardInnerBg} rounded-[12px] p-4 flex flex-col justify-between min-h-[148px] transition-colors`}
+        className={`${theme.cardInnerBg} rounded-[12px] p-4 flex flex-col justify-between min-h-[197px] transition-colors`}
       >
-        <div className='space-y-2.5'>
+        <div className='space-y-3.5'>
           {/* Badge Row (Figma Frame 15) */}
           <div className='flex items-center gap-2 flex-wrap'>
             {/* Level Badge */}
             <span
-              className={`${theme.levelBadgeBg} ${theme.levelBadgeText} px-2.5 py-0.5 rounded-[10px] text-[8px] font-medium leading-[10px] tracking-tight`}
+              className={`${theme.levelBadgeBg} ${theme.levelBadgeText} px-2.5 py-1 rounded-[10px] text-[10px] font-medium leading-[12px] tracking-tight`}
             >
               {course.level || 'Beginner'}
             </span>
 
             {/* Domain Badge */}
             <span
-              className={`${theme.domainBadgeBg} ${theme.domainBadgeText} px-2.5 py-0.5 rounded-[10px] text-[8px] font-medium leading-[10px] tracking-tight`}
+              className={`${theme.domainBadgeBg} ${theme.domainBadgeText} px-2.5 py-1 rounded-[10px] text-[10px] font-medium leading-[12px] tracking-tight`}
             >
               {theme.domainLabel}
             </span>
 
             {/* Content Type Badge */}
             <span
-              className={`${theme.contentBadgeBg} ${theme.contentBadgeText} px-2.5 py-0.5 rounded-[10px] text-[8px] font-medium leading-[10px] tracking-tight`}
+              className={`${theme.contentBadgeBg} ${theme.contentBadgeText} px-2.5 py-1 rounded-[10px] text-[10px] font-medium leading-[12px] tracking-tight`}
             >
               {contentType}
             </span>
           </div>
 
           {/* Title & Description (Figma Frame 11) */}
-          <div className='space-y-1 pt-0.5'>
-            <h3 className='font-semibold text-xs text-black leading-[15px] capitalize line-clamp-1'>
+          <div className='space-y-2 pt-0.5'>
+            <h3 className='font-semibold text-[16px] text-black leading-[19px] capitalize line-clamp-1'>
               {course.name}
             </h3>
-            <p className='text-[10px] text-black/80 font-normal leading-[13px] line-clamp-2'>
+            <p className='text-[12px] text-black font-normal leading-[15px] line-clamp-2'>
               {course.description ||
                 'Master modern frontend frameworks, scalable backend architectures, and database management.'}
             </p>
@@ -209,9 +209,9 @@ const FacilitatorCourseCard: React.FC<FacilitatorCourseCardProps> = ({
         </div>
 
         {/* Stats Section (Figma Frames 8 & 9) */}
-        <div className='space-y-1.5 pt-2'>
+        <div className='space-y-2 pt-3'>
           {/* Metadata Row 1: Units & Lessons (Figma Frame 8) */}
-          <div className='flex items-center gap-1.5 text-[8px] font-medium text-black'>
+          <div className='flex items-center gap-1.5 text-[10px] font-medium leading-[12px] text-black'>
             <Layers className='w-3 h-3 text-black/80 shrink-0' />
             <span>
               {unitsCount} Units • {lessonsCount} Lessons
@@ -219,7 +219,7 @@ const FacilitatorCourseCard: React.FC<FacilitatorCourseCardProps> = ({
           </div>
 
           {/* Metadata Row 2: Assignments & Capstone (Figma Frame 9) */}
-          <div className='flex items-center gap-1.5 text-[8px] font-medium text-[#344499]'>
+          <div className='flex items-center gap-1.5 text-[10px] font-medium leading-[12px] text-[#344499]'>
             <Briefcase className='w-3 h-3 text-[#344499] shrink-0' />
             <span>
               {assignmentsCount} Assignments • {capstonesCount} Capstone Project{capstonesCount !== 1 ? 's' : ''}
@@ -231,7 +231,7 @@ const FacilitatorCourseCard: React.FC<FacilitatorCourseCardProps> = ({
       {/* Bottom Footer Bar (Figma Frame 17) */}
       <div className='flex items-center justify-between px-3 pt-3 w-full'>
         {/* Modules Counter */}
-        <div className='text-[10px] font-medium text-black/50'>
+        <div className='text-[10px] font-medium text-black/50 leading-[12px]'>
           Modules:{' '}
           <span className='font-medium text-black'>
             {unitsCount}
@@ -301,10 +301,10 @@ const FacilitatorCourses: React.FC = () => {
           {[...Array(6)].map((_, i) => (
             <div
               key={i}
-              className='bg-white rounded-[14px] p-2 space-y-4 shadow-sm border border-slate-100'
+              className='bg-white rounded-[14px] p-1 pb-3 space-y-4 shadow-sm border border-slate-100 min-h-[251px]'
             >
-              <Skeleton className='h-40 w-full rounded-[12px]' />
-              <div className='flex justify-between px-2 pb-2'>
+              <Skeleton className='h-[197px] w-full rounded-[12px]' />
+              <div className='flex justify-between px-3 pb-1'>
                 <Skeleton className='h-4 w-16' />
                 <Skeleton className='h-6 w-24 rounded-[12px]' />
               </div>

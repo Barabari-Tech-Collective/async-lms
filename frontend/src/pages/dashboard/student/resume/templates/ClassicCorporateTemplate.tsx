@@ -13,52 +13,38 @@ function SectionHeading({ title, icon }: { title: string; icon?: React.ReactNode
       data-section-heading=''
       className='mb-2'
       style={{
-        marginBottom: '6px',
-        paddingBottom: '0px',
-        borderBottom: 'none',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
     >
-      <div
+      <h2
+        className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans flex items-center gap-1.5'
         style={{
-          display: 'block',
-          width: '100%',
-          lineHeight: '1.2',
-          paddingBottom: '5px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.12em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.25',
           margin: 0,
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
         }}
       >
-        <h2
-          className='text-[11px] font-bold tracking-widest text-slate-900 uppercase font-sans flex items-center gap-1.5'
-          style={{
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '0.12em',
-            color: '#0f172a',
-            textTransform: 'uppercase',
-            lineHeight: '1.2',
-            margin: 0,
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          {icon}
-          {title}
-        </h2>
-      </div>
+        {icon}
+        {title}
+      </h2>
       <div
         data-heading-line=''
         style={{
           display: 'block',
           width: '100%',
-          height: '1px',
-          backgroundColor: '#334155',
-          marginTop: '0px',
-          marginBottom: '5px',
-          border: 'none',
-          padding: 0,
+          height: '0px',
+          borderTop: '1px solid #334155',
+          marginTop: '6px',
+          marginBottom: '8px',
         }}
       />
     </div>

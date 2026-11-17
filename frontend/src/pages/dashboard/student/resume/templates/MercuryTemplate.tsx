@@ -12,50 +12,36 @@ function SectionHeading({ title }: { title: string }) {
       data-section-heading=''
       className='mb-2'
       style={{
-        marginBottom: '6px',
-        paddingBottom: '0px',
-        borderBottom: 'none',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
     >
-      <div
+      <h2
+        className='text-[11px] font-bold tracking-[0.14em] text-slate-900 uppercase font-sans'
         style={{
-          display: 'block',
-          width: '100%',
-          lineHeight: '1.2',
-          paddingBottom: '5px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          letterSpacing: '0.14em',
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          lineHeight: '1.25',
           margin: 0,
+          padding: 0,
+          display: 'block',
         }}
       >
-        <h2
-          className='text-[11px] font-bold tracking-[0.14em] text-slate-900 uppercase font-sans'
-          style={{
-            fontSize: '11px',
-            fontWeight: 'bold',
-            letterSpacing: '0.14em',
-            color: '#0f172a',
-            textTransform: 'uppercase',
-            lineHeight: '1.2',
-            margin: 0,
-            padding: 0,
-            display: 'block',
-          }}
-        >
-          {title}
-        </h2>
-      </div>
+        {title}
+      </h2>
       <div
         data-heading-line=''
         style={{
           display: 'block',
           width: '100%',
-          height: '2px',
-          backgroundColor: '#0f172a',
-          marginTop: '0px',
-          marginBottom: '5px',
-          border: 'none',
-          padding: 0,
+          height: '0px',
+          borderTop: '2px solid #0f172a',
+          marginTop: '6px',
+          marginBottom: '8px',
         }}
       />
     </div>

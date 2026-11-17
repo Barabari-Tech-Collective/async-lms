@@ -21,6 +21,7 @@ import { RESUME_TEMPLATES } from './templateRegistry';
 import { TemplateModal } from './templates/TemplateModal';
 import { TemplateVisualCard } from './templates/TemplateVisualCard';
 import { TemplateQuickPreviewModal } from './templates/TemplateQuickPreviewModal';
+import { A4ScaledDocumentThumbnail } from './templates/A4ScaledDocumentThumbnail';
 
 interface ResumeDashboardViewProps {
   resumesList: ResumeListItem[];
@@ -66,6 +67,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
   recycleBinCount,
   activeFilter,
   setActiveFilter,
+  activeResumeDoc,
 }) => {
   const carouselRef = useRef<HTMLDivElement>(null);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
@@ -219,7 +221,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
               className='flex items-start gap-6 overflow-x-auto scrollbar-none scroll-smooth pb-2'
               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
-              {/* Blank Card */}
+              {/* Blank Card - Google Docs Style */}
               <div
                 onClick={() => onCreateNew('blank')}
                 className='group flex flex-col shrink-0 cursor-pointer text-left select-none'
@@ -234,19 +236,19 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
                 }}
                 aria-label='Start with a blank resume'
               >
-                <div className='w-[175px] h-[245px] bg-white rounded-lg shadow-xs border-2 border-dashed border-slate-300 group-hover:border-[#344499] group-hover:shadow-lg transition-all flex flex-col items-center justify-center bg-radial from-slate-50 to-white'>
-                  <div className='w-11 h-11 rounded-full border-2 border-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform'>
-                    <Plus size={22} className='text-slate-800' strokeWidth={2.2} />
+                <div className='w-[175px] h-[247px] bg-white rounded-[2px] shadow-xs border border-dashed border-slate-300 group-hover:border-[#1a73e8] group-hover:shadow-md transition-all flex flex-col items-center justify-center bg-radial from-slate-50 to-white'>
+                  <div className='w-11 h-11 rounded-full border border-slate-300 flex items-center justify-center group-hover:scale-110 group-hover:border-[#1a73e8] transition-all bg-white shadow-2xs'>
+                    <Plus size={22} className='text-slate-600 group-hover:text-[#1a73e8]' strokeWidth={2} />
                   </div>
-                  <span className='mt-2.5 text-xs font-bold text-slate-800'>Blank Resume</span>
+                  <span className='mt-2.5 text-xs font-semibold text-slate-800'>Blank resume</span>
                   <span className='text-[10px] text-slate-400'>Start from scratch</span>
                 </div>
-                <div className='mt-2.5 text-left'>
-                  <span className='block text-xs font-bold text-[#223498] group-hover:underline'>
-                    Blank Canvas
+                <div className='mt-2 flex flex-col text-left'>
+                  <span className='font-semibold text-xs text-slate-900 group-hover:text-[#1a73e8] transition-colors truncate'>
+                    Blank document
                   </span>
-                  <span className='block text-[10.5px] text-[#223498]/80 font-normal leading-tight mt-0.5'>
-                    Start completely from scratch
+                  <span className='text-xs text-slate-500 font-normal truncate mt-0.5'>
+                    Start from scratch
                   </span>
                 </div>
               </div>
@@ -270,7 +272,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
             <button
               type='button'
               onClick={() => scrollCarousel('left')}
-              className='absolute -left-3 top-[92px] w-8 h-8 rounded-full bg-white/95 shadow-md border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-white hover:scale-105 transition-all cursor-pointer z-10'
+              className='absolute -left-3 top-[107px] w-8 h-8 rounded-full bg-white/95 shadow-md border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-white hover:scale-105 transition-all cursor-pointer z-10'
               aria-label='Scroll templates left'
             >
               <ChevronLeft size={18} strokeWidth={2.5} />
@@ -278,7 +280,7 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
             <button
               type='button'
               onClick={() => scrollCarousel('right')}
-              className='absolute -right-3 top-[92px] w-8 h-8 rounded-full bg-white/95 shadow-md border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-white hover:scale-105 transition-all cursor-pointer z-10'
+              className='absolute -right-3 top-[107px] w-8 h-8 rounded-full bg-white/95 shadow-md border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-white hover:scale-105 transition-all cursor-pointer z-10'
               aria-label='Scroll templates right'
             >
               <ChevronRight size={18} strokeWidth={2.5} />
@@ -364,24 +366,19 @@ export const ResumeDashboardView: React.FC<ResumeDashboardViewProps> = ({
                       </div>
                     )}
 
-                    {/* Resume Miniature Canvas */}
-                    <div className='w-full h-[220px] bg-slate-50 flex items-center justify-center p-3 relative overflow-hidden border-b border-slate-100'>
-                      <div className='w-full h-full bg-white shadow-2xs rounded-xs p-3 flex flex-col gap-1.5 pointer-events-none select-none border border-slate-200/60'>
-                        <div className='flex items-center justify-between pb-1 border-b border-slate-200'>
-                          <div className='h-2.5 bg-slate-800 rounded-xs w-1/2' />
-                          <div className='h-2 bg-slate-300 rounded-xs w-1/4' />
-                        </div>
-                        <div className='h-1.5 bg-slate-400 rounded-xs w-3/4 mt-1' />
-                        <div className='space-y-1 mt-1'>
-                          <div className='h-1 bg-slate-300 rounded-xs w-full' />
-                          <div className='h-1 bg-slate-200 rounded-xs w-5/6' />
-                          <div className='h-1 bg-slate-200 rounded-xs w-4/6' />
-                        </div>
-                        <div className='h-1.5 bg-slate-700 rounded-xs w-1/3 mt-2' />
-                        <div className='space-y-1 mt-1'>
-                          <div className='h-1 bg-slate-200 rounded-xs w-full' />
-                          <div className='h-1 bg-slate-200 rounded-xs w-11/12' />
-                        </div>
+                    {/* Resume Miniature Canvas - Real Scaled Document */}
+                    <div className='w-full h-[220px] bg-slate-50 flex items-center justify-center p-2 relative overflow-hidden border-b border-slate-100'>
+                      <div className='rounded-[2px] border border-slate-300 shadow-xs overflow-hidden bg-white'>
+                        <A4ScaledDocumentThumbnail
+                          document={
+                            isSelected && activeResumeDoc
+                              ? activeResumeDoc
+                              : resume.document
+                          }
+                          templateId={resume.template_id || resume.document?.templateId || 'ivy-standard'}
+                          width={142}
+                          height={200}
+                        />
                       </div>
 
                       {/* Hover Overlay with Action Buttons */}

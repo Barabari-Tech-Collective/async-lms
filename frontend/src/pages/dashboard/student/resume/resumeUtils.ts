@@ -166,7 +166,7 @@ export function formatHref(url: string | undefined | null, type: 'email' | 'phon
   return trimmed;
 }
 
-export function compressAvatarImage(file: File, maxDim = 320, quality = 0.85): Promise<string> {
+export function compressAvatarImage(file: File, maxDim = 320, quality = 0.88): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = reject;
@@ -174,28 +174,25 @@ export function compressAvatarImage(file: File, maxDim = 320, quality = 0.85): P
       const img = new Image();
       img.onerror = reject;
       img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > height) {
-          if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          }
-        } else {
-          if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
+        const nw = img.naturalWidth || img.width;
+        const nh = img.naturalHeight || img.height;
+        // Center-crop to 1:1 square so avatar is never squished or stretched sideways
+        const sDim = Math.min(nw, nh);
+        const sx = (nw - sDim) / 2;
+        const sy = (nh - sDim) / 2;
+
+        const outDim = Math.min(sDim, maxDim);
         const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = outDim;
+        canvas.height = outDim;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           resolve(e.target?.result as string);
           return;
         }
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, sx, sy, sDim, sDim, 0, 0, outDim, outDim);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.src = e.target?.result as string;

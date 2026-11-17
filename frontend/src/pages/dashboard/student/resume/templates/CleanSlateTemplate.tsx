@@ -10,11 +10,9 @@ function SectionHeading({ title }: { title: string }) {
   return (
     <div
       data-section-heading=''
-      className='border-b border-slate-200 pb-0.5 mb-2'
+      className='mb-2'
       style={{
-        borderBottom: '1px solid #e2e8f0',
-        paddingBottom: '2px',
-        marginBottom: '6px',
+        marginBottom: '4px',
         display: 'block',
         width: '100%',
       }}
@@ -34,6 +32,17 @@ function SectionHeading({ title }: { title: string }) {
       >
         {title}
       </h2>
+      <div
+        data-heading-line=''
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '0px',
+          borderTop: '1px solid #e2e8f0',
+          marginTop: '6px',
+          marginBottom: '8px',
+        }}
+      />
     </div>
   );
 }
@@ -145,9 +154,7 @@ export function CleanSlateTemplate({
     projects: () =>
       data.projects?.length > 0 ? (
         <section className='mb-3'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-3'>
-            Projects
-          </h2>
+          <SectionHeading title='Projects' />
           <div className='space-y-2'>
             {data.projects.map((proj, pIdx) => (
               <div key={proj.id || pIdx} className='page-break-inside-avoid'>
@@ -217,9 +224,7 @@ export function CleanSlateTemplate({
     experience: () =>
       data.experience && data.experience.length > 0 ? (
         <section className='mb-3'>
-          <h2 className='text-[11px] font-medium tracking-[0.2em] text-slate-400 uppercase mb-3'>
-            Experience
-          </h2>
+          <SectionHeading title='Experience' />
           <div className='space-y-4'>
             {data.experience.map((exp, expIdx) => (
               <div key={exp.id || expIdx} className='page-break-inside-avoid'>
