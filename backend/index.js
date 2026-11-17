@@ -1,6 +1,7 @@
 require('dotenv').config();
 
-// from crashing Node 24 due to a read-only ErrorEvent.message property.
+// Prevent transient socket resets (e.g. Neon connection pooler idle TLS drops)
+// and harmless WebSocket ErrorEvents from crashing Node.
 process.on('uncaughtException', (err) => {
   if (
     err &&
@@ -11,8 +12,34 @@ process.on('uncaughtException', (err) => {
     return;
   }
 
+  if (
+    err &&
+    (err.code === 'ECONNRESET' ||
+     err.code === 'EPIPE' ||
+     err.code === 'ETIMEDOUT' ||
+     (err.syscall === 'read' && err.code === 'ECONNRESET') ||
+     err.message?.includes('ECONNRESET'))
+  ) {
+    console.warn('⚠️ [Database/TLS] Ignored transient idle socket disconnect:', err.message || err.code);
+    return;
+  }
+
   console.error('Uncaught Exception:', err);
   process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  if (
+    reason &&
+    (reason.code === 'ECONNRESET' ||
+     reason.code === 'EPIPE' ||
+     reason.code === 'ETIMEDOUT' ||
+     String(reason).includes('ECONNRESET'))
+  ) {
+    console.warn('⚠️ [Database/TLS] Ignored transient socket disconnect in promise rejection:', reason.message || reason);
+    return;
+  }
+  console.error('Unhandled Promise Rejection:', reason);
 });
 
 const express = require('express');
