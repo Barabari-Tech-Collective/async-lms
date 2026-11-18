@@ -1012,6 +1012,7 @@ exports.runEvaluation = async (req, res) => {
           rubric: formattedRubric,
           testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
           assignmentId: targetId,
+          assignmentTitle: assignment.title,
           skipCache: true,
           reEvaluate: true,
         };
@@ -1332,15 +1333,20 @@ exports.syncEvaluationStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verify evaluation exists
+    // Verify evaluation exists (support lookup by evaluation ID or assignment/project ID)
     const evalRes = await pool.query(
-      `SELECT id, status, total_submissions, evaluator_type FROM evaluations WHERE id = $1`,
+      `SELECT id, status, total_submissions, evaluator_type 
+       FROM evaluations 
+       WHERE id::text = $1 OR assignment_id::text = $1 OR college_assignment_id::text = $1 OR project_id::text = $1
+       ORDER BY created_at DESC LIMIT 1`,
       [id],
     );
 
     if (!evalRes.rows.length) {
       return res.status(404).json({ success: false, message: 'Evaluation not found' });
     }
+
+    const evaluationId = evalRes.rows[0].id;
 
     // Count actual rows — don't trust the cached status field
     // (new students can be added after evaluation starts, making the cached counts stale)
@@ -1351,16 +1357,24 @@ exports.syncEvaluationStatus = async (req, res) => {
          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count
        FROM evaluation_results
        WHERE evaluation_id = $1`,
-      [id],
+      [evaluationId],
     );
 
     const totalRows     = parseInt(countsRes.rows[0].total)       || 0;
     const doneRows      = parseInt(countsRes.rows[0].done)        || 0;
     const pendingRows   = parseInt(countsRes.rows[0].pending_count) || 0;
 
+    // If the evaluation was already stopped/cancelled by the user, don't flip it back to 'completed'!
+    if (evalRes.rows[0]?.status === 'cancelled') {
+      return res.json({
+        success: true,
+        progress: { total: totalRows, completed: doneRows, isFinished: true, isCancelled: true },
+      });
+    }
+
     // If there are no pending rows at all, we're done — return immediately
     if (pendingRows === 0 && totalRows > 0) {
-      await pool.query(`UPDATE evaluations SET status = 'completed' WHERE id = $1`, [id]);
+      await pool.query(`UPDATE evaluations SET status = 'completed' WHERE id = $1`, [evaluationId]);
       return res.json({
         success: true,
         progress: { total: totalRows, completed: doneRows, isFinished: true },
@@ -1372,7 +1386,7 @@ exports.syncEvaluationStatus = async (req, res) => {
       `SELECT id, job_id, status_url, submission_id, student_id, created_at
        FROM evaluation_results
        WHERE evaluation_id = $1 AND status = 'pending'`,
-      [id],
+      [evaluationId],
     );
 
     let newlyCompleted = 0;
@@ -1489,10 +1503,18 @@ exports.syncEvaluationStatus = async (req, res) => {
         // 1) Job is 'active' (in execution) for > 5 minutes measured from execution start (worker hung / stalled)
         // 2) Job has been in queue for > 35 minutes (queue completely dead)
         if (jobState !== 'completed' && jobState !== 'failed') {
-          const createdAtTime = job.created_at ? new Date(job.created_at).getTime() : Date.now();
-          const ageMinutes = (Date.now() - createdAtTime) / 60000;
-          const activeDurationMinutes = jobData.processedOn ? (Date.now() - jobData.processedOn) / 60000 : null;
-          const isStalledActive = (jobState === 'active' && (activeDurationMinutes !== null ? activeDurationMinutes > 5 : ageMinutes > 35));
+          // Use BullMQ queue timestamp if available (accurate to the millisecond the job entered Redis);
+          // If falling back to DB created_at, cap any legacy timestamps older than 2 hours to Date.now()
+          // so re-evaluating historical submissions never calculates phantom age (e.g. 34,709 minutes).
+          const rawJobTimestamp = jobData.timestamp ? Number(jobData.timestamp) : null;
+          const dbCreatedTime = job.created_at ? new Date(job.created_at).getTime() : Date.now();
+          const effectiveStartTime = rawJobTimestamp || (Date.now() - dbCreatedTime > 7200000 ? Date.now() : dbCreatedTime);
+          const ageMinutes = Math.max(0, (Date.now() - effectiveStartTime) / 60000);
+
+          const activeDurationMinutes = jobData.processedOn ? Math.max(0, (Date.now() - Number(jobData.processedOn)) / 60000) : null;
+          // Job is ONLY stalled in 'active' if activeDurationMinutes is known and > 5 mins.
+          // If activeDurationMinutes is null (just transitioned), it is NOT stalled.
+          const isStalledActive = (jobState === 'active' && activeDurationMinutes !== null && activeDurationMinutes > 5);
           const isQueueDead = ageMinutes > 35;
 
           if (isStalledActive || isQueueDead) {
@@ -2869,7 +2891,7 @@ In your generated "testCases" array:
           delete tc.tolerance;
         }
 
-        // Sanitize function_check: eliminate arithmetic PRODUCT trap (students write =A*B, not =PRODUCT(A,B))
+        // Sanitize function_check: eliminate arithmetic PRODUCT trap and auto-expand equivalent functions
         if (tc.type === 'function_check' && Array.isArray(tc.acceptedFunctions)) {
           const isOnlyProduct = tc.acceptedFunctions.every(f => f.toUpperCase() === 'PRODUCT');
           if (isOnlyProduct) {
@@ -2877,6 +2899,26 @@ In your generated "testCases" array:
             tc.mustBeFormula = true;
             tc.forbiddenConstants = true;
             delete tc.acceptedFunctions;
+          } else {
+            // Auto-expand modern and alternative Excel function equivalents
+            const upperFns = new Set(tc.acceptedFunctions.map(f => String(f).toUpperCase()));
+            if (upperFns.has('VLOOKUP') || upperFns.has('XLOOKUP')) {
+              upperFns.add('VLOOKUP');
+              upperFns.add('XLOOKUP');
+              upperFns.add('INDEX');
+              upperFns.add('MATCH');
+            }
+            if (upperFns.has('CONCAT') || upperFns.has('CONCATENATE')) {
+              upperFns.add('CONCAT');
+              upperFns.add('CONCATENATE');
+              upperFns.add('TEXTJOIN');
+            }
+            if (upperFns.has('TEXTBEFORE') || upperFns.has('TEXTAFTER')) {
+              upperFns.add('MID');
+              upperFns.add('LEFT');
+              upperFns.add('RIGHT');
+            }
+            tc.acceptedFunctions = Array.from(upperFns);
           }
         }
 
@@ -2948,20 +2990,35 @@ In your generated "testCases" array:
           if (!coveredCriteria.has(rName)) {
             const lowerR = rName.toLowerCase();
             let fallbackType = 'data_check';
-            let fallbackProps = { range: 'B4:I35', disallowBlanks: true };
+            let fallbackProps = { range: 'A2:Z100', disallowBlanks: false, minRowCount: 2 };
 
             if (lowerR.includes('formula') || lowerR.includes('calc') || lowerR.includes('profit') || lowerR.includes('margin') || lowerR.includes('sum')) {
               fallbackType = 'formula_range_check';
-              fallbackProps = { range: 'I4:I35', mustBeFormula: true, forbiddenConstants: true };
+              fallbackProps = { range: 'A2:Z100', mustBeFormula: true, forbiddenConstants: true, anchor: 'Total' };
             } else if (lowerR.includes('format') || lowerR.includes('style') || lowerR.includes('bold')) {
               fallbackType = 'format_check';
-              fallbackProps = { range: 'B2:I3', bold: true };
+              fallbackProps = { range: 'A1:Z2', bold: true };
             } else if (lowerR.includes('text') || lowerR.includes('clean') || lowerR.includes('proper') || lowerR.includes('trim')) {
               fallbackType = 'function_check';
-              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['PROPER', 'TRIM'] };
+              fallbackProps = { range: 'A2:Z100', acceptedFunctions: ['PROPER', 'TRIM', 'CONCAT', 'CONCATENATE', 'LEFT', 'MID', 'RIGHT'] };
             } else if (lowerR.includes('lookup') || lowerR.includes('xlookup') || lowerR.includes('vlookup')) {
               fallbackType = 'function_check';
-              fallbackProps = { range: 'E4:E35', acceptedFunctions: ['VLOOKUP', 'XLOOKUP', 'INDEX'] };
+              fallbackProps = { range: 'A2:Z100', acceptedFunctions: ['VLOOKUP', 'XLOOKUP', 'INDEX', 'MATCH', 'FILTER'] };
+            } else if (lowerR.includes('pivot') || lowerR.includes('summary') || lowerR.includes('model') || lowerR.includes('relation') || lowerR.includes('diagram')) {
+              fallbackType = 'pivot_check';
+              fallbackProps = { minPivotTables: 1 };
+            } else if (lowerR.includes('chart') || lowerR.includes('graph') || lowerR.includes('visual')) {
+              fallbackType = 'chart_check';
+              fallbackProps = { minCharts: 1 };
+            } else if (lowerR.includes('query') || lowerR.includes('etl')) {
+              fallbackType = 'power_query_check';
+              fallbackProps = { requireQuery: true };
+            } else if (lowerR.includes('conditional')) {
+              fallbackType = 'conditional_formatting_check';
+              fallbackProps = { minRules: 1 };
+            } else if (lowerR.includes('validation') || lowerR.includes('dropdown')) {
+              fallbackType = 'data_validation_check';
+              fallbackProps = { minValidations: 1 };
             }
 
             parsedJson.push({
@@ -2970,8 +3027,30 @@ In your generated "testCases" array:
               ...(targetSheet ? { sheet: targetSheet } : {}),
               ...fallbackProps
             });
+            coveredCriteria.add(rName);
           }
         }
+
+        // Align test case weights to rubric weights
+        const rubricWeightMap = {};
+        rubricList.forEach(r => {
+          const rName = typeof r === 'string' ? r : r.name;
+          const rWeight = typeof r === 'object' && Number(r.weight) > 0 ? Number(r.weight) : (100 / Math.max(rubricNames.length, 1));
+          if (rName) rubricWeightMap[rName] = rWeight;
+        });
+
+        const critCount = {};
+        parsedJson.forEach(tc => {
+          const cName = tc.criterion || rubricNames[0] || 'General';
+          critCount[cName] = (critCount[cName] || 0) + 1;
+        });
+
+        parsedJson.forEach(tc => {
+          const cName = tc.criterion || rubricNames[0] || 'General';
+          const totalCritWeight = rubricWeightMap[cName] || (100 / Math.max(Object.keys(critCount).length, 1));
+          const count = critCount[cName] || 1;
+          tc.weight = Math.round((totalCritWeight / count) * 100) / 100;
+        });
       }
     }
 
@@ -3508,7 +3587,10 @@ exports.reEvaluateSubmission = async (req, res) => {
     } else {
       // Fetch the evaluation to get assignmentId or collegeAssignmentId or project_id
       const evalRes = await client.query(
-        `SELECT assignment_id, college_assignment_id, project_id FROM evaluations WHERE id::text = $1::text`,
+        `SELECT id, assignment_id, college_assignment_id, project_id 
+         FROM evaluations 
+         WHERE id::text = $1::text OR assignment_id::text = $1::text OR college_assignment_id::text = $1::text OR project_id::text = $1::text
+         ORDER BY created_at DESC LIMIT 1`,
         [evaluationId]
       );
 
@@ -3517,6 +3599,7 @@ exports.reEvaluateSubmission = async (req, res) => {
       }
 
       const evaluation = evalRes.rows[0];
+      evaluationId = evaluation.id; // Use canonical evaluation ID
       isCollegeAssignment = !!evaluation.college_assignment_id;
       isProject = !!evaluation.project_id;
       assignmentId = isCollegeAssignment
@@ -3617,7 +3700,7 @@ exports.reEvaluateSubmission = async (req, res) => {
            (evaluation_id, submission_id, student_id, student_name, status, marks, feedback)
          VALUES ($1, $2, $3, $4, 'pending', 0, '{}'::jsonb)
          ON CONFLICT (evaluation_id, submission_id) DO UPDATE
-         SET status = 'pending', marks = 0, feedback = '{}'::jsonb`,
+         SET status = 'pending', marks = 0, feedback = '{}'::jsonb, created_at = NOW()`,
         [evaluationId, s.submission_id, s.user_id || s.student_id, s.student_name]
       );
     }
@@ -3829,6 +3912,7 @@ exports.reEvaluateSubmission = async (req, res) => {
               rubric: formattedRubric,
               testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
               assignmentId: assignmentId,
+              assignmentTitle: assignment.title,
               skipCache: true,
               reEvaluate: true,
             };
@@ -3867,6 +3951,8 @@ exports.reEvaluateSubmission = async (req, res) => {
                 fileUrl: fileUrl,
                 rubric: formattedRubric,
                 testCases: Array.isArray(rawTestCases) ? rawTestCases : (rawTestCases?.testCases || []),
+                assignmentId: assignmentId,
+                assignmentTitle: assignment.title,
               };
 
               const response = await postToEvaluatorWithRetry(evaluatorUrl, payload, {
@@ -4067,7 +4153,7 @@ exports.reEvaluateSubmission = async (req, res) => {
     for (const j of jobIdsAndLinks) {
       await pool.query(
         `UPDATE evaluation_results
-         SET job_id = $1, status = 'pending', status_url = $2
+         SET job_id = $1, status = 'pending', status_url = $2, created_at = NOW()
          WHERE evaluation_id = $3 AND submission_id = $4`,
         [j.jobId, j.statusUrl, evaluationId, j.submissionId],
       );
@@ -4124,16 +4210,28 @@ exports.stopEvaluation = async (req, res) => {
     await client.query('BEGIN');
 
     let targetEvalId = id;
+    let evalRecord = null;
 
-    if (!targetEvalId && assignmentId) {
+    if (targetEvalId) {
       const evalRes = await client.query(
-        `SELECT id FROM evaluations 
+        `SELECT id, assignment_id, college_assignment_id, project_id, evaluator_type 
+         FROM evaluations WHERE id = $1`,
+        [targetEvalId]
+      );
+      if (evalRes.rows.length > 0) {
+        evalRecord = evalRes.rows[0];
+      }
+    } else if (assignmentId) {
+      const evalRes = await client.query(
+        `SELECT id, assignment_id, college_assignment_id, project_id, evaluator_type 
+         FROM evaluations 
          WHERE assignment_id = $1 OR college_assignment_id = $1 OR project_id = $1 
          ORDER BY created_at DESC LIMIT 1`,
         [assignmentId]
       );
       if (evalRes.rows.length > 0) {
         targetEvalId = evalRes.rows[0].id;
+        evalRecord = evalRes.rows[0];
       }
     }
 
@@ -4149,16 +4247,27 @@ exports.stopEvaluation = async (req, res) => {
       breakdown: []
     });
 
-    // Mark pending submissions as stopped/cancelled
+    // 1. Fetch pending and running job IDs so central-evaluator can remove them from Redis queues
+    const pendingJobsRes = await client.query(
+      `SELECT job_id, status_url FROM evaluation_results 
+       WHERE evaluation_id = $1 AND status IN ('pending', 'evaluating', 'running', 'in_progress')`,
+      [targetEvalId]
+    );
+
+    const jobIdsToCancel = pendingJobsRes.rows
+      .map(r => r.job_id || (r.status_url || '').split('/').pop())
+      .filter(Boolean);
+
+    // 2. Mark pending / in-progress submissions as stopped/cancelled
     const updateResultsRes = await client.query(
       `UPDATE evaluation_results 
        SET status = 'cancelled', marks = 0, feedback = $1::jsonb 
-       WHERE evaluation_id = $2 AND status = 'pending'
+       WHERE evaluation_id = $2 AND status IN ('pending', 'evaluating', 'running', 'in_progress')
        RETURNING id`,
       [cancelFeedback, targetEvalId]
     );
 
-    // Update evaluation status
+    // 3. Update evaluation status to cancelled
     await client.query(
       `UPDATE evaluations 
        SET status = 'cancelled' 
@@ -4168,13 +4277,35 @@ exports.stopEvaluation = async (req, res) => {
 
     await client.query('COMMIT');
 
+    // 4. Proactively tell central-evaluator to cancel the jobs in BullMQ queues
+    try {
+      const baseUrl = process.env.CENTRAL_EVALUATOR_URL || 'http://127.0.0.1:4000';
+      const resolvedAssignmentId = assignmentId || evalRecord?.assignment_id || evalRecord?.college_assignment_id || evalRecord?.project_id;
+      const evalType = (evalRecord?.evaluator_type || '').toLowerCase();
+      await axios.post(
+        `${baseUrl}/jobs/cancel`,
+        {
+          type: evalType || undefined,
+          assignmentId: resolvedAssignmentId,
+          evaluationId: targetEvalId,
+          jobIds: jobIdsToCancel
+        },
+        {
+          headers: { 'x-api-key': process.env.CENTRAL_EVALUATOR_API_KEY },
+          timeout: 5000
+        }
+      );
+    } catch (cancelErr) {
+      console.warn('Central evaluator job cancellation notice:', cancelErr.message);
+    }
+
     return res.json({
       success: true,
       message: `Evaluation stopped successfully. ${updateResultsRes.rowCount} pending submission(s) cancelled.`,
       cancelledCount: updateResultsRes.rowCount
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Stop evaluation error:', error);
     return res.status(500).json({ success: false, message: error.message });
   } finally {

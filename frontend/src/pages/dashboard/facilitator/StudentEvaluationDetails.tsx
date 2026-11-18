@@ -364,12 +364,15 @@ export default function StudentEvaluationDetails() {
   const isPermissionOrAccessFailure =
     !failureReason.includes('cannot access') &&
     !failureReason.includes('exception') &&
-    (failureReason.includes('permission') ||
-    (failureReason.includes('access denied') || failureReason.includes('access restricted')) ||
-    failureReason.includes('private') ||
-    failureReason.includes('restricted') ||
-    failureReason.includes('anyone with the link') ||
-    failureReason.includes('returned an html web page instead of'));
+    (
+      failureReason.includes('permission') ||
+      failureReason.includes('access denied') ||
+      failureReason.includes('access restricted') ||
+      failureReason.includes('private') ||
+      failureReason.includes('restricted') ||
+      failureReason.includes('anyone with the link') ||
+      failureReason.includes('returned an html web page instead of')
+    );
 
   const isFailed = status === 'failed' || Boolean(
     (marks === 0 || studentResult?.marks === 0) &&

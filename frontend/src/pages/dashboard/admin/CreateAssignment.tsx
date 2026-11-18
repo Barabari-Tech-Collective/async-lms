@@ -164,7 +164,7 @@ export default function CreateAssignment() {
   const [generatingRubric, setGeneratingRubric] = useState(false);
 
   // ─── Editor Type ───
-  const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'rich');
+  const [editorType, setEditorType] = useState<'rich' | 'markdown'>(editData.editorType || 'markdown');
 
   const handleSwitchEditor = (newType: 'rich' | 'markdown') => {
     if (newType === editorType) return;

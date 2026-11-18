@@ -104,7 +104,7 @@ const CapstoneModal: React.FC<CapstoneModalProps> = ({
   const [rubric, setRubric] = useState<string>(
     editData?.rubric ? (typeof editData.rubric === 'string' ? editData.rubric : JSON.stringify(editData.rubric, null, 2)) : ''
   );
-  const [editorType, setEditorType] = useState<'rich' | 'markdown'>('rich');
+  const [editorType, setEditorType] = useState<'rich' | 'markdown'>('markdown');
   const [generating, setGenerating] = useState(false);
   const [generatingRubric, setGeneratingRubric] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
