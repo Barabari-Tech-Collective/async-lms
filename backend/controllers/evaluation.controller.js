@@ -2400,6 +2400,17 @@ CRITICAL ARCHITECTURAL RULES (ZERO TOLERANCE FOR DEVIATION)
    - SUMMARY FORMULA EXCLUSION RULE: DO NOT add an "anchor" on "function_check" when evaluating a summary total cell (e.g. range "F5:F5" with acceptedFunctions: ["SUM"])! The anchor label (e.g. "Grand Total") resides in an adjacent text cell (E5); adding the anchor redirects the function check to the text cell and causes a false failure. Use "range" directly without an anchor.
    - SUMMARY VALUE CHECKS: For "value_check", DO use the summary label as an anchor with direction "right" and offset 1 (e.g. anchor: "Grand Total", direction: "right", offset: 1, expectedValue: 8000).
    - NEVER specify a multi-column rectangle (like "D4:E35") when evaluating a single formula or function! Target ONLY the single formula column (e.g. "E4:E35") and provide the "anchor".
+   - ALTERNATIVE IMPLEMENTATION INDEPENDENCE (CRITICAL ANTI-CONFLICT RULE):
+     * When instructions or rubrics allow alternative methods (e.g. "PivotTable OR formulas like SUMIF/SUMIFS", or "XLOOKUP or VLOOKUP"):
+     * YOU MUST GENERATE ONLY ONE PRIMARY TEST CASE for that criterion!
+     * NEVER generate BOTH a "pivot_check" AND a "function_check" (or "formula_range_check") for the same criterion. Automated test suites combine multiple test cases under a single criterion with AND logic. Demanding both means a student who builds a perfect PivotTable will fail the formula check, and a student who uses formulas will fail the pivot check!
+     * If a PivotTable is permitted/suggested, generate a single "pivot_check". If formulas are requested, generate "function_check" with all accepted functions (e.g. ["SUMIF", "SUMIFS", "SUM"] or ["XLOOKUP", "VLOOKUP", "INDEX"]).
+   - NEVER TARGET RAW TRANSACTION DATA SHEETS FOR SUMMARY CHECKS:
+     * Raw data sheets (e.g. "Sales Database", "Transactions", "Raw Data") contain unaggregated transaction rows.
+     * NEVER generate "function_check" or "formula_range_check" with arbitrary ranges (like "B4:B20") pointing to raw data sheets! Summary formulas and aggregations belong either on the "Dashboard" sheet or on a dedicated summary sheet.
+   - RESILIENT DASHBOARD KPI CHECKS:
+     * For dashboard KPI cards (e.g. "Total Sales", "Total Revenue"), DO NOT generate rigid single-cell coordinate checks (e.g. range "B2:B2" for SUM, range "B2:B2" for bold, range "B2:B2" for center). Real students place cards in different cells (C2, D2), merge cells (B2:D3), or link them from summary tabs.
+     * For KPI formula checks, use sheet "Dashboard", acceptedFunctions: ["SUM", "SUMIF", "SUMIFS"], and mustBeFormula: true WITHOUT locking to an exact cell address.
 
 A. "formula_range_check" (Dynamic Calculations & Anti-Cheat):
    Verifies that a column contains dynamic calculated formulas without static hardcoded numbers or static math cheats (e.g. =1000).
@@ -2553,8 +2564,10 @@ G. "pivot_check" (Pivot Tables & Data Modeling):
    Verifies that the student created native Pivot Table(s) or Data Model aggregations.
    CRITICAL COMPETENCY RULE:
    - Always set "minPivotTables": 1.
+   - PIVOT TABLE SHEET AGNOSTICISM: Always OMIT the "sheet" property on "pivot_check"! Excel automatically generates PivotTables on a new worksheet (e.g. "Sheet1", "Pivot Tables"). Setting "sheet" to the raw data sheet causes false failures.
    - ONLY provide "requiredField" if the assignment instructions literally and explicitly mandate that specific field name.
    - If the instructions do not explicitly mandate exact field names, DO NOT invent arbitrary field names (like "Department" or "Product_ID")! Omit "requiredField" so the engine evaluates the student's true competency in building working Pivot Tables and aggregations.
+   - NEVER generate "formula_range_check" or "function_check" alongside "pivot_check" under the same criterion!
    {
      "criterion": "<Exact Rubric Criterion Name>",
      "type": "pivot_check",
