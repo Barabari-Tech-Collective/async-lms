@@ -214,15 +214,17 @@ export default function CapstoneView() {
 
   const allowedTypes: SubmissionType[] = useMemo(() => {
     const raw = capstone?.allowed_submission_types;
-    if (!raw) return ALL_SUBMISSION_TYPES;
-    if (Array.isArray(raw) && raw.length > 0) return raw as SubmissionType[];
-    if (typeof raw === 'string') {
+    let list: SubmissionType[] = ALL_SUBMISSION_TYPES;
+    if (Array.isArray(raw) && raw.length > 0) {
+      list = raw as SubmissionType[];
+    } else if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed as SubmissionType[];
+        if (Array.isArray(parsed) && parsed.length > 0) list = parsed as SubmissionType[];
       } catch {}
     }
-    return ALL_SUBMISSION_TYPES;
+    const valid = list.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    return valid.length > 0 ? valid : ALL_SUBMISSION_TYPES;
   }, [capstone?.allowed_submission_types]);
 
   useEffect(() => {
@@ -288,7 +290,7 @@ export default function CapstoneView() {
       }
     } else {
       if (!link.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
@@ -508,8 +510,8 @@ export default function CapstoneView() {
                           : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span>{cfg.emoji}</span>
-                      <span className='truncate'>{cfg.shortLabel}</span>
+                      <span>{cfg?.emoji || '📄'}</span>
+                      <span className='truncate'>{cfg?.shortLabel || type}</span>
                     </button>
                   );
                 })}
