@@ -577,6 +577,14 @@ export default function ResumeBuilder() {
         background-position: center center !important;
         background-repeat: no-repeat !important;
       }
+      /* Fix html2canvas SVG icon vertical misalignment in inline links/flex containers */
+      .exporting-pdf a svg,
+      .exporting-pdf .inline-flex > svg,
+      .exporting-pdf [data-contact-links] svg {
+        display: inline-block !important;
+        vertical-align: middle !important;
+        margin-top: 2px !important;
+      }
     `;
     document.head.appendChild(exportStyle);
     previewEl.classList.add('exporting-pdf');
@@ -820,6 +828,22 @@ export default function ResumeBuilder() {
                 }
                 if (computed.stroke && computed.stroke !== 'none') {
                   (svgEl as unknown as HTMLElement).style.stroke = toRgbColor(computed.stroke);
+                }
+              });
+
+              // Fix html2canvas flexbox cross-axis SVG baseline misalignment for icons in links & contact rows
+              printRoot.querySelectorAll<SVGElement>('svg').forEach((svgEl) => {
+                const parent = svgEl.parentElement;
+                if (
+                  parent &&
+                  (parent.tagName === 'A' ||
+                    parent.classList.contains('inline-flex') ||
+                    parent.closest('[data-contact-links]') ||
+                    parent.closest('a'))
+                ) {
+                  svgEl.style.display = 'inline-block';
+                  svgEl.style.verticalAlign = 'middle';
+                  svgEl.style.marginTop = '2px';
                 }
               });
             }

@@ -121,6 +121,14 @@ export default function PublicResumeView() {
           margin-bottom: 5px !important;
           padding: 0 !important;
         }
+        /* Fix html2canvas SVG icon vertical misalignment in inline links/flex containers */
+        .exporting-pdf a svg,
+        .exporting-pdf .inline-flex > svg,
+        .exporting-pdf [data-contact-links] svg {
+          display: inline-block !important;
+          vertical-align: middle !important;
+          margin-top: 2px !important;
+        }
       `;
       document.head.appendChild(exportStyle);
       el.classList.add('exporting-pdf');
@@ -216,6 +224,22 @@ export default function PublicResumeView() {
               }
               return '#1e293b';
             };
+
+            // Fix html2canvas flexbox cross-axis SVG baseline misalignment for icons in links & contact rows
+            clonedDoc.querySelectorAll('svg').forEach((svgEl) => {
+              const parent = svgEl.parentElement;
+              if (
+                parent &&
+                (parent.tagName === 'A' ||
+                  parent.classList.contains('inline-flex') ||
+                  parent.closest('[data-contact-links]') ||
+                  parent.closest('a'))
+              ) {
+                (svgEl as HTMLElement).style.display = 'inline-block';
+                (svgEl as HTMLElement).style.verticalAlign = 'middle';
+                (svgEl as HTMLElement).style.marginTop = '2px';
+              }
+            });
 
             clonedDoc.querySelectorAll('style').forEach((styleEl) => {
               if (styleEl.textContent) {

@@ -350,6 +350,7 @@ export function ContactLinksRow({
 
   return (
     <div
+      data-contact-links=''
       className={`flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[11.5px] font-medium ${
         isCentered ? 'justify-center' : ''
       }`}
@@ -360,7 +361,7 @@ export function ContactLinksRow({
           className={`inline-flex items-center gap-1 hover:underline underline-offset-2 transition-colors ${linkColor}`}
           title='Send Email'
         >
-          <Mail size={12} className={iconColor} />
+          <Mail size={12} className={`${iconColor} shrink-0`} />
           <span>{pi.email}</span>
         </a>
       )}
@@ -373,14 +374,14 @@ export function ContactLinksRow({
           className={`inline-flex items-center gap-1 hover:underline underline-offset-2 transition-colors ${linkColor}`}
           title='WhatsApp / Phone'
         >
-          <Phone size={12} className={iconColor} />
+          <Phone size={12} className={`${iconColor} shrink-0`} />
           <span>{pi.phone}</span>
         </a>
       )}
 
       {pi.location && (
         <span className={`inline-flex items-center gap-1 ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>
-          <MapPin size={12} className={iconColor} />
+          <MapPin size={12} className={`${iconColor} shrink-0`} />
           <span>{pi.location}</span>
         </span>
       )}
@@ -395,7 +396,7 @@ export function ContactLinksRow({
           }`}
           title='LinkedIn Profile'
         >
-          <Linkedin size={12} />
+          <Linkedin size={12} className='shrink-0' />
           <span>LinkedIn</span>
         </a>
       )}
@@ -410,7 +411,7 @@ export function ContactLinksRow({
           }`}
           title='GitHub Profile'
         >
-          <Github size={12} />
+          <Github size={12} className='shrink-0' />
           <span>GitHub</span>
         </a>
       )}

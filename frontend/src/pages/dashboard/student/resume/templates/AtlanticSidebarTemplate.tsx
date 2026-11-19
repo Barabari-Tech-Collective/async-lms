@@ -170,17 +170,17 @@ export function AtlanticSidebarTemplate({
             </div>
 
             {/* Contact Details */}
-            <div className='pt-3 border-t border-white/10 space-y-2 text-[11px] text-slate-200'>
+            <div data-contact-links='' className='pt-3 border-t border-white/10 space-y-2 text-[11px] text-slate-200'>
               <h3 className='text-[10px] font-black tracking-widest text-sky-400 uppercase font-mono mb-2'>
                 CONTACT
               </h3>
 
               {pi.email && (
-                <div className='flex items-center gap-2 overflow-hidden'>
+                <div className='flex items-center gap-2'>
                   <Mail size={12} className='text-sky-400 shrink-0' />
                   <a
                     href={formatHref(pi.email, 'email')}
-                    className='truncate hover:text-white hover:underline'
+                    className='hover:text-white hover:underline break-all'
                   >
                     {pi.email}
                   </a>
