@@ -1,7 +1,6 @@
 require('dotenv').config();
 
-// Prevent transient socket resets (e.g. Neon connection pooler idle TLS drops)
-// and harmless WebSocket ErrorEvents from crashing Node.
+// Prevent known harmless driver WebSocket ErrorEvents from crashing Node
 process.on('uncaughtException', (err) => {
   if (
     err &&
@@ -12,33 +11,11 @@ process.on('uncaughtException', (err) => {
     return;
   }
 
-  if (
-    err &&
-    (err.code === 'ECONNRESET' ||
-     err.code === 'EPIPE' ||
-     err.code === 'ETIMEDOUT' ||
-     (err.syscall === 'read' && err.code === 'ECONNRESET') ||
-     err.message?.includes('ECONNRESET'))
-  ) {
-    console.warn('⚠️ [Database/TLS] Ignored transient idle socket disconnect:', err.message || err.code);
-    return;
-  }
-
   console.error('Uncaught Exception:', err);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  if (
-    reason &&
-    (reason.code === 'ECONNRESET' ||
-     reason.code === 'EPIPE' ||
-     reason.code === 'ETIMEDOUT' ||
-     String(reason).includes('ECONNRESET'))
-  ) {
-    console.warn('⚠️ [Database/TLS] Ignored transient socket disconnect in promise rejection:', reason.message || reason);
-    return;
-  }
   console.error('Unhandled Promise Rejection:', reason);
 });
 
@@ -99,8 +76,8 @@ app.use('/worker/:ip', (req, res, next) => {
   return proxy(req, res, next);
 });
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Request id + client IP, before anything that logs. Also sets X-Request-Id on
 // the response so a user reporting a problem can quote a traceable reference.

@@ -90,7 +90,13 @@ exports.selectSubjects = async (req, res) => {
   }
 
   // Onboarding security guard: Only students still on the onboarding step can use this endpoint
-  const userCheck = await pool.query('SELECT role, onboarding_step FROM users WHERE id = $1', [userId]);
+  const userCheck = await pool.query(
+    `SELECT LOWER(r.role_key) AS role, u.onboarding_step 
+     FROM users u 
+     JOIN roles r ON r.id = u.role_id 
+     WHERE u.id = $1`,
+    [userId],
+  );
   if (!userCheck.rows.length || userCheck.rows[0].role !== 'student' || userCheck.rows[0].onboarding_step !== 'program') {
     return res.status(403).json({
       message: 'Onboarding is already completed. Additional courses must be requested through facilitator approval.',

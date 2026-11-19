@@ -106,11 +106,40 @@ const outboundLimiter = new Semaphore(MAX_CONCURRENT_PROBES);
 // ── 3. SSRF IP Blacklist & Validation ──
 function isPrivateIp(ip) {
   if (!ip || typeof ip !== 'string') return true;
-  const cleanIp = ip.trim().toLowerCase();
+  let cleanIp = ip.trim().toLowerCase();
 
-  // Handle IPv4-mapped IPv6 (e.g., ::ffff:169.254.169.254 or ::ffff:127.0.0.1)
+  // Strip IPv6 brackets if provided e.g. [::1]
+  if (cleanIp.startsWith('[') && cleanIp.endsWith(']')) {
+    cleanIp = cleanIp.slice(1, -1);
+  }
+
+  // Handle NAT64 prefix (64:ff9b::/96)
+  if (cleanIp.startsWith('64:ff9b::') || cleanIp.startsWith('0064:ff9b::')) {
+    const rest = cleanIp.replace(/^(00)?64:ff9b::/, '');
+    if (net.isIPv4(rest)) {
+      return isPrivateIp(rest);
+    }
+  }
+
+  // Handle IPv4-mapped IPv6 (dotted ::ffff:127.0.0.1 or hex ::ffff:7f00:1)
   if (cleanIp.startsWith('::ffff:')) {
-    return isPrivateIp(cleanIp.slice(7));
+    const rest = cleanIp.slice(7);
+    if (net.isIPv4(rest)) {
+      return isPrivateIp(rest);
+    }
+    // Hex notation: e.g. 7f00:1 or a9fe:a9fe
+    const hexParts = rest.split(':');
+    if (hexParts.length === 2) {
+      const p1 = parseInt(hexParts[0], 16);
+      const p2 = parseInt(hexParts[1], 16);
+      if (!isNaN(p1) && !isNaN(p2)) {
+        const b1 = (p1 >> 8) & 0xff;
+        const b2 = p1 & 0xff;
+        const b3 = (p2 >> 8) & 0xff;
+        const b4 = p2 & 0xff;
+        return isPrivateIp(`${b1}.${b2}.${b3}.${b4}`);
+      }
+    }
   }
 
   if (net.isIPv4(cleanIp)) {

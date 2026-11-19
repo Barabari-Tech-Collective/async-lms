@@ -180,7 +180,9 @@ async function removeStudentFromSubject({ userId, subjectId, force = false }) {
   try {
     await client.query('BEGIN');
 
-    // Delete from user_subjects
+    // Delete enrollment from user_subjects.
+    // DESIGN INTENT: Historical lesson progress and exercise submissions are deliberately preserved
+    // so that if a student is subsequently re-enrolled, their completed work is restored without data loss.
     await client.query(
       `DELETE FROM user_subjects WHERE user_id = $1 AND subject_id = $2`,
       [userId, subjectId],
@@ -297,6 +299,20 @@ async function requestEnrollment({ userId, subjectId }) {
     throw err;
   }
 
+  // 3b. Anti-Spam: 24-hour rejection cooldown to protect facilitators from repeated spam requests
+  const recentRejected = await pool.query(
+    `SELECT updated_at FROM enrollment_requests 
+     WHERE user_id = $1 AND subject_id = $2 AND status = 'rejected' 
+       AND updated_at > NOW() - INTERVAL '24 hours'
+     ORDER BY updated_at DESC LIMIT 1`,
+    [userId, subjectId],
+  );
+  if (recentRejected.rows.length > 0) {
+    const err = new Error('Your previous enrollment request was recently rejected. Please wait 24 hours before submitting another request.');
+    err.statusCode = 429;
+    throw err;
+  }
+
   // 4. Insert new pending request (guarded against concurrent inserts by unique partial index)
   let insertRes;
   try {
@@ -349,9 +365,9 @@ async function requestEnrollment({ userId, subjectId }) {
           )
         );
       } else {
-        // Fallback: Notify admins if no facilitator is assigned
+        // Fallback: Notify admins if no facilitator is assigned to this college/subject pair
         const adminRes = await pool.query(
-          `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = 'ADMIN' AND u.deleted_at IS NULL LIMIT 5`,
+          `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = 'ADMIN' AND u.deleted_at IS NULL ORDER BY u.created_at ASC LIMIT 10`,
         );
         await Promise.allSettled(
           adminRes.rows.map((adm) =>
@@ -365,6 +381,22 @@ async function requestEnrollment({ userId, subjectId }) {
           )
         );
       }
+    } else {
+      // Fallback: Student has no college profile assigned yet; ensure admins are notified
+      const adminRes = await pool.query(
+        `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.role_key = 'ADMIN' AND u.deleted_at IS NULL ORDER BY u.created_at ASC LIMIT 10`,
+      );
+      await Promise.allSettled(
+        adminRes.rows.map((adm) =>
+          notify({
+            userId: adm.id,
+            type: 'general',
+            title: 'New Course Enrollment Request (Unassigned Student)',
+            body: `${studentName} requested enrollment in ${subjectName} (Student has no college assigned).`,
+            link: '/dashboard/admin/requests',
+          })
+        )
+      );
     }
   } catch (notifErr) {
     console.warn('[requestEnrollment] Notification dispatch warning:', notifErr.message);
@@ -424,15 +456,27 @@ async function reviewEnrollmentRequest({
     throw err;
   }
 
-  // 2. Facilitator scoping check
+  // 2. Facilitator scoping check: Enforce exact (college_id, subject_id) pair verification
   if (!isAdmin) {
-    const hasCollegeAccess =
-      Array.isArray(allowedCollegeIds) && allowedCollegeIds.includes(reqItem.college_id);
-    const hasSubjectAccess =
-      Array.isArray(allowedSubjectIds) && allowedSubjectIds.includes(reqItem.subject_id);
+    if (!reqItem.college_id) {
+      const err = new Error('You do not have permission to review requests for unassigned students');
+      err.statusCode = 403;
+      throw err;
+    }
+    const pairRes = await pool.query(
+      `SELECT 1 FROM facilitator_colleges fc
+       JOIN facilitator_subjects fs ON fs.facilitator_id = fc.facilitator_id
+       WHERE fc.facilitator_id = $1
+         AND fc.college_id = $2
+         AND fs.subject_id = $3
+         AND fc.is_deleted = false
+         AND fs.is_deleted = false
+       LIMIT 1`,
+      [reviewerId, reqItem.college_id, reqItem.subject_id],
+    );
 
-    if (!hasCollegeAccess || !hasSubjectAccess) {
-      const err = new Error('You do not have permission to review requests for this student or course');
+    if (pairRes.rows.length === 0) {
+      const err = new Error('You do not have permission to review requests for this student and course pair');
       err.statusCode = 403;
       throw err;
     }
@@ -463,7 +507,6 @@ async function reviewEnrollmentRequest({
     );
 
     if (updateRes.rows.length === 0) {
-      await client.query('ROLLBACK');
       const err = new Error('Request has already been reviewed by another instructor or admin');
       err.statusCode = 409;
       throw err;
@@ -520,6 +563,7 @@ async function listEnrollmentRequests({
   search = '',
   allowedCollegeIds = null,
   allowedSubjectIds = null,
+  facilitatorId = null,
   isAdmin = false,
   limit = 20,
   offset = 0,
@@ -537,14 +581,27 @@ async function listEnrollmentRequests({
   }
 
   if (!isAdmin) {
-    if (!Array.isArray(allowedCollegeIds) || allowedCollegeIds.length === 0 ||
-        !Array.isArray(allowedSubjectIds) || allowedSubjectIds.length === 0) {
+    if (facilitatorId) {
+      whereClauses.push(
+        `EXISTS (
+          SELECT 1 FROM facilitator_colleges fc
+          JOIN facilitator_subjects fs ON fs.facilitator_id = fc.facilitator_id
+          WHERE fc.facilitator_id = $${pIdx++}
+            AND fc.college_id = sp.college_id
+            AND fs.subject_id = er.subject_id
+            AND fc.is_deleted = false
+            AND fs.is_deleted = false
+        )`
+      );
+      params.push(facilitatorId);
+    } else if (Array.isArray(allowedCollegeIds) && Array.isArray(allowedSubjectIds) && allowedCollegeIds.length > 0 && allowedSubjectIds.length > 0) {
+      whereClauses.push(`sp.college_id = ANY($${pIdx++}::uuid[])`);
+      params.push(allowedCollegeIds);
+      whereClauses.push(`er.subject_id = ANY($${pIdx++}::uuid[])`);
+      params.push(allowedSubjectIds);
+    } else {
       return { requests: [], total: 0 };
     }
-    whereClauses.push(`sp.college_id = ANY($${pIdx++}::uuid[])`);
-    params.push(allowedCollegeIds);
-    whereClauses.push(`er.subject_id = ANY($${pIdx++}::uuid[])`);
-    params.push(allowedSubjectIds);
   }
 
   if (search && search.trim()) {

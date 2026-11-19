@@ -1,5 +1,19 @@
-const router = require('express').Router();
+const express = require('express');
+const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const verifyToken = require('../middlewares/verfiyToken');
+
+// Public rate limiter for recruiter-facing resume links
+const publicResumeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { success: false, message: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Route-specific 10MB body parser for rich multi-section resume JSON trees
+const resumeBodyParser = express.json({ limit: '10mb' });
 const {
   chat,
   getResume,
@@ -26,7 +40,7 @@ const {
 } = require('../controllers/assistant.controller');
 
 // ── Public Unauthenticated Resume Access for Recruiters ───────────────────────
-router.get('/public/resume/:id', getPublicResumeById);
+router.get('/public/resume/:id', publicResumeLimiter, getPublicResumeById);
 
 router.post('/chat', verifyToken, chat);
 
@@ -34,7 +48,7 @@ router.post('/chat', verifyToken, chat);
 router.get('/resumes', verifyToken, getAllResumes);
 router.get('/resumes/bin', verifyToken, getRecycleBinResumes);
 router.delete('/resumes/bin/empty', verifyToken, emptyRecycleBin);
-router.post('/resume/new', verifyToken, createResume);
+router.post('/resume/new', verifyToken, resumeBodyParser, createResume);
 router.get('/resume/achievements', verifyToken, getAchievements);
 router.get('/resume/course-capstones', verifyToken, getCourseCapstones);
 router.post('/resume/generate', verifyToken, generateResume);
@@ -43,7 +57,7 @@ router.post('/resume/optimize', verifyToken, optimizeWithJD);
 
 // Specific resume operations (by UUID)
 router.get('/resume/:id', verifyToken, getResumeById);
-router.put('/resume/:id', verifyToken, updateResumeById);
+router.put('/resume/:id', verifyToken, resumeBodyParser, updateResumeById);
 router.patch('/resume/:id/rename', verifyToken, renameResume);
 router.post('/resume/:id/duplicate', verifyToken, duplicateResume);
 router.patch('/resume/:id/primary', verifyToken, setPrimaryResume);
@@ -53,7 +67,7 @@ router.delete('/resume/:id', verifyToken, deleteResumeById);
 
 // Legacy Single-Resume Endpoints (Backward-Compatibility)
 router.get('/resume', verifyToken, getResume);
-router.put('/resume', verifyToken, saveResume);
+router.put('/resume', verifyToken, resumeBodyParser, saveResume);
 router.delete('/resume', verifyToken, deleteResume);
 router.post('/resume', verifyToken, generateResume); // backward-compatible alias
 

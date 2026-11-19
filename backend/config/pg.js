@@ -45,10 +45,6 @@ const poolConfig = connectionString
 
 const pool = new Pool(poolConfig);
 
-pool.on('connect', (client) => {
-  client.query('SET search_path TO "$user", public;').catch(() => {});
-});
-
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
 });
@@ -807,7 +803,7 @@ pool.on('error', (err, client) => {
       CREATE INDEX IF NOT EXISTS idx_enrollment_requests_user ON enrollment_requests(user_id);
       CREATE INDEX IF NOT EXISTS idx_enrollment_requests_subject ON enrollment_requests(subject_id);
       CREATE INDEX IF NOT EXISTS idx_enrollment_requests_created_at ON enrollment_requests(created_at DESC);
-    `).catch((err) => console.warn('[Migration] enrollment_requests setup notice:', err.message));
+    `);
 
     // ── Student Resumes (Placement Assistance Resume Builder) ─────────────────────
     await client.query(`
@@ -838,7 +834,7 @@ pool.on('error', (err, client) => {
 
       CREATE INDEX IF NOT EXISTS idx_student_resumes_user_deleted
         ON student_resumes(user_id, deleted_at);
-    `).catch((err) => console.warn('[Migration] student_resumes setup notice:', err.message));
+    `);
     console.log('[Migration] student_resumes table, recycle bin support, and optimistic concurrency index verified.');
 
   } catch (error) {

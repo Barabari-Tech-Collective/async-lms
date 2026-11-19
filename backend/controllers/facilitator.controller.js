@@ -3649,16 +3649,17 @@ exports.addStudentCourse = async (req, res) => {
       return res.status(400).json({ message: 'Invalid or missing subject_id' });
     }
 
-    if (!subjectIds.includes(subject_id)) {
-      return res.status(403).json({ message: 'You are not authorized to assign this course' });
-    }
-
-    const profileCheck = await pool.query(
-      'SELECT 1 FROM student_profiles WHERE user_id = $1 AND college_id = ANY($2::uuid[])',
-      [studentId, collegeIds],
+    // Pair-based authorization: Ensure facilitator is assigned to BOTH this student's college AND this subject together
+    const pairCheck = await pool.query(
+      `SELECT 1 FROM student_profiles sp
+       JOIN facilitator_colleges fc ON fc.college_id = sp.college_id AND fc.facilitator_id = $1 AND fc.is_deleted = false
+       JOIN facilitator_subjects fs ON fs.subject_id = $2 AND fs.facilitator_id = $1 AND fs.is_deleted = false
+       WHERE sp.user_id = $3
+       LIMIT 1`,
+      [req.user.id, subject_id, studentId],
     );
-    if (profileCheck.rows.length === 0) {
-      return res.status(403).json({ message: 'Access denied: Student is not in your assigned colleges' });
+    if (pairCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'Access denied: You are not authorized to assign this course to this student' });
     }
 
     await courseEnrollmentService.enrollStudentInSubject(null, {
@@ -3710,16 +3711,17 @@ exports.removeStudentCourse = async (req, res) => {
       return res.status(400).json({ message: 'Invalid subject ID format' });
     }
 
-    if (!subjectIds.includes(subjectId)) {
-      return res.status(403).json({ message: 'You are not authorized to revoke this course' });
-    }
-
-    const profileCheck = await pool.query(
-      'SELECT 1 FROM student_profiles WHERE user_id = $1 AND college_id = ANY($2::uuid[])',
-      [studentId, collegeIds],
+    // Pair-based authorization: Ensure facilitator is assigned to BOTH this student's college AND this subject together
+    const pairCheck = await pool.query(
+      `SELECT 1 FROM student_profiles sp
+       JOIN facilitator_colleges fc ON fc.college_id = sp.college_id AND fc.facilitator_id = $1 AND fc.is_deleted = false
+       JOIN facilitator_subjects fs ON fs.subject_id = $2 AND fs.facilitator_id = $1 AND fs.is_deleted = false
+       WHERE sp.user_id = $3
+       LIMIT 1`,
+      [req.user.id, subjectId, studentId],
     );
-    if (profileCheck.rows.length === 0) {
-      return res.status(403).json({ message: 'Access denied: Student is not in your assigned colleges' });
+    if (pairCheck.rows.length === 0) {
+      return res.status(403).json({ message: 'Access denied: You are not authorized to revoke this course for this student' });
     }
 
     const result = await courseEnrollmentService.removeStudentFromSubject({
@@ -3760,6 +3762,7 @@ exports.getEnrollmentRequests = async (req, res) => {
       search: search || '',
       allowedCollegeIds: collegeIds,
       allowedSubjectIds: subjectIds,
+      facilitatorId: req.user.id,
       isAdmin: false,
       limit: parseInt(limit, 10),
       offset: parseInt(offset, 10),

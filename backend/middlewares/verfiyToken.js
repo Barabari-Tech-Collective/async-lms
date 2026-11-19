@@ -60,8 +60,9 @@ const verifyToken = async (req, res, next) => {
         }
       } catch (dbErr) {
         console.warn(`[verifyToken] DB verification transient issue: ${dbErr.message}`);
-        // 1. If we have any cached record (up to 15 mins), use it
-        if (cached && (now - cached.cachedAt < 15 * 60 * 1000)) {
+        // 1. If we have a cached record (capped strictly to 2 minutes, and fail-closed for admin routes), use it
+        const isAdminRoute = (req.baseUrl && req.baseUrl.includes('/admin')) || (req.path && req.path.includes('/admin'));
+        if (!isAdminRoute && cached && (now - cached.cachedAt < 2 * 60 * 1000)) {
           userDb = cached.data;
         } else {
           // 2. Retry query once after short pause (absorbs Neon wake-up / transient timeout)

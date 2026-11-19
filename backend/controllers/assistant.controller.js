@@ -492,6 +492,10 @@ exports.getPublicResumeById = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
   }
 
+  // Set anti-indexing and private caching headers to protect student data from web crawlers
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
   // Optional author identity extraction: allows the student to preview their own private draft
   let requestingUserId = null;
   const authHeader = req.headers.authorization;
@@ -525,10 +529,36 @@ exports.getPublicResumeById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Resume not found or has been made private.' });
     }
 
+    // Sanitize document output: whitelist recruiter-visible sections while avoiding leaking internal metadata
+    const doc = row.document || {};
+    const sanitizedDocument = {
+      fullName: doc.fullName || row.author_name,
+      headline: doc.headline,
+      email: doc.email,
+      phone: doc.phone,
+      location: doc.location,
+      summary: doc.summary,
+      skills: doc.skills || [],
+      experience: doc.experience || [],
+      education: doc.education || [],
+      projects: doc.projects || [],
+      certifications: doc.certifications || [],
+      links: doc.links || [],
+      theme: doc.theme,
+      template: doc.template,
+      is_public: isPublic,
+    };
+
     return res.json({
       success: true,
       data: {
-        ...row,
+        id: row.id,
+        title: row.title,
+        updated_at: row.updated_at,
+        author_name: row.author_name,
+        schema_version: row.schema_version,
+        version: row.version,
+        document: sanitizedDocument,
         is_author_preview: !isPublic && isAuthor,
       },
     });

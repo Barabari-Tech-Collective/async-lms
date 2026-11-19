@@ -1,3 +1,8 @@
+/**
+ * Authorization middleware for student and facilitator feature routes.
+ * NOTE: Platform administrators ('admin') are intentionally granted access
+ * to support administrative oversight, audits, and instructor troubleshooting.
+ */
 const isStudentOrFacilitator = async (req, res, next) => {
   try {
     const role = req.user?.role;
