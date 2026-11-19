@@ -235,9 +235,9 @@ export default function PublicResumeView() {
                   parent.closest('[data-contact-links]') ||
                   parent.closest('a'))
               ) {
-                (svgEl as HTMLElement).style.display = 'inline-block';
-                (svgEl as HTMLElement).style.verticalAlign = 'middle';
-                (svgEl as HTMLElement).style.marginTop = '2px';
+                svgEl.style.display = 'inline-block';
+                svgEl.style.verticalAlign = 'middle';
+                svgEl.style.marginTop = '2px';
               }
             });
 
