@@ -1135,11 +1135,9 @@ exports.forgotPassword = async (req, res) => {
       return res.json(genericResponse);
     }
 
-    // Google-linked accounts cannot sign in with a password, so issuing a reset
-    // would walk the user through setting one and then still refuse them at
-    // login. It is also how these accounts ended up holding a password_hash
-    // they could never use. Same generic response, so this does not become an
-    // account-enumeration oracle.
+    // Google-linked accounts cannot sign in with a password. To avoid an account enumeration
+    // oracle, return the exact same generic 200 response to the public caller, and send an email
+    // advising the verified owner to sign in using Google.
     if (userRes.rows[0].google_id) {
       logAction({
         req,
@@ -1149,6 +1147,25 @@ exports.forgotPassword = async (req, res) => {
         actor: { id: userRes.rows[0].id, email: normalizedEmail, role: null },
         details: { reason: 'google_account' },
       });
+
+      try {
+        await sendMail({
+          to: normalizedEmail,
+          subject: 'Sign in to CodeGuru with Google',
+          text: 'We received a request to reset your password. Your CodeGuru account is linked with Google Sign-In and does not use a password. Please sign in by clicking "Continue with Google" on the login page.',
+          html: `
+            <div style="font-family: sans-serif; padding: 20px; color: #333;">
+              <h2>CodeGuru Sign-In Notice</h2>
+              <p>We received a request to reset your password. Your account is linked with <strong>Google Sign-In</strong> and does not use a password.</p>
+              <p>Please return to the login page and sign in by clicking <strong>Continue with Google</strong>.</p>
+              <p style="color: #6b7280; font-size: 14px;">If you did not request this, you can safely ignore this email.</p>
+            </div>
+          `,
+        });
+      } catch (mailNoticeErr) {
+        console.warn('[forgotPassword] Google sign-in hint email dispatch notice:', mailNoticeErr.message);
+      }
+
       return res.json(genericResponse);
     }
 

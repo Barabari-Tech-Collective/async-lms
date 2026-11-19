@@ -14,7 +14,7 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   },
 });
 
-redis.on('error', (err) => console.error('[registry:redis] Connection error:', err.message));
+redis.on('error', (err) => console.error('[registry:redis] Connection error:', err.message || err.code || 'Connection refused (check if Redis is running)'));
 
 const workers     = new Map(); // workerId → { url, capacity, allocatedMemory, totalMemory, activeCount, lastSeen }
 const assignments = new Map(); // `${userId}:${projectId}` → { workerId, memoryCost }

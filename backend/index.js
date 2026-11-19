@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-// from crashing Node 24 due to a read-only ErrorEvent.message property.
+// Prevent known harmless driver WebSocket ErrorEvents from crashing Node
 process.on('uncaughtException', (err) => {
   if (
     err &&
@@ -13,6 +13,10 @@ process.on('uncaughtException', (err) => {
 
   console.error('Uncaught Exception:', err);
   process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Promise Rejection:', reason);
 });
 
 const express = require('express');
@@ -72,8 +76,8 @@ app.use('/worker/:ip', (req, res, next) => {
   return proxy(req, res, next);
 });
 
-app.use(express.json());
-// app.use(morgan('combined'));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Request id + client IP, before anything that logs. Also sets X-Request-Id on
 // the response so a user reporting a problem can quote a traceable reference.
@@ -121,8 +125,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many requests, please try again later.' },
 });
-
-app.use(express.json());
 
 const server = http.createServer(app);
 
