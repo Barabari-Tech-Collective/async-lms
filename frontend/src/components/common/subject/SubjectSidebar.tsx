@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, NavLink } from 'react-router';
+import { useParams, NavLink, useLocation } from 'react-router';
 import apiClient from '@/services/api';
 import { Loader2, PlayCircle, ListChecks, FileText, Trophy, CheckCircle2, X } from 'lucide-react';
 import {
@@ -16,6 +16,12 @@ interface SubjectSidebarProps {
 
 export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps) => {
   const { slug, subtopicSlug, exerciseId, quizId } = useParams();
+  const location = useLocation();
+  const isFacilitator = location.pathname.startsWith('/dashboard/facilitator');
+  const baseCourseUrl = isFacilitator
+    ? `/dashboard/facilitator/courses/${slug}`
+    : `/dashboard/student/courses/${slug}`;
+
   const [structure, setStructure] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedValue, setExpandedValue] = useState<string[]>([]);
@@ -109,7 +115,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
         {isMobile && onCloseMobile && (
           <button
             onClick={onCloseMobile}
-            className='p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors'
+            className='p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer'
             aria-label='Close Curriculum'
           >
             <X className='w-5 h-5' />
@@ -139,7 +145,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                   {unit.subtopics?.map((sub: any) => (
                     <NavLink
                       key={sub.id}
-                      to={`/dashboard/student/courses/${slug}/lesson/${sub.slug}`}
+                      to={`${baseCourseUrl}/lesson/${sub.slug}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
                         `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
@@ -162,7 +168,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                           UPDATED
                         </span>
                       )}
-                      {sub.is_completed && (
+                      {!isFacilitator && sub.is_completed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
                     </NavLink>
@@ -171,7 +177,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                   {unit.quizzes?.map((quiz: any) => (
                     <NavLink
                       key={quiz.id}
-                      to={`/dashboard/student/courses/${slug}/quiz/${quiz.id}`}
+                      to={`${baseCourseUrl}/quiz/${quiz.id}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
                         `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
@@ -194,7 +200,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                           UPDATED
                         </span>
                       )}
-                      {quiz.is_passed && (
+                      {!isFacilitator && quiz.is_passed && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
                     </NavLink>
@@ -203,7 +209,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                   {unit.assignments?.map((a: any) => (
                     <NavLink
                       key={a.id}
-                      to={`/dashboard/student/courses/${slug}/assignment/${a.id}`}
+                      to={`${baseCourseUrl}/assignment/${a.id}`}
                       onClick={handleItemClick}
                       className={({ isActive }) =>
                         `flex items-center gap-3 py-2.5 pl-6 sm:pl-10 pr-4 text-xs sm:text-sm transition-all min-h-[44px] ${isActive
@@ -226,7 +232,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
                           UPDATED
                         </span>
                       )}
-                      {a.is_submitted && (
+                      {!isFacilitator && a.is_submitted && (
                         <CheckCircle2 className='h-4 w-4 shrink-0 text-emerald-500' />
                       )}
                     </NavLink>
@@ -236,7 +242,7 @@ export const SubjectSidebar = ({ isMobile, onCloseMobile }: SubjectSidebarProps)
               {/* Capstone (topic-level) */}
               {topic.capstone && (
                 <NavLink
-                  to={`/dashboard/student/courses/${slug}/capstone/${topic.capstone.id}`}
+                  to={`${baseCourseUrl}/capstone/${topic.capstone.id}`}
                   onClick={handleItemClick}
                   className={({ isActive }) =>
                     `flex items-center gap-3 py-2.5 pl-4 sm:pl-6 pr-4 text-xs sm:text-sm transition-all border-t border-slate-200 min-h-[44px] ${isActive

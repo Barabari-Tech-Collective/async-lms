@@ -976,7 +976,7 @@ exports.publishCourse = async (req, res) => {
           const asgn = typeof aiTopic.assignment === 'string' ? JSON.parse(aiTopic.assignment) : aiTopic.assignment;
           const allowedTypes = Array.isArray(asgn.allowed_submission_types) && asgn.allowed_submission_types.length > 0
             ? asgn.allowed_submission_types
-            : ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+            : ['file', 'github', 'docs', 'figma', 'excel', 'drive', 'url'];
           const existAsgn = await client.query(`SELECT id, title, instructions, max_score FROM assignments WHERE unit_id = $1`, [unitId]);
           const asgnTitle = asgn.title || `${aiTopic.title} Assignment`;
           const asgnInst = asgn.instructions || null;

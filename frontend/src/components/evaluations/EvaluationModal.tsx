@@ -139,6 +139,7 @@ const EvaluationModal = ({ open, onClose, assignmentName, assignmentId, onComple
                 <option value="FULLSTACK">Fullstack Evaluator</option>
                 <option value="PYTHON">Python Evaluator</option>
                 <option value="EXCEL">Excel Spreadsheet Evaluator</option>
+                <option value="SQL">SQL Database Evaluator</option>
               </select>
             </div>
 
@@ -242,7 +243,9 @@ const EvaluationModal = ({ open, onClose, assignmentName, assignmentId, onComple
               {/* View Results */}
               <button
                 onClick={() => {
-                  navigate(`/dashboard/facilitator/results/${evaluationId}`);
+                  navigate(`/dashboard/facilitator/results/${evaluationId}`, {
+                    state: { from: `/dashboard/facilitator/evaluations` },
+                  });
                 }}
                 className="w-[167px] h-[40px] rounded-[4px] text-sm rounded bg-gray-200 hover:bg-gray-300"
               >
