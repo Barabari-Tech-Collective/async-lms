@@ -234,40 +234,69 @@ export default function AiCurriculumEditor() {
   );
 
   const handleRenameModule = useCallback(
-    (moduleId: string, title: string) =>
+    (moduleId: string, title: string) => {
       setModules((ms) =>
-        ms.map((m) => (m.id === moduleId ? { ...m, title } : m)),
-      ),
+        ms.map((m) =>
+          m.id === moduleId
+            ? {
+                ...m,
+                title,
+                is_modified: !m.is_new ? true : m.is_modified,
+                is_updated: !m.is_new ? true : m.is_updated,
+              }
+            : m,
+        ),
+      );
+      setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
+    },
     [],
   );
 
   const handleRenameTopic = useCallback(
-    (moduleId: string, topicId: string, title: string) =>
+    (moduleId: string, topicId: string, title: string) => {
       setModules((ms) =>
         ms.map((m) =>
           m.id === moduleId
             ? {
                 ...m,
                 topics: m.topics.map((t) =>
-                  t.id === topicId ? { ...t, title } : t,
+                  t.id === topicId
+                    ? {
+                        ...t,
+                        title,
+                        is_modified: !t.is_new ? true : t.is_modified,
+                        is_updated: !t.is_new ? true : t.is_updated,
+                      }
+                    : t,
                 ),
               }
             : m,
         ),
-      ),
+      );
+      setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
+    },
     [],
   );
 
   const handleUpdateTopic = useCallback(
-    (topicId: string, data: Partial<AiTopic>) =>
+    (topicId: string, data: Partial<AiTopic>) => {
       setModules((ms) =>
         ms.map((m) => ({
           ...m,
           topics: m.topics.map((t) =>
-            t.id === topicId ? { ...t, ...data } : t,
+            t.id === topicId
+              ? {
+                  ...t,
+                  ...data,
+                  is_modified: !t.is_new ? true : t.is_modified,
+                  is_updated: !t.is_new ? true : t.is_updated,
+                }
+              : t,
           ),
         })),
-      ),
+      );
+      setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
+    },
     [],
   );
 
@@ -347,8 +376,21 @@ export default function AiCurriculumEditor() {
   );
 
   const handleUpdateModule = useCallback(
-    (moduleId: string, data: Partial<AiModule>) =>
-      setModules((ms) => ms.map((m) => m.id === moduleId ? { ...m, ...data } : m)),
+    (moduleId: string, data: Partial<AiModule>) => {
+      setModules((ms) =>
+        ms.map((m) =>
+          m.id === moduleId
+            ? {
+                ...m,
+                ...data,
+                is_modified: !m.is_new ? true : m.is_modified,
+                is_updated: !m.is_new ? true : m.is_updated,
+              }
+            : m,
+        ),
+      );
+      setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
+    },
     [],
   );
 
@@ -390,12 +432,29 @@ export default function AiCurriculumEditor() {
             topics: m.topics.map((t) => ({
               ...t,
               lessons: t.lessons.map((l) =>
-                l.id === lessonId ? { ...l, ...patch } : l,
+                l.id === lessonId
+                  ? {
+                      ...l,
+                      ...patch,
+                      is_modified: !l.is_new ? true : l.is_modified,
+                      is_updated: !l.is_new ? true : l.is_updated,
+                    }
+                  : l,
               ),
             })),
           })),
         );
-        setSelectedLesson((l) => (l?.id === lessonId ? { ...l, ...patch } : l));
+        setSelectedLesson((l) =>
+          l?.id === lessonId
+            ? {
+                ...l,
+                ...patch,
+                is_modified: !l.is_new ? true : l.is_modified,
+                is_updated: !l.is_new ? true : l.is_updated,
+              }
+            : l,
+        );
+        setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
         toast.success(
           `${type === 'video' ? 'Video link' : type === 'markdown' ? 'Content' : 'Exercise'} generated`,
         );
@@ -421,12 +480,29 @@ export default function AiCurriculumEditor() {
         topics: m.topics.map((t) => ({
           ...t,
           lessons: t.lessons.map((l) =>
-            l.id === lessonId ? { ...l, title } : l,
+            l.id === lessonId
+              ? {
+                  ...l,
+                  title,
+                  is_modified: !l.is_new ? true : l.is_modified,
+                  is_updated: !l.is_new ? true : l.is_updated,
+                }
+              : l,
           ),
         })),
       })),
     );
-    setSelectedLesson((l) => (l?.id === lessonId ? { ...l, title } : l));
+    setSelectedLesson((l) =>
+      l?.id === lessonId
+        ? {
+            ...l,
+            title,
+            is_modified: !l.is_new ? true : l.is_modified,
+            is_updated: !l.is_new ? true : l.is_updated,
+          }
+        : l,
+    );
+    setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
   }, []);
 
   const handleUpdateLesson = useCallback(
@@ -438,12 +514,29 @@ export default function AiCurriculumEditor() {
           topics: m.topics.map((t) => ({
             ...t,
             lessons: t.lessons.map((l) =>
-              l.id === lessonId ? { ...l, ...data } : l,
+              l.id === lessonId
+                ? {
+                    ...l,
+                    ...data,
+                    is_modified: !l.is_new ? true : l.is_modified,
+                    is_updated: !l.is_new ? true : l.is_updated,
+                  }
+                : l,
             ),
           })),
         })),
       );
-      setSelectedLesson((l) => (l?.id === lessonId ? { ...l, ...data } : l));
+      setSelectedLesson((l) =>
+        l?.id === lessonId
+          ? {
+              ...l,
+              ...data,
+              is_modified: !l.is_new ? true : l.is_modified,
+              is_updated: !l.is_new ? true : l.is_updated,
+            }
+          : l,
+      );
+      setCourse((c) => (c ? { ...c, has_unpublished_changes: true } : c));
     },
     [],
   );

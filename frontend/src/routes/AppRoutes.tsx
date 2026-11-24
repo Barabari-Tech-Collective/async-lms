@@ -99,6 +99,9 @@ const FacilitatorEvaluations = lazyWithRetry(
 const ResultsPage = lazyWithRetry(
   () => import('@/pages/dashboard/facilitator/ResultsPage'),
 );
+const StudentEvaluationDetails = lazyWithRetry(
+  () => import('@/pages/dashboard/facilitator/StudentEvaluationDetails'),
+);
 const FacilitatorAnalytics = lazyWithRetry(
   () => import('@/pages/dashboard/facilitator/FacilitatorAnalytics'),
 );
@@ -267,6 +270,7 @@ const router = createBrowserRouter([
               { path: 'assignment-success', element: <AssignmentSuccess /> },
               { path: 'evaluations', element: <FacilitatorEvaluations /> },
               { path: 'results/:id', element: <ResultsPage /> },
+              { path: 'results/:id/student/:submissionId', element: <StudentEvaluationDetails /> },
 
               { path: 'analytics', element: <FacilitatorAnalytics /> },
               { path: 'student-growth', element: <FacilitatorStudentGrowth /> },
@@ -315,6 +319,7 @@ const router = createBrowserRouter([
               },
               { path: 'evaluations', element: <Evaluations /> },
               { path: 'results/:id', element: <ResultsPage /> },
+              { path: 'results/:id/student/:submissionId', element: <StudentEvaluationDetails /> },
               { path: 'profile', element: <AdminProfile /> },
               { path: 'ai-curriculum', element: <AiCurriculumList /> },
               { path: 'ai-curriculum/new', element: <AiCurriculumBuilder /> },

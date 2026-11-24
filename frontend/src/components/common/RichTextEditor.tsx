@@ -14,6 +14,13 @@ import {
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
+import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
+import {
+  markdownToHtml,
+  isHtmlContent,
+  cleanCorruptedMarkdown,
+  isCorruptedMarkdown,
+} from '@/utils/contentFormat';
 
 interface Props {
   value: string;
@@ -50,6 +57,12 @@ export default function RichTextEditor({
     [uploadEndpoint],
   );
 
+  const getFormattedHtml = useCallback((val: string) => {
+    if (!val || !val.trim()) return '';
+    const clean = isCorruptedMarkdown(val) ? cleanCorruptedMarkdown(val) : val;
+    return isHtmlContent(clean) ? clean : markdownToHtml(clean);
+  }, []);
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -62,7 +75,7 @@ export default function RichTextEditor({
         },
       }).configure({ inline: false, allowBase64: false }),
     ],
-    content: value,
+    content: getFormattedHtml(value),
     onUpdate({ editor }) {
       isInternalUpdate.current = true;
       onChange(editor.getHTML());
@@ -71,22 +84,37 @@ export default function RichTextEditor({
       handlePaste(view, event) {
         const items = Array.from(event.clipboardData?.items ?? []);
         const imageItem = items.find((i) => i.type.startsWith('image/'));
-        if (!imageItem) return false;
-        event.preventDefault();
-        const file = imageItem.getAsFile();
-        if (!file) return true;
-        const toastId = toast.loading('Uploading image…');
-        uploadImage(file).then((url) => {
-          toast.dismiss(toastId);
-          if (url) {
-            view.dispatch(
-              view.state.tr.replaceSelectionWith(
-                view.state.schema.nodes.image.create({ src: url }),
-              ),
-            );
-          }
-        });
-        return true;
+        if (imageItem) {
+          event.preventDefault();
+          const file = imageItem.getAsFile();
+          if (!file) return true;
+          const toastId = toast.loading('Uploading image…');
+          uploadImage(file).then((url) => {
+            toast.dismiss(toastId);
+            if (url) {
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(
+                  view.state.schema.nodes.image.create({ src: url }),
+                ),
+              );
+            }
+          });
+          return true;
+        }
+
+        // Handle pasting markdown text into RichTextEditor
+        const text = event.clipboardData?.getData('text/plain');
+        if (text && /(?:^|\n)\s*(?:#{1,6}\s+|-\s+|\*\s+|\d+\.\s+|```|---\s+)/.test(text)) {
+          event.preventDefault();
+          const html = markdownToHtml(text);
+          const element = document.createElement('div');
+          element.innerHTML = html;
+          const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(element);
+          view.dispatch(view.state.tr.replaceSelection(slice));
+          return true;
+        }
+
+        return false;
       },
       handleDrop(view, event) {
         const file = event.dataTransfer?.files?.[0];
@@ -119,13 +147,14 @@ export default function RichTextEditor({
       return;
     }
     try {
-      if (editor.getHTML() !== value) {
-        editor.commands.setContent(value, false as any);
+      const targetHtml = getFormattedHtml(value);
+      if (editor.getHTML() !== targetHtml) {
+        editor.commands.setContent(targetHtml, false as any);
       }
     } catch (err) {
       console.warn("Editor sync ignored due to state error", err);
     }
-  }, [value, editor]);
+  }, [value, editor, getFormattedHtml]);
 
   const addLink = () => {
     if (!editor) return;

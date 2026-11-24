@@ -76,7 +76,7 @@ exports.chat = async (req, res) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
+      model: process.env.OPENAI_MODEL || 'deepseek-chat',
       messages: [{ role: 'system', content: systemPrompt }, ...sanitized],
       max_tokens: 600,
       temperature: 0.7,
@@ -217,7 +217,7 @@ Instructions:
 - Keep the tone professional and data-driven.`;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
+      model: process.env.OPENAI_MODEL || 'deepseek-chat',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -269,7 +269,7 @@ exports.optimizeWithJD = async (req, res) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
+      model: process.env.OPENAI_MODEL || 'deepseek-chat',
       messages: [
         {
           role: 'system',

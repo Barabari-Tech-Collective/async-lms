@@ -196,26 +196,35 @@ exports.signup = async (req, res) => {
         [normalizedEmail, hash, expiresAt],
       );
 
-      await sendMail({
-        to: normalizedEmail,
-        subject: 'Verify your CodeGuru Account',
-        text: `Your CodeGuru email verification code is: ${otp}. It expires in 15 minutes.`,
-        html: `
-          <div style="font-family: sans-serif; padding: 20px; color: #333;">
-            <h2>Verify your CodeGuru Account</h2>
-            <p>Please use the following verification code to complete your registration:</p>
-            <div style="font-size: 24px; font-weight: bold; padding: 15px; background-color: #f3f4f6; border-radius: 8px; display: inline-block; letter-spacing: 2px; color: #4f46e5; margin: 10px 0;">
-              ${otp}
+      let mailSent = false;
+      try {
+        await sendMail({
+          to: normalizedEmail,
+          subject: 'Verify your CodeGuru Account',
+          text: `Your CodeGuru email verification code is: ${otp}. It expires in 15 minutes.`,
+          html: `
+            <div style="font-family: sans-serif; padding: 20px; color: #333;">
+              <h2>Verify your CodeGuru Account</h2>
+              <p>Please use the following verification code to complete your registration:</p>
+              <div style="font-size: 24px; font-weight: bold; padding: 15px; background-color: #f3f4f6; border-radius: 8px; display: inline-block; letter-spacing: 2px; color: #4f46e5; margin: 10px 0;">
+                ${otp}
+              </div>
+              <p style="color: #6b7280; font-size: 14px;">This code is valid for 15 minutes.</p>
             </div>
-            <p style="color: #6b7280; font-size: 14px;">This code is valid for 15 minutes.</p>
-          </div>
-        `,
-      });
+          `,
+        });
+        mailSent = true;
+      } catch (mailErr) {
+        console.error(`[${logID}] Resend verification email failed for ${normalizedEmail}:`, mailErr.message);
+      }
 
       return res.json({
         success: true,
         email: normalizedEmail,
-        message: 'A new verification code has been sent to your email.',
+        mail_sent: mailSent,
+        message: mailSent
+          ? 'A new verification code has been sent to your email.'
+          : 'Verification code generated. If email delivery is delayed, please check your inbox shortly or click Resend.',
       });
     }
 
@@ -287,27 +296,35 @@ exports.signup = async (req, res) => {
     );
 
     // Send verification email
-    await sendMail({
-      to: normalizedEmail,
-      subject: 'Verify your CodeGuru Account',
-      text: `Your CodeGuru email verification code is: ${otp}. It expires in 15 minutes.`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2>Welcome to CodeGuru!</h2>
-          <p>Please use the following verification code to complete your registration:</p>
-          <div style="font-size: 24px; font-weight: bold; padding: 15px; background-color: #f3f4f6; border-radius: 8px; display: inline-block; letter-spacing: 2px; color: #4f46e5; margin: 10px 0;">
-            ${otp}
+    let mailSent = false;
+    try {
+      await sendMail({
+        to: normalizedEmail,
+        subject: 'Verify your CodeGuru Account',
+        text: `Your CodeGuru email verification code is: ${otp}. It expires in 15 minutes.`,
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; color: #333;">
+            <h2>Welcome to CodeGuru!</h2>
+            <p>Please use the following verification code to complete your registration:</p>
+            <div style="font-size: 24px; font-weight: bold; padding: 15px; background-color: #f3f4f6; border-radius: 8px; display: inline-block; letter-spacing: 2px; color: #4f46e5; margin: 10px 0;">
+              ${otp}
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">This code is valid for 15 minutes. If you did not sign up for this account, please ignore this email.</p>
           </div>
-          <p style="color: #6b7280; font-size: 14px;">This code is valid for 15 minutes. If you did not sign up for this account, please ignore this email.</p>
-        </div>
-      `,
-    });
+        `,
+      });
+      mailSent = true;
+    } catch (mailErr) {
+      console.error(`[${logID}] Signup verification email failed for ${normalizedEmail}:`, mailErr.message);
+    }
 
     res.json({
       success: true,
       email: newUser.email,
-      message:
-        'Signup successful. A verification code has been sent to your email.',
+      mail_sent: mailSent,
+      message: mailSent
+        ? 'Signup successful. A verification code has been sent to your email.'
+        : 'Account created! Please check your email for the verification code or request a resend.',
     });
   } catch (err) {
     console.error(`[${logID}] SIGNUP ERROR:`, err);

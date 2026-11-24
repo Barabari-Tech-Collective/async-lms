@@ -12,8 +12,6 @@ import {
   FileText,
   ExternalLink,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +21,7 @@ import { getErrorMessage } from '@/lib/utils';
 import { fireConfetti } from '@/lib/confetti';
 import { notifyCourseProgressUpdated } from '@/utils/progressEvents';
 import { AssignmentRubricsViewer } from '@/components/common/assignment/AssignmentRubricsViewer';
+import { FormattedContent } from '@/utils/contentFormat';
 import { AssignmentTestCasesViewer } from '@/components/common/assignment/AssignmentTestCasesViewer';
 import type { SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
@@ -165,9 +164,11 @@ export default function AssignmentView() {
       const data = res.data.data;
       setAssignment(data);
 
-      const available = Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
+      const rawAvailable = Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
         ? data.allowed_submission_types
         : ALL_SUBMISSION_TYPES;
+      const validAvailable = rawAvailable.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+      const available = validAvailable.length > 0 ? validAvailable : ALL_SUBMISSION_TYPES;
 
       if (data.submission_type && available.includes(data.submission_type)) {
         setActiveType(data.submission_type);
@@ -190,9 +191,11 @@ export default function AssignmentView() {
   }, [assignmentId]);
 
   const allowedTypes: SubmissionType[] = useMemo(() => {
-    return Array.isArray(assignment?.allowed_submission_types) && assignment.allowed_submission_types.length > 0
+    const raw = Array.isArray(assignment?.allowed_submission_types) && assignment.allowed_submission_types.length > 0
       ? assignment.allowed_submission_types
       : ALL_SUBMISSION_TYPES;
+    const valid = raw.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    return valid.length > 0 ? valid : ALL_SUBMISSION_TYPES;
   }, [assignment?.allowed_submission_types]);
 
   const handleTypeSelect = (type: SubmissionType) => {
@@ -254,12 +257,12 @@ export default function AssignmentView() {
       }
     } else {
       if (!solutionUrl.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
       if (validator && !validator.pattern.test(solutionUrl.trim())) {
-        toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
+        toast.error(`Please provide a valid ${currentTypeConfig.shortLabel} URL`);
         return;
       }
     }
@@ -357,17 +360,11 @@ export default function AssignmentView() {
           <p className='text-xs sm:text-sm text-slate-500 mt-0.5'>Read carefully before submitting</p>
         </div>
         <div className='px-4 py-5 sm:px-8 sm:py-6'>
-          {assignment.instructions ? (
-            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
-              {/^<[a-z][\s\S]*>/i.test(assignment.instructions.trimStart()) ? (
-                <div dangerouslySetInnerHTML={{ __html: assignment.instructions }} />
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{assignment.instructions}</ReactMarkdown>
-              )}
-            </div>
-          ) : (
-            <p className='italic text-slate-400 text-sm'>No instructions provided.</p>
-          )}
+          <FormattedContent
+            content={assignment.instructions}
+            className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'
+            fallback={<p className='italic text-slate-400 text-sm'>No instructions provided.</p>}
+          />
         </div>
       </Card>
 
@@ -416,8 +413,8 @@ export default function AssignmentView() {
                           : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span>{cfg.emoji}</span>
-                      <span className='truncate'>{cfg.shortLabel}</span>
+                      <span>{cfg?.emoji || '📄'}</span>
+                      <span className='truncate'>{cfg?.shortLabel || type}</span>
                     </button>
                   );
                 })}

@@ -8,9 +8,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FileText, CheckCircle2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { Assignment } from '@/utils/types';
+import { FormattedContent } from '@/utils/contentFormat';
 
 export type { Assignment };
 
@@ -48,11 +47,10 @@ export const AssignmentCard = ({ assignment }: { assignment: Assignment }) => {
           <CardTitle className='text-xl font-bold text-slate-800'>
             {assignment.title}
           </CardTitle>
-          <div className='prose prose-sm max-w-none text-slate-500 leading-relaxed line-clamp-3'>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {assignment.instructions}
-            </ReactMarkdown>
-          </div>
+          <FormattedContent
+            content={assignment.instructions}
+            className='prose prose-sm max-w-none text-slate-500 leading-relaxed line-clamp-3'
+          />
         </div>
 
         <div className='space-y-2 text-sm pt-2'>

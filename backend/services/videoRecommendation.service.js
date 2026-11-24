@@ -122,7 +122,7 @@ Analyze the titles and select the single best videoId that perfectly matches the
 Return ONLY a valid JSON object: { "best_videoId": "the_id_here" }`;
 
           const response = await openai.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'deepseek-v4-flash',
+            model: process.env.OPENAI_MODEL || 'deepseek-chat',
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.1,
             response_format: { type: 'json_object' }

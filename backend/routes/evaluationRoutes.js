@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../config/pg");
-
 const {
   runEvaluation,
   getEvaluationResults,
@@ -18,15 +16,6 @@ const verifyToken = require("../middlewares/verfiyToken");
 const isAdminOrFacilitator = require("../middlewares/isAdminOrFacilitator");
 
 router.use(verifyToken, isAdminOrFacilitator);
-
-router.get('/dump-db', async (req, res) => {
-  try {
-    const result = await pool.query("SELECT total_score, execution_logs, rubric, rubric_breakdown, repo_url FROM college_assignment_submissions ORDER BY submitted_at DESC LIMIT 1;");
-    res.json(result.rows[0] || { empty: true });
-  } catch (err) {
-    res.json({ error: err.message, stack: err.stack });
-  }
-});
 
 // 🚀 Run evaluation
 router.post("/run", runEvaluation);

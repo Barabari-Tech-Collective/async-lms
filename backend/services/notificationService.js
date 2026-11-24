@@ -69,4 +69,50 @@ async function notifyCollege({ collegeId, type, title, body, link = null, meta =
   }
 }
 
-module.exports = { setIo, notify, notifyCollege };
+/**
+ * Notify all students currently enrolled in a subject.
+ * Uses 500-student batch chunking to avoid PostgreSQL parameter limits (Trap 3 fix).
+ */
+async function notifySubjectStudents({ subjectId, type, title, body, link = null, meta = null }) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT us.user_id
+       FROM user_subjects us
+       WHERE us.subject_id = $1`,
+      [subjectId],
+    );
+
+    if (rows.length === 0) return;
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const values = [];
+      const params = [];
+      let pIdx = 1;
+
+      for (const r of chunk) {
+        values.push(`($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`);
+        params.push(r.user_id, type, title, body, link);
+      }
+
+      const inserted = await pool.query(
+        `INSERT INTO notifications (user_id, type, title, body, link)
+         VALUES ${values.join(', ')}
+         RETURNING *`,
+        params,
+      );
+
+      // Push real-time Socket.io events with full notification payload
+      if (_io) {
+        for (const notif of inserted.rows) {
+          _io.to(`user:${notif.user_id}`).emit('notification:new', notif);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[notifySubjectStudents] Failed to send subject notifications:', err.message);
+  }
+}
+
+module.exports = { setIo, notify, notifyCollege, notifySubjectStudents };

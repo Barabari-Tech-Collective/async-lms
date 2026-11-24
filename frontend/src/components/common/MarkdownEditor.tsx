@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils';
 import apiClient from '@/services/api';
 import toast from 'react-hot-toast';
+import { cleanCorruptedMarkdown, isCorruptedMarkdown } from '@/utils/contentFormat';
 
 interface Props {
   value: string;
@@ -177,6 +178,21 @@ export default function MarkdownEditor({
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onPaste={(e) => {
+            const pastedText = e.clipboardData.getData('text/plain');
+            if (isCorruptedMarkdown(pastedText)) {
+              e.preventDefault();
+              const cleaned = cleanCorruptedMarkdown(pastedText);
+              const el = textareaRef.current;
+              if (!el) return;
+              const { next, cursor } = insertAt(el, '', '', cleaned);
+              onChange(next);
+              requestAnimationFrame(() => {
+                el.focus();
+                el.setSelectionRange(cursor, cursor);
+              });
+            }
+          }}
           placeholder={placeholder}
           style={{ minHeight }}
           className='w-full resize-y px-3 py-2 text-sm text-slate-800 font-mono focus:outline-none bg-white placeholder:text-slate-400'
@@ -190,7 +206,9 @@ export default function MarkdownEditor({
           style={{ minHeight }}
         >
           {value.trim() ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {isCorruptedMarkdown(value) ? cleanCorruptedMarkdown(value) : value}
+            </ReactMarkdown>
           ) : (
             <p className='text-slate-400 text-sm italic'>Nothing to preview yet.</p>
           )}

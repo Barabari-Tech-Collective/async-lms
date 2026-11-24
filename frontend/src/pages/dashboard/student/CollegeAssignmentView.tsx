@@ -20,6 +20,7 @@ import toast from 'react-hot-toast';
 import { getErrorMessage } from '@/lib/utils';
 import type { CollegeAssignment, SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
+import { FormattedContent } from '@/utils/contentFormat';
 
 // URL Validation Regex Patterns
 const SUBMISSION_REGEX: Record<string, { pattern: RegExp; example: string }> = {
@@ -90,6 +91,16 @@ export default function CollegeAssignmentView() {
     }, 0);
   }, [parsedRubric]);
 
+  const allowedTypes: SubmissionType[] = useMemo(() => {
+    const raw =
+      Array.isArray(assignment?.allowed_submission_types) &&
+      assignment.allowed_submission_types.length > 0
+        ? assignment.allowed_submission_types
+        : ALL_SUBMISSION_TYPES;
+    const valid = raw.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    return valid.length > 0 ? valid : ALL_SUBMISSION_TYPES;
+  }, [assignment?.allowed_submission_types]);
+
   const fetchAssignment = async () => {
     try {
       setLoading(true);
@@ -100,10 +111,12 @@ export default function CollegeAssignmentView() {
       const data = res.data.data;
       setAssignment(data);
 
-      const allowed: SubmissionType[] =
+      const rawAllowed: SubmissionType[] =
         Array.isArray(data.allowed_submission_types) && data.allowed_submission_types.length > 0
           ? data.allowed_submission_types
           : ALL_SUBMISSION_TYPES;
+      const validAllowed = rawAllowed.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+      const allowed = validAllowed.length > 0 ? validAllowed : ALL_SUBMISSION_TYPES;
 
       if (data.submission_type && allowed.includes(data.submission_type)) {
         setActiveType(data.submission_type);
@@ -193,12 +206,12 @@ export default function CollegeAssignmentView() {
       }
     } else {
       if (!solutionUrl.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
       if (validator && !validator.pattern.test(solutionUrl.trim())) {
-        toast.error(`Please provide a valid ${SUBMISSION_TYPE_CONFIGS[activeType].shortLabel} URL`);
+        toast.error(`Please provide a valid ${currentTypeConfig.shortLabel} URL`);
         return;
       }
     }
@@ -246,12 +259,6 @@ export default function CollegeAssignmentView() {
       </div>
     );
   }
-
-  const allowedTypes: SubmissionType[] =
-    Array.isArray(assignment.allowed_submission_types) &&
-    assignment.allowed_submission_types.length > 0
-      ? assignment.allowed_submission_types
-      : ALL_SUBMISSION_TYPES;
 
   const isSubmitted = Boolean(
     assignment.submission_link || assignment.submission_file_url
@@ -334,18 +341,11 @@ export default function CollegeAssignmentView() {
                     <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
                       Assignment Brief
                     </h2>
-                    {assignment.description ? (
-                      <div
-                        className='prose prose-sm max-w-full overflow-x-auto text-slate-500 leading-7'
-                        dangerouslySetInnerHTML={{
-                          __html: assignment.description,
-                        }}
-                      />
-                    ) : (
-                      <p className='text-slate-500 italic text-sm'>
-                        No description provided.
-                      </p>
-                    )}
+                    <FormattedContent
+                      content={assignment.description}
+                      className='prose prose-sm max-w-full overflow-x-auto text-slate-500 leading-7'
+                      fallback={<p className='text-slate-500 italic text-sm'>No description provided.</p>}
+                    />
                   </div>
 
                   {assignment.assignment_description && (
@@ -353,11 +353,9 @@ export default function CollegeAssignmentView() {
                       <h2 className='text-lg sm:text-xl font-bold text-[#1e293b]'>
                         Instructions
                       </h2>
-                      <div
+                      <FormattedContent
+                        content={assignment.assignment_description}
                         className='prose prose-sm max-w-full overflow-x-auto text-slate-500 leading-7'
-                        dangerouslySetInnerHTML={{
-                          __html: assignment.assignment_description,
-                        }}
                       />
                     </div>
                   )}
@@ -443,7 +441,7 @@ export default function CollegeAssignmentView() {
                             ? rawPoints
                             : Number(rawPoints);
                           const title =
-                            item.name || item.title || item.criterion || `Criterion ${idx + 1}`;
+                            item.item || item.name || item.title || item.criterion || item.label || `Criterion ${idx + 1}`;
 
                           return (
                             <div
@@ -544,8 +542,8 @@ export default function CollegeAssignmentView() {
                               : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                           }`}
                         >
-                          <span>{cfg.emoji}</span>
-                          <span className='truncate'>{cfg.shortLabel}</span>
+                          <span>{cfg?.emoji || '📄'}</span>
+                          <span className='truncate'>{cfg?.shortLabel || type}</span>
                         </button>
                       );
                     })}

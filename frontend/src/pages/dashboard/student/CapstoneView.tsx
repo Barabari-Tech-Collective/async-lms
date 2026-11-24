@@ -17,9 +17,8 @@ import {
 import { StudentAssignmentFeedbackModal } from '@/components/common/student/StudentAssignmentFeedbackModal';
 import type { StudentAssignmentOverviewItem, SubmissionType } from '@/utils/types';
 import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import apiClient from '@/services/api';
+import { FormattedContent } from '@/utils/contentFormat';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -215,15 +214,17 @@ export default function CapstoneView() {
 
   const allowedTypes: SubmissionType[] = useMemo(() => {
     const raw = capstone?.allowed_submission_types;
-    if (!raw) return ALL_SUBMISSION_TYPES;
-    if (Array.isArray(raw) && raw.length > 0) return raw as SubmissionType[];
-    if (typeof raw === 'string') {
+    let list: SubmissionType[] = ALL_SUBMISSION_TYPES;
+    if (Array.isArray(raw) && raw.length > 0) {
+      list = raw as SubmissionType[];
+    } else if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed as SubmissionType[];
+        if (Array.isArray(parsed) && parsed.length > 0) list = parsed as SubmissionType[];
       } catch {}
     }
-    return ALL_SUBMISSION_TYPES;
+    const valid = list.filter((t) => t in SUBMISSION_TYPE_CONFIGS);
+    return valid.length > 0 ? valid : ALL_SUBMISSION_TYPES;
   }, [capstone?.allowed_submission_types]);
 
   useEffect(() => {
@@ -289,7 +290,7 @@ export default function CapstoneView() {
       }
     } else {
       if (!link.trim()) {
-        toast.error(`Please enter your ${SUBMISSION_TYPE_CONFIGS[activeType].label} URL`);
+        toast.error(`Please enter your ${currentTypeConfig.label} URL`);
         return;
       }
       const validator = SUBMISSION_REGEX[activeType];
@@ -418,21 +419,11 @@ export default function CapstoneView() {
           </p>
         </div>
         <div className='bg-white px-4 py-6 sm:px-6 sm:py-8'>
-          {capstone.instructions ? (
-            <div className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'>
-              {/^<[a-z][\s\S]*>/i.test(capstone.instructions.trimStart()) ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: capstone.instructions }}
-                />
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {capstone.instructions}
-                </ReactMarkdown>
-              )}
-            </div>
-          ) : (
-            <p className='italic text-slate-400 text-sm'>No instructions provided.</p>
-          )}
+          <FormattedContent
+            content={capstone.instructions}
+            className='prose prose-slate max-w-full overflow-x-auto text-sm sm:text-base lg:prose-lg'
+            fallback={<p className='italic text-slate-400 text-sm'>No instructions provided.</p>}
+          />
         </div>
       </Card>
 
@@ -519,8 +510,8 @@ export default function CapstoneView() {
                           : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span>{cfg.emoji}</span>
-                      <span className='truncate'>{cfg.shortLabel}</span>
+                      <span>{cfg?.emoji || '📄'}</span>
+                      <span className='truncate'>{cfg?.shortLabel || type}</span>
                     </button>
                   );
                 })}
