@@ -657,7 +657,12 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                       pathname: `${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`,
                       search: location.search,
                     }}
-                    state={{ studentResult: item, evaluation, returnSearch: location.search }}
+                    state={{
+                      studentResult: item,
+                      evaluation,
+                      returnSearch: location.search,
+                      from: `${basePath}/results/${assignmentId || evaluation?.id}${location.search}`,
+                    }}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition"
                     title="View detailed student evaluation result"
                   >
@@ -801,7 +806,12 @@ const StudentTable = ({ results, evaluation, assignmentId, onRefresh }: Props) =
                           pathname: `${basePath}/results/${assignmentId || evaluation?.id}/student/${rowId}`,
                           search: location.search,
                         }}
-                        state={{ studentResult: item, evaluation, returnSearch: location.search }}
+                        state={{
+                          studentResult: item,
+                          evaluation,
+                          returnSearch: location.search,
+                          from: `${basePath}/results/${assignmentId || evaluation?.id}${location.search}`,
+                        }}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 transition shadow-2xs"
                         title="View detailed student feedback and rubric breakdown"
                       >

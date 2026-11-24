@@ -332,7 +332,7 @@ exports.getFacilitatorStudentProfile = async (req, res) => {
                )
            ) as completed_subtopics,
            us.progress_percent as progress_percent,
-           us.is_completed,
+           (us.is_completed OR us.certificate_id IS NOT NULL) as is_completed,
            (NOT $2::boolean OR us.subject_id = ANY($3::uuid[])) as can_manage
          FROM user_subjects us
          JOIN subjects s ON us.subject_id = s.id
@@ -3696,13 +3696,6 @@ exports.removeStudentCourse = async (req, res) => {
     const force = req.query.force === 'true';
     const collegeIds = req.user.college_ids || [];
     const subjectIds = req.user.subject_ids || [];
-
-    // Guard: Only platform administrators can force-revoke completed courses with certificates
-    if (force && req.user.role !== 'admin') {
-      return res.status(403).json({
-        message: 'Access denied: Only platform administrators can force-revoke or delete a completed course with an issued certificate.',
-      });
-    }
 
     if (!studentId || !UUID_RE.test(studentId)) {
       return res.status(400).json({ message: 'Invalid student ID format' });

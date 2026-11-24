@@ -38,3 +38,5 @@ db_dump.json
 # Audit reports and audit scripts
 EXCEL_EVALUATION_AUDIT_REPORT.md
 backend/scripts/
+otp_log.txt
+backend/otp_log.txt

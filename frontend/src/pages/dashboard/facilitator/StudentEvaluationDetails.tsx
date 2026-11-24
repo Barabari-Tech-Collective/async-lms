@@ -409,7 +409,16 @@ export default function StudentEvaluationDetails() {
   const isFacilitator = location.pathname.includes('/facilitator/');
   const returnSearch = location.state?.returnSearch || location.search || '';
   const basePath = isFacilitator ? '/dashboard/facilitator' : '/dashboard/admin';
-  const backUrl = `${basePath}/results/${id}${returnSearch}`;
+  const backUrl = location.state?.from || `${basePath}/results/${id}${returnSearch}`;
+
+  const handleBack = () => {
+    // If user navigated within the app, go back in history to avoid pushing duplicate entries
+    if (window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate(backUrl, { replace: true });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-16">
@@ -418,15 +427,24 @@ export default function StudentEvaluationDetails() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate(backUrl)}
-              className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center gap-1.5 text-xs font-semibold"
+              type="button"
+              onClick={handleBack}
+              className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+              title="Back to Results"
             >
               <ArrowLeft size={16} />
               <span>Back to Results</span>
             </button>
             <div className="h-4 w-px bg-slate-200 hidden sm:block" />
             <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
-              <span className="truncate max-w-[200px]">{assignmentName}</span>
+              <button
+                type="button"
+                onClick={handleBack}
+                className="truncate max-w-[200px] hover:text-slate-800 hover:underline cursor-pointer text-left font-normal"
+                title="Back to Results"
+              >
+                {assignmentName}
+              </button>
               <ChevronRight size={13} className="text-slate-400" />
               <span className="font-semibold text-slate-800">
                 {studentResult?.student_name || 'Student Evaluation'}

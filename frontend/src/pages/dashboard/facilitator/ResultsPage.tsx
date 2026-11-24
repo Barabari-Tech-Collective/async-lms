@@ -1,5 +1,5 @@
 import TopHeader from '@/components/common/facilitator/TopHeader';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useLocation } from 'react-router';
 import { useState, useEffect } from 'react';
 import StatsCard from '@/components/common/results/StatsCard';
 import ScoreChart from '@/components/common/results/ScoreChart';
@@ -26,7 +26,20 @@ type Evaluation = {
 };
 const ResultsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams(); // evaluationId
+
+  const isFacilitator = location.pathname.includes('/facilitator/');
+  const basePath = isFacilitator ? '/dashboard/facilitator' : '/dashboard/admin';
+  const defaultBackUrl = `${basePath}/evaluations`;
+
+  const handleBack = () => {
+    if (location.state?.from) {
+      navigate(location.state.from);
+    } else {
+      navigate(defaultBackUrl);
+    }
+  };
 
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [results, setResults] = useState<any[]>([]);
@@ -140,8 +153,10 @@ const ResultsPage = () => {
         <div className='flex items-center justify-between gap-3 mt-2 sm:mt-4'>
           <div className='flex items-center gap-3'>
             <button
-              onClick={() => navigate(-1)}
+              type='button'
+              onClick={handleBack}
               className='p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center text-sm font-semibold cursor-pointer'
+              title='Back to Evaluations'
             >
               ← Back
             </button>

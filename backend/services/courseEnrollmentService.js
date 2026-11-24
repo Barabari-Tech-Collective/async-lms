@@ -169,7 +169,7 @@ async function removeStudentFromSubject({ userId, subjectId, force = false }) {
   const enrollment = checkRes.rows[0];
   if ((enrollment.is_completed || enrollment.certificate_id) && !force) {
     const err = new Error(
-      'Cannot revoke a course that the student has already completed with an issued certificate. Only administrators can override with force=true.',
+      'Cannot revoke a course that the student has already completed with an issued certificate. Confirm force revocation to proceed.',
     );
     err.statusCode = 403;
     err.isCompleted = true;

@@ -146,7 +146,9 @@ export default function AssignmentManagement() {
         scope: isReEvaluate ? 'all' : 'pending',
       });
       toast.success(isReEvaluate ? 'Re-evaluation started' : 'Evaluation started');
-      navigate(`${basePath}/results/${assignment.id}`);
+      navigate(`${basePath}/results/${assignment.id}`, {
+        state: { from: `${basePath}/assignments` },
+      });
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to run evaluation'));
     } finally {
@@ -155,7 +157,9 @@ export default function AssignmentManagement() {
   };
 
   const handleViewResults = (assignment: Assignment) => {
-    navigate(`${basePath}/results/${assignment.id}`);
+    navigate(`${basePath}/results/${assignment.id}`, {
+      state: { from: `${basePath}/assignments` },
+    });
   };
 
   const handleDelete = async () => {

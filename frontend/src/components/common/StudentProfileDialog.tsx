@@ -101,6 +101,7 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
   // Revoke course states
   const [revokeTarget, setRevokeTarget] = useState<SubjectRow | null>(null);
   const [forceRevoke, setForceRevoke] = useState(false);
+  const [requiresForce, setRequiresForce] = useState(false);
   const [submittingRevoke, setSubmittingRevoke] = useState(false);
 
   // Reject request state
@@ -171,11 +172,16 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
       toast.success(`Access to ${revokeTarget.name} revoked successfully`);
       setRevokeTarget(null);
       setForceRevoke(false);
+      setRequiresForce(false);
       fetchProfile();
     } catch (err: any) {
       if (err.response?.data?.isCompleted) {
-        setForceRevoke(true);
-        toast.error('This course is completed with a certificate. Check the force box to confirm.');
+        setRequiresForce(true);
+        setForceRevoke(false);
+        toast.error(
+          err.response?.data?.message ||
+            'This course is completed with a certificate. Check the confirmation box to proceed.',
+        );
       } else {
         toast.error(getErrorMessage(err, 'Failed to revoke course access'));
       }
@@ -407,6 +413,7 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
                                 onClick={() => {
                                   setRevokeTarget(s);
                                   setForceRevoke(false);
+                                  setRequiresForce(Boolean(s.is_completed));
                                 }}
                                 title='Revoke Course Access'
                                 className='h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors'
@@ -502,7 +509,16 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
       </Dialog>
 
       {/* Revoke Course Access Confirmation Modal */}
-      <Dialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
+      <Dialog
+        open={!!revokeTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevokeTarget(null);
+            setForceRevoke(false);
+            setRequiresForce(false);
+          }
+        }}
+      >
         <DialogContent className='sm:max-w-md'>
           <DialogHeader>
             <div className='flex items-center gap-2 text-red-600 mb-1'>
@@ -515,9 +531,11 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
             </DialogDescription>
           </DialogHeader>
 
-          {revokeTarget?.is_completed && (
+          {(revokeTarget?.is_completed || requiresForce) && (
             <div className='p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 space-y-2'>
-              <p className='font-semibold'>⚠️ Completed Course Notice:</p>
+              <p className='font-semibold flex items-center gap-1.5'>
+                <AlertTriangle className='w-3.5 h-3.5 text-red-600 shrink-0' /> Completed Course Notice:
+              </p>
               <p>
                 The student has already completed this course and holds an issued certificate. Revoking access will detach
                 this credential.
@@ -535,12 +553,20 @@ export default function StudentProfileDialog({ studentId, apiPrefix, onClose }: 
           )}
 
           <DialogFooter>
-            <Button variant='outline' onClick={() => setRevokeTarget(null)} disabled={submittingRevoke}>
+            <Button
+              variant='outline'
+              onClick={() => {
+                setRevokeTarget(null);
+                setForceRevoke(false);
+                setRequiresForce(false);
+              }}
+              disabled={submittingRevoke}
+            >
               Cancel
             </Button>
             <Button
               onClick={handleConfirmRevokeCourse}
-              disabled={submittingRevoke || (revokeTarget?.is_completed && !forceRevoke)}
+              disabled={submittingRevoke || ((revokeTarget?.is_completed || requiresForce) && !forceRevoke)}
               className='bg-red-600 hover:bg-red-700 text-white'
             >
               {submittingRevoke && <Loader2 className='w-4 h-4 animate-spin mr-1.5' />}

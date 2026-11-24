@@ -4115,7 +4115,7 @@ exports.getStudentProfile = async (req, res) => {
                )
            ) as completed_subtopics,
            us.progress_percent as progress_percent,
-           us.is_completed,
+           (us.is_completed OR us.certificate_id IS NOT NULL) as is_completed,
            true as can_manage
          FROM user_subjects us
          JOIN subjects s ON us.subject_id = s.id
