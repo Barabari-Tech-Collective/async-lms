@@ -973,6 +973,57 @@ const LearningFlow: React.FC = () => {
     }
   };
 
+  // Reorder Subtopics
+  const handleMoveSubtopicUp = async (
+    subtopicIndex: number,
+    subtopics: Subtopic[],
+  ) => {
+    if (subtopicIndex === 0) return;
+
+    const currentSubtopic = subtopics[subtopicIndex];
+    const prevSubtopic = subtopics[subtopicIndex - 1];
+
+    try {
+      await Promise.all([
+        apiClient.put(`/admin/subtopics/${prevSubtopic.id}`, {
+          order_index: subtopicIndex,
+        }),
+        apiClient.put(`/admin/subtopics/${currentSubtopic.id}`, {
+          order_index: subtopicIndex - 1,
+        }),
+      ]);
+      toast.success('Lesson topic order updated');
+      refreshStructure();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to update order'));
+    }
+  };
+
+  const handleMoveSubtopicDown = async (
+    subtopicIndex: number,
+    subtopics: Subtopic[],
+  ) => {
+    if (subtopicIndex === subtopics.length - 1) return;
+
+    const currentSubtopic = subtopics[subtopicIndex];
+    const nextSubtopic = subtopics[subtopicIndex + 1];
+
+    try {
+      await Promise.all([
+        apiClient.put(`/admin/subtopics/${currentSubtopic.id}`, {
+          order_index: subtopicIndex + 1,
+        }),
+        apiClient.put(`/admin/subtopics/${nextSubtopic.id}`, {
+          order_index: subtopicIndex,
+        }),
+      ]);
+      toast.success('Lesson topic order updated');
+      refreshStructure();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to update order'));
+    }
+  };
+
   const previewContent = async (
     content: LessonContent,
     forceType?: 'markdown' | 'video',
@@ -1546,7 +1597,7 @@ const LearningFlow: React.FC = () => {
                                            ) : (
                                              <>
                                                {unit.subtopics.map(
-                                                 (sub: Subtopic) => (
+                                                 (sub: Subtopic, sIndex: number) => (
                                                    <div
                                                      key={sub.id}
                                                      className='group'
@@ -1608,6 +1659,37 @@ const LearningFlow: React.FC = () => {
                                                        </div>
 
                                                        <div className='flex items-center gap-0.5 shrink-0 ml-1'>
+                                                          {/* Reorder Subtopic */}
+                                                          <div className='flex items-center gap-0.5 text-slate-400 border border-slate-200/80 rounded-md px-1 py-0.5'>
+                                                            <button
+                                                              type='button'
+                                                              onClick={() =>
+                                                                handleMoveSubtopicUp(
+                                                                  sIndex,
+                                                                  unit.subtopics,
+                                                                )
+                                                              }
+                                                              disabled={sIndex === 0}
+                                                              className={`p-0.5 hover:text-slate-700 ${sIndex === 0 ? 'cursor-not-allowed opacity-30' : 'cursor-pointer hover:text-slate-600'}`}
+                                                              title='Move Up'
+                                                            >
+                                                              <ArrowUp className='h-3 w-3' />
+                                                            </button>
+                                                            <button
+                                                              type='button'
+                                                              onClick={() =>
+                                                                handleMoveSubtopicDown(
+                                                                  sIndex,
+                                                                  unit.subtopics,
+                                                                )
+                                                              }
+                                                              disabled={sIndex === (unit.subtopics?.length || 0) - 1}
+                                                              className={`p-0.5 hover:text-slate-700 ${sIndex === (unit.subtopics?.length || 0) - 1 ? 'cursor-not-allowed opacity-30' : 'cursor-pointer hover:text-slate-600'}`}
+                                                              title='Move Down'
+                                                            >
+                                                              <ArrowDown className='h-3 w-3' />
+                                                            </button>
+                                                          </div>
                                                          <button
                                                            type='button'
                                                            onClick={() => {

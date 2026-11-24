@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import type { AiAssignment } from '@/features/aiCurriculum/types';
 import { aiCurriculumApi } from '@/features/aiCurriculum/aiCurriculumApi';
 import type { SubmissionType } from '@/utils/types';
-import { SUBMISSION_TYPE_CONFIGS } from '@/utils/types';
+import { SUBMISSION_TYPE_CONFIGS, ALL_SUBMISSION_TYPES } from '@/utils/types';
 
 export function AssignmentModal({
   topicId,
@@ -30,14 +30,7 @@ export function AssignmentModal({
     instructions: initialAssignment?.instructions || '',
     max_score: initialAssignment?.max_score || 100,
     resources: initialAssignment?.resources || [],
-    allowed_submission_types: initialAssignment?.allowed_submission_types || [
-      'file',
-      'github',
-      'docs',
-      'figma',
-      'excel',
-      'url',
-    ],
+    allowed_submission_types: initialAssignment?.allowed_submission_types || ALL_SUBMISSION_TYPES,
   });
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -50,7 +43,7 @@ export function AssignmentModal({
   };
 
   const toggleAllowedType = (typeId: string) => {
-    const current = draft.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url'];
+    const current = draft.allowed_submission_types || ALL_SUBMISSION_TYPES;
     if (current.includes(typeId)) {
       if (current.length <= 1) {
         toast.error('At least one submission method must remain enabled');
@@ -227,7 +220,7 @@ export function AssignmentModal({
                   Allowed Submission Methods
                 </p>
                 <div className='flex flex-wrap gap-1.5'>
-                  {(draft.allowed_submission_types || ['file', 'github', 'docs', 'figma', 'excel', 'url']).map((type) => {
+                  {(draft.allowed_submission_types || ALL_SUBMISSION_TYPES).map((type) => {
                     const cfg = SUBMISSION_TYPE_CONFIGS[type as SubmissionType];
                     return cfg ? (
                       <span
@@ -279,17 +272,11 @@ export function AssignmentModal({
                     { id: 'docs', label: 'Google Docs', emoji: '📄' },
                     { id: 'figma', label: 'Figma Link', emoji: '🎨' },
                     { id: 'excel', label: 'Spreadsheet', emoji: '📊' },
+                    { id: 'drive', label: 'Google Drive', emoji: '📁' },
                     { id: 'url', label: 'Live URL', emoji: '🌐' },
                   ].map((item) => {
                     const isSelected = (
-                      draft.allowed_submission_types || [
-                        'file',
-                        'github',
-                        'docs',
-                        'figma',
-                        'excel',
-                        'url',
-                      ]
+                      draft.allowed_submission_types || ALL_SUBMISSION_TYPES
                     ).includes(item.id);
                     return (
                       <button

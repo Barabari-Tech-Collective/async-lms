@@ -23,6 +23,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 // ---------- Lazy Imports ----------
 
 // Public
+const PublicResumeView = lazyWithRetry(() => import('@/pages/public/PublicResumeView'));
 const Home = lazyWithRetry(() => import('@/pages/Home'));
 const Login = lazyWithRetry(() => import('@/pages/Login'));
 const Signup = lazyWithRetry(() => import('@/pages/Signup'));
@@ -114,6 +115,12 @@ const FacilitatorReports = lazyWithRetry(
 const FacilitatorSettings = lazyWithRetry(
   () => import('@/pages/dashboard/facilitator/FacilitatorSettings'),
 );
+const FacilitatorRequests = lazyWithRetry(
+  () => import('@/pages/dashboard/facilitator/FacilitatorRequests'),
+);
+const FacilitatorCourses = lazyWithRetry(
+  () => import('@/pages/dashboard/facilitator/FacilitatorCourses'),
+);
 
 // Admin Dashboard
 const AdminDashboardLayout = lazyWithRetry(
@@ -145,6 +152,9 @@ const Evaluations = lazyWithRetry(
 );
 const AdminProfile = lazyWithRetry(
   () => import('@/pages/dashboard/admin/AdminProfile'),
+);
+const AdminRequests = lazyWithRetry(
+  () => import('@/pages/dashboard/admin/AdminRequests'),
 );
 
 // Curriculum Developer Dashboard
@@ -186,6 +196,8 @@ const router = createBrowserRouter([
       { path: 'college-under-verification', element: <CollegeUnderVerification /> },
       { path: 'verify-email', element: <VerifyEmail /> },
       { path: 'forgot-password', element: <ForgotPassword /> },
+      { path: 'r/:id', element: <PublicResumeView /> },
+      { path: 'resume/:id', element: <PublicResumeView /> },
 
       {
         element: <PrivateRoute />,
@@ -263,6 +275,7 @@ const router = createBrowserRouter([
             element: <FacilitatorDashboardLayout />,
             children: [
               { index: true, element: <FacilitatorHome /> },
+              { path: 'courses', element: <FacilitatorCourses /> },
               { path: 'students', element: <FacilitatorStudents /> },
               { path: 'assignments', element: <AssignmentManagement /> },
               { path: 'assignment-management', element: <AssignmentManagement /> },
@@ -275,12 +288,40 @@ const router = createBrowserRouter([
               { path: 'analytics', element: <FacilitatorAnalytics /> },
               { path: 'student-growth', element: <FacilitatorStudentGrowth /> },
               { path: 'reports', element: <FacilitatorReports /> },
+              { path: 'requests', element: <FacilitatorRequests /> },
               { path: 'settings', element: <FacilitatorSettings /> },
               { path: 'ai-curriculum', element: <AiCurriculumList /> },
               { path: 'ai-curriculum/new', element: <AiCurriculumBuilder /> },
               { path: 'ai-curriculum/:id/edit', element: <AiCurriculumEditor /> },
               { path: 'ai-curriculum/:id/preview', element: <AiCurriculumPreview /> },
               { path: 'ai-curriculum/:id/review', element: <AiCurriculumReview /> },
+            ],
+          },
+          {
+            path: 'dashboard/facilitator/courses/:slug',
+            element: <CourseViewLayout />,
+            children: [
+              { index: true, element: <CourseIntro /> },
+              {
+                path: 'lesson/:subtopicSlug',
+                element: <LessonView />,
+              },
+              {
+                path: 'exercise/:exerciseId',
+                element: <LessonView />,
+              },
+              {
+                path: 'assignment/:assignmentId',
+                element: <AssignmentView />,
+              },
+              {
+                path: 'quiz/:quizId',
+                element: <LessonView />,
+              },
+              {
+                path: 'capstone/:projectId',
+                element: <CapstoneView />,
+              },
             ],
           },
         ],
@@ -299,6 +340,7 @@ const router = createBrowserRouter([
               { path: 'learning-flow', element: <LearningFlow /> },
               { path: 'lock-control', element: <LockControl /> },
               { path: 'users', element: <Students /> },
+              { path: 'requests', element: <AdminRequests /> },
               { path: 'analytics', element: <Analytics /> },
               { path: 'settings', element: <AdminSettings /> },
               {

@@ -8,6 +8,7 @@ const isFacilitator = require('../middlewares/isFacilitator');
 router.use(verifyToken, isFacilitator);
 
 router.get('/stats', facilitatorController.getFacilitatorStats);
+router.get('/courses', facilitatorController.getFacilitatorCourses);
 router.get('/colleges', facilitatorController.getFacilitatorColleges);
 router.get('/batches', facilitatorController.getBatches);
 router.get('/students', facilitatorController.getFacilitatorStudents);
@@ -20,6 +21,13 @@ router.get('/students/:id/modules', facilitatorController.getFacilitatorStudentM
 router.get('/students/:id/submissions', facilitatorController.getFacilitatorStudentSubmissions);
 router.patch('/students/:id/verify', verifyStudent);
 router.patch('/students/:id', editStudent);
+
+// Student Course Enrollment Management
+router.get('/students/:studentId/available-courses', facilitatorController.getAvailableCoursesForStudent);
+router.post('/students/:studentId/courses', facilitatorController.addStudentCourse);
+router.delete('/students/:studentId/courses/:subjectId', facilitatorController.removeStudentCourse);
+router.get('/enrollment-requests', facilitatorController.getEnrollmentRequests);
+router.patch('/enrollment-requests/:requestId', facilitatorController.reviewEnrollmentRequest);
 
 // Analytics
 router.get('/analytics/subjects', facilitatorController.getAnalyticsSubjects);

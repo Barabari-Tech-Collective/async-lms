@@ -14,10 +14,10 @@ export function isCorruptedMarkdown(text?: string | null): boolean {
   const trimmed = text.trim();
 
   // Explicit check for <p> followed by markdown headers
-  if (/^<p>\s*#{1,6}\s+/i.test(trimmed)) return true;
+  if (/^<p[\s>].*?#{1,6}\s+/is.test(trimmed)) return true;
 
   // Generic check: wrapped in <p>...</p> but contains markdown markers inside
-  if (/^<p[\s>]/.test(trimmed) && /<\/p>$/.test(trimmed)) {
+  if (/^<p[\s>]/.test(trimmed) && /<\/p>$/i.test(trimmed)) {
     const inner = trimmed.replace(/^<p\b[^>]*>/i, '').replace(/<\/p>$/i, '');
     const hasMarkdownSyntax =
       /(?:^|\s)#{1,6}\s+/.test(inner) ||
@@ -25,9 +25,7 @@ export function isCorruptedMarkdown(text?: string | null): boolean {
       /\*\*[^*]+\*\*/.test(inner) ||
       /(?:^|\s)(?:-|\*|\d+\.)\s+/.test(inner);
 
-    // If it has markdown syntax and no other HTML block tags (like h1, ul, table)
-    const hasOtherHtmlTags = /<(h[1-6]|ul|ol|li|table|pre|blockquote)\b/i.test(inner);
-    if (hasMarkdownSyntax && !hasOtherHtmlTags) {
+    if (hasMarkdownSyntax) {
       return true;
     }
   }
@@ -55,6 +53,9 @@ export function cleanCorruptedMarkdown(text?: string | null): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
 
+  // Convert internal </p><p> paragraph boundaries to markdown double newlines
+  cleaned = cleaned.replace(/<\/p>\s*<p\b[^>]*>/gi, '\n\n');
+
   // Restore newlines before markdown headings that got collapsed into single spaces
   // Example: "...formulas. ### Worksheet Setup" -> "...formulas.\n\n### Worksheet Setup"
   cleaned = cleaned.replace(/([^\n])\s+(#{1,6}\s+)/g, '$1\n\n$2');
@@ -65,6 +66,7 @@ export function cleanCorruptedMarkdown(text?: string | null): string {
   // Restore newlines before list items that got collapsed
   cleaned = cleaned.replace(/([^\n])\s+(-\s+)/g, '$1\n$2');
   cleaned = cleaned.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n$2');
+  cleaned = cleaned.replace(/([^\n])\s+(\*\s+)/g, '$1\n$2');
 
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -78,22 +80,36 @@ export function isHtmlContent(text?: string | null): boolean {
 
   if (isCorruptedMarkdown(trimmed)) return false;
 
+  // Check for distinct Markdown syntax markers anywhere in the document
+  const hasMarkdownSyntax =
+    /(?:^|\n)\s*#{1,6}\s+/.test(trimmed) ||           // Headings: # H1, ## H2
+    /(?:^|\n)\s*```/.test(trimmed) ||                 // Code fences: ```lang
+    /(?:^|\n)\s*---\s*(?:\n|$)/.test(trimmed) ||      // Horizontal rule: ---
+    /(?:^|\n)\s*(?:-|\*|\d+\.)\s+/.test(trimmed) ||   // Lists: - item, * item, 1. item
+    /(?:^|\n)\s*>\s+/.test(trimmed);                  // Blockquotes: > quote
+
+  // If it has Markdown structural markers, it is Markdown (even if it contains embedded HTML tags)
+  if (hasMarkdownSyntax) {
+    return false;
+  }
+
+  // Check if it starts with an HTML tag (WYSIWYG / TipTap output always starts with a tag like <p>, <div>, <h1>, etc.)
+  const startsWithHtmlTag = /^<(!doctype|[a-z][a-z0-9]*)\b[^>]*>/i.test(trimmed);
+
   // Has structural HTML tags like headings, lists, tables, pre, blockquote
   const hasStructuralHtml = /<(h[1-6]|ul|ol|li|table|pre|blockquote)\b/i.test(trimmed);
   if (hasStructuralHtml) return true;
 
-  // Has paragraph or formatting tags without markdown markers
+  // Has paragraph or formatting tags
   const hasBasicHtml = /<(p|strong|em|b|i|u|span|div)\b/i.test(trimmed);
-  const hasMarkdownMarkers = /(?:^|\n)\s*(?:#{1,6}\s+|-\s+|\*\s+|\d+\.\s+|```)/.test(trimmed);
-
-  return hasBasicHtml && !hasMarkdownMarkers;
+  return startsWithHtmlTag && hasBasicHtml;
 }
 
 /**
  * Automatically decides whether to open an editor in 'rich' or 'markdown' mode.
  */
 export function detectEditorType(content?: string | null): 'rich' | 'markdown' {
-  if (!content || !content.trim()) return 'rich';
+  if (!content || !content.trim()) return 'markdown';
   if (isCorruptedMarkdown(content)) return 'markdown';
   if (isHtmlContent(content)) return 'rich';
   return 'markdown';
