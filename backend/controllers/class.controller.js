@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const pool = require('../config/pg');
+const attendanceDashboard = require('../services/attendanceDashboard.service');
 const { enqueueMeetJob } = require('../services/meetQueue.service');
 const { createMeetJob } = require('../services/meetJob.service');
 const {
@@ -51,6 +52,7 @@ function safeClass(row) {
     gracePeriodMinutes: Number(row.grace_period_minutes || 0),
     status: row.status,
     hasMeetSpace: Boolean(row.meet_space_name && row.meet_uri),
+    rosterCount: Number(row.roster_count || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -232,7 +234,13 @@ exports.listClasses = async (req, res) => {
     }
     let statusClause = '';
     if (statusFilter === 'upcoming') {
-      statusClause = `AND c.status IN ('creating', 'scheduled', 'active', 'ending')`;
+      statusClause = `AND (
+        c.status IN ('active', 'ending')
+        OR (
+          c.status IN ('creating', 'scheduled')
+          AND c.planned_end_at + c.grace_period_minutes * INTERVAL '1 minute' > NOW()
+        )
+      )`;
     } else if (statusFilter === 'past') {
       statusClause = `AND c.status IN ('ended', 'sync_pending', 'processing', 'cancelled', 'failed')`;
     } else if (statusFilter && statusFilter !== 'all') {
@@ -243,22 +251,31 @@ exports.listClasses = async (req, res) => {
     params.push(limit, offset);
     const result = await pool.query(
       `SELECT c.*, s.name AS subject_title,
+              (SELECT COUNT(*)::int
+                 FROM class_students cs
+                WHERE cs.class_id = c.id
+                  AND cs.roster_status = 'eligible') AS roster_count,
               COUNT(*) OVER ()::int AS total_count
          FROM classes c
          JOIN subjects s ON s.id = c.subject_id
         WHERE true
           ${ownerClause}
           ${statusClause}
-        ORDER BY c.scheduled_start_at DESC, c.id DESC
+        ORDER BY c.scheduled_start_at ${statusFilter === 'upcoming' ? 'ASC' : 'DESC'}, c.id ${statusFilter === 'upcoming' ? 'ASC' : 'DESC'}
         LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
       params,
     );
     const totalCount = result.rows[0]?.total_count || 0;
+    const now = new Date();
     return res.json({
       success: true,
       data: result.rows.map((row) => ({
         ...safeClass(row),
         subjectTitle: row.subject_title,
+        ...(statusFilter === 'upcoming' && {
+          canJoin: ['scheduled', 'active'].includes(row.status) &&
+            getFacilitatorJoinState(row, now) === 'joinable',
+        }),
       })),
       pagination: pagination(page, limit, totalCount),
     });
@@ -862,6 +879,24 @@ exports.studentAttendance = async (req, res) => {
       },
       pagination: pagination(page, limit, totalCount),
     });
+  } catch (error) {
+    return sendError(res, error);
+  }
+};
+
+exports.dashboardOverview = async (req, res) => {
+  try {
+    const data = await attendanceDashboard.getOverview(pool, req.user);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return sendError(res, error);
+  }
+};
+
+exports.dashboardTrends = async (req, res) => {
+  try {
+    const trends = await attendanceDashboard.getTrends(pool, req.user, req.query);
+    return res.json({ success: true, ...trends });
   } catch (error) {
     return sendError(res, error);
   }

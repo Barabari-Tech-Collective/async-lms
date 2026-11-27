@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   LayoutDashboard,
   School,
@@ -11,9 +12,11 @@ import {
   Settings,
   Sparkles,
   X,
+  CalendarCheck,
+  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 import Logo from '../Logo';
 import { useAppSelector } from '@/app/hooks';
 import { selectUser } from '@/features/auth/authSelectors';
@@ -50,6 +53,7 @@ const menuItems = [
 
 export default function AdminSidebar({
   isOpen,
+  toggle,
   isMobile = false,
   onCloseMobile,
 }: {
@@ -59,6 +63,40 @@ export default function AdminSidebar({
   onCloseMobile?: () => void;
 }) {
   const currentUser = useAppSelector(selectUser);
+  const location = useLocation();
+  const isAttendanceActive = location.pathname.startsWith('/dashboard/admin/attendance');
+  const [attendanceMenu, setAttendanceMenu] = useState({
+    locationKey: location.key,
+    open: isAttendanceActive,
+  });
+  if (attendanceMenu.locationKey !== location.key) {
+    setAttendanceMenu({ locationKey: location.key, open: isAttendanceActive });
+  }
+  const isAttendanceOpen = attendanceMenu.locationKey === location.key
+    ? attendanceMenu.open
+    : isAttendanceActive;
+
+  const handleLinkClick = () => {
+    if (isMobile && onCloseMobile) {
+      onCloseMobile();
+    }
+  };
+
+  const handleAttendanceClick = () => {
+    if (!isOpen && !isMobile && toggle) {
+      toggle();
+      setAttendanceMenu({ locationKey: location.key, open: true });
+    } else {
+      setAttendanceMenu({ locationKey: location.key, open: !isAttendanceOpen });
+    }
+  };
+
+  const handleDashboardSubClick = () => {
+    handleLinkClick();
+    if (isOpen && !isMobile && toggle) {
+      toggle();
+    }
+  };
 
   const initials =
     currentUser?.full_name
@@ -71,7 +109,7 @@ export default function AdminSidebar({
   return (
     <aside
       className={cn(
-        'h-full flex flex-col transition-all duration-300 bg-[#191C34] text-slate-300',
+        'h-full flex flex-col transition-all duration-300 bg-[#191C34] text-slate-300 overflow-hidden',
         isMobile ? 'w-full' : isOpen ? 'w-64' : 'w-20',
       )}
     >
@@ -97,8 +135,115 @@ export default function AdminSidebar({
       </div>
 
       {/* Nav Items */}
-      <nav className='flex-1 py-4 px-3 space-y-1 overflow-y-auto custom-scrollbar'>
-        {menuItems.map((item) => (
+      <nav
+        className={cn(
+          'min-h-0 flex-1 py-4 px-3 space-y-1 overflow-x-hidden overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden',
+        )}
+      >
+        {menuItems.slice(0, 6).map((item) => (
+          <NavLink
+            key={item.name}
+            to={item.path}
+            end={item.path === '/dashboard/admin'}
+            onClick={() => {
+              if (isMobile && onCloseMobile) {
+                onCloseMobile();
+              }
+            }}
+            className={({ isActive }) =>
+              cn(
+                'flex w-full items-center gap-3 px-3 py-2.5 sm:py-3 rounded-xl transition-all group min-h-[44px]',
+                !isOpen && !isMobile && 'justify-center px-0',
+                isActive
+                  ? 'bg-[#333d7c] text-white shadow-sm'
+                  : 'hover:bg-[#2a3469] hover:text-white',
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <item.icon
+                  size={20}
+                  className={cn(
+                    'shrink-0',
+                    isActive
+                      ? 'text-white'
+                      : 'text-slate-400 group-hover:text-slate-300',
+                  )}
+                />
+                {(isOpen || isMobile) && (
+                  <span className='font-medium text-[13px] sm:text-[14px] truncate'>{item.name}</span>
+                )}
+                {isActive && (isOpen || isMobile) && (
+                  <div className='ml-auto w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0' />
+                )}
+              </>
+            )}
+          </NavLink>
+        ))}
+
+        {/* Attendance Dropdown */}
+        <div className='space-y-1'>
+          <button
+            type='button'
+            onClick={handleAttendanceClick}
+            aria-label='Attendance'
+            aria-expanded={isAttendanceOpen && (isOpen || isMobile)}
+            className={cn(
+              'flex w-full items-center gap-3 px-3 py-2.5 sm:py-3 rounded-xl transition-all group min-h-[44px]',
+              !isOpen && !isMobile && 'justify-center px-0',
+              isAttendanceActive
+                ? 'bg-[#333d7c] text-white shadow-sm'
+                : 'hover:bg-[#2a3469] hover:text-white',
+            )}
+          >
+            <CalendarCheck
+              size={20}
+              className={cn(
+                'shrink-0',
+                isAttendanceActive
+                  ? 'text-white'
+                  : 'text-slate-400 group-hover:text-slate-300',
+              )}
+            />
+            {(isOpen || isMobile) && (
+              <>
+                <span className='font-medium text-[13px] sm:text-[14px] truncate flex-1 text-left'>
+                  Attendance
+                </span>
+                <ChevronDown
+                  size={16}
+                  className={cn(
+                    'transition-transform duration-200 text-slate-400',
+                    isAttendanceOpen && 'rotate-180 text-white',
+                  )}
+                />
+              </>
+            )}
+          </button>
+
+          {/* Attendance Submenu */}
+          {isAttendanceOpen && (isOpen || isMobile) && (
+            <div className='pl-9 pr-1 space-y-1 animate-in fade-in duration-150'>
+              <NavLink
+                to='/dashboard/admin/attendance'
+                onClick={handleDashboardSubClick}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+                    isActive
+                      ? 'bg-[#2a3469] text-yellow-400 font-semibold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-[#2a3469]/50',
+                  )
+                }
+              >
+                Dashboard
+              </NavLink>
+            </div>
+          )}
+        </div>
+
+        {menuItems.slice(6).map((item) => (
           <NavLink
             key={item.name}
             to={item.path}

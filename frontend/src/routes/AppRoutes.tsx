@@ -6,9 +6,9 @@ import PrivateRoute from './PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 
 // Reload once on chunk load failure (stale CloudFront deployment)
-function lazyWithRetry<T extends React.ComponentType<any>>(
-  factory: () => Promise<{ default: T }>,
-): React.LazyExoticComponent<T> {
+function lazyWithRetry<Props extends object>(
+  factory: () => Promise<{ default: React.ComponentType<Props> }>,
+): React.LazyExoticComponent<React.ComponentType<Props>> {
   return lazy(() =>
     factory().catch(() => {
       if (!sessionStorage.getItem('chunk_reload')) {
@@ -168,6 +168,9 @@ const AiCurriculumReview = lazyWithRetry(
 const AiCurriculumPreview = lazyWithRetry(
   () => import('@/pages/dashboard/shared/AiCurriculumPreview'),
 );
+const AttendanceDashboard = lazyWithRetry(
+  () => import('@/pages/dashboard/shared/attendance/AttendanceDashboard'),
+);
 
 // ---------- Router ----------
 
@@ -264,6 +267,7 @@ const router = createBrowserRouter([
             children: [
               { index: true, element: <FacilitatorHome /> },
               { path: 'students', element: <FacilitatorStudents /> },
+              { path: 'attendance', element: <AttendanceDashboard /> },
               { path: 'assignments', element: <AssignmentManagement /> },
               { path: 'assignment-management', element: <AssignmentManagement /> },
               { path: 'create-assignment', element: <CreateAssignment /> },
@@ -299,6 +303,7 @@ const router = createBrowserRouter([
               { path: 'learning-flow', element: <LearningFlow /> },
               { path: 'lock-control', element: <LockControl /> },
               { path: 'users', element: <Students /> },
+              { path: 'attendance', element: <AttendanceDashboard /> },
               { path: 'analytics', element: <Analytics /> },
               { path: 'settings', element: <AdminSettings /> },
               {

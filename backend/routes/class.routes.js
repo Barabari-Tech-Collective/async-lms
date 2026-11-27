@@ -15,6 +15,8 @@ const meetActionLimiter = rateLimit({
 router.post('/', verifyToken, isAdminOrFacilitator, controller.create);
 router.get('/student', verifyToken, controller.listStudentClasses);
 router.get('/students', verifyToken, isAdminOrFacilitator, controller.listClassStudents);
+router.get('/dashboard/overview', verifyToken, isAdminOrFacilitator, controller.dashboardOverview);
+router.get('/dashboard/trends', verifyToken, isAdminOrFacilitator, controller.dashboardTrends);
 router.get('/', verifyToken, isAdminOrFacilitator, controller.listClasses);
 router.get('/:id', verifyToken, controller.getOne);
 router.patch('/:id', verifyToken, isAdminOrFacilitator, controller.update);

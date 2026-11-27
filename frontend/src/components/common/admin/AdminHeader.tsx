@@ -1,4 +1,4 @@
-import { Search, Menu, LogOut, UserCircle, User } from 'lucide-react';
+import { Menu, LogOut, UserCircle, User } from 'lucide-react';
 import NotificationBell from '@/components/common/NotificationBell';
 import {
   DropdownMenu,
@@ -58,16 +58,6 @@ export default function AdminHeader({
       </div>
 
       <div className='flex items-center gap-2 sm:gap-4 shrink-0'>
-        {/* Search Bar - Desktop */}
-        <div className='relative hidden xl:block w-64 lg:w-72'>
-          <Search className='absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4' />
-          <input
-            type='text'
-            placeholder='Search...'
-            className='w-full pl-9 pr-4 py-2 bg-[#f8fafc] border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all'
-          />
-        </div>
-
         {/* Notifications and Profile Dropdown */}
         <div className='flex items-center gap-1.5 sm:gap-2'>
           <NotificationBell />
